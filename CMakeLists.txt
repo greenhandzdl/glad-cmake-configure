@@ -87,6 +87,23 @@ target_include_directories(glad PUBLIC
 )
 
 # ============================================================================
+# GLM (header-only math library, required by Shader.h)
+# ============================================================================
+find_path(GLM_INCLUDE_DIR glm/glm.hpp
+    HINTS
+        ${BREW_PREFIX}/include
+        /usr/local/include
+        /usr/include
+        ${CMAKE_SOURCE_DIR}/third_party
+)
+if(NOT GLM_INCLUDE_DIR)
+    message(FATAL_ERROR "GLM not found. Please install GLM:\n"
+        "  macOS: brew install glm\n"
+        "  Linux: sudo apt-get install libglm-dev")
+endif()
+message(STATUS "Found GLM: ${GLM_INCLUDE_DIR}")
+
+# ============================================================================
 # Find OpenGL
 # ============================================================================
 if(IS_LINUX)
@@ -110,6 +127,7 @@ endif()
 set(SOURCE_FILES
     ${CMAKE_SOURCE_DIR}/src/main.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/utils.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/Shader.cpp
 )
 
 # ============================================================================
@@ -123,6 +141,7 @@ add_executable(${TARGET_NAME}
 
 target_include_directories(${TARGET_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src/headers
+    ${GLM_INCLUDE_DIR}
 )
 
 target_link_libraries(${TARGET_NAME} PRIVATE
@@ -211,5 +230,6 @@ message(STATUS "  Platform:        ${CMAKE_SYSTEM_NAME}")
 message(STATUS "  GLFW:            ${GLFW_FOUND}")
 message(STATUS "  GLFW Target:     ${GLFW_TARGET}")
 message(STATUS "  GLAD:            embedded (OpenGL 3.3 Core)")
+message(STATUS "  GLM:             ${GLM_INCLUDE_DIR}")
 message(STATUS "  Output Directory: ${CMAKE_SOURCE_DIR}/output")
 message(STATUS "")
