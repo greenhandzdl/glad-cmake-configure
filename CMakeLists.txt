@@ -104,6 +104,24 @@ endif()
 message(STATUS "Found GLM: ${GLM_INCLUDE_DIR}")
 
 # ============================================================================
+# STB (header-only image/utility library - git submodule)
+#
+# stb is a header-only library. The implementation macros
+# (e.g. STB_IMAGE_IMPLEMENTATION, STB_IMAGE_WRITE_IMPLEMENTATION) must be
+# defined in EXACTLY ONE .cpp file that includes the corresponding header,
+# so they are intentionally NOT defined here (global definitions would cause
+# duplicate-symbol errors when multiple translation units include stb).
+# ============================================================================
+if(NOT EXISTS ${CMAKE_SOURCE_DIR}/third_party/stb/stb_image.h)
+    message(FATAL_ERROR "STB not found. Please initialize the submodule:\n"
+        "  git submodule update --init --recursive")
+endif()
+add_library(stb INTERFACE)
+target_include_directories(stb INTERFACE
+    ${CMAKE_SOURCE_DIR}/third_party/stb
+)
+
+# ============================================================================
 # Find OpenGL
 # ============================================================================
 if(IS_LINUX)
@@ -147,6 +165,7 @@ target_include_directories(${TARGET_NAME} PRIVATE
 target_link_libraries(${TARGET_NAME} PRIVATE
     ${GLFW_TARGET}
     glad
+    stb
 )
 
 # Platform specific libraries
@@ -231,5 +250,6 @@ message(STATUS "  GLFW:            ${GLFW_FOUND}")
 message(STATUS "  GLFW Target:     ${GLFW_TARGET}")
 message(STATUS "  GLAD:            embedded (OpenGL 3.3 Core)")
 message(STATUS "  GLM:             ${GLM_INCLUDE_DIR}")
+message(STATUS "  STB:             submodule (${CMAKE_SOURCE_DIR}/third_party/stb)")
 message(STATUS "  Output Directory: ${CMAKE_SOURCE_DIR}/output")
 message(STATUS "")
