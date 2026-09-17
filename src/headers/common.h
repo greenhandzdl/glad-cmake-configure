@@ -32,7 +32,7 @@
 #define WINDOW_TITLE "GLFW + GLAD Template Application"
 
 // GLAD must be included before GLFW to avoid gl.h conflicts
-#include <glad/glad.h>
+#include <glad/gl.h>
 #include <GLFW/glfw3.h>
 
 #endif // GLFW_TEMPLATE_COMMON_H

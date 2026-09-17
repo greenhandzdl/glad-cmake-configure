@@ -77,14 +77,62 @@ if(NOT GLFW_FOUND)
 endif()
 
 # ============================================================================
-# GLAD (OpenGL Loader - embedded source)
+# GLAD (OpenGL Loader)
+#   Priority 1: system package (gladConfig.cmake, e.g. brew install glad)
+#   Priority 2: build from git submodule (https://github.com/Dav1dde/glad.git)
 # ============================================================================
-add_library(glad STATIC
-    ${CMAKE_SOURCE_DIR}/third_party/glad/src/glad.c
-)
-target_include_directories(glad PUBLIC
-    ${CMAKE_SOURCE_DIR}/third_party/glad/include
-)
+set(GLAD_FOUND FALSE)
+
+find_package(glad CONFIG QUIET)
+if(TARGET glad::glad)
+    message(STATUS "Found GLAD (system package: glad::glad)")
+    set(GLAD_TARGET glad::glad)
+    set(GLAD_SOURCE "system")
+    set(GLAD_FOUND TRUE)
+endif()
+
+if(NOT GLAD_FOUND)
+    # Fallback: build GLAD from the Dav1dde/glad git submodule.
+    # The submodule is the glad2 generator (Python package). We invoke it
+    # directly via PYTHONPATH=third_party/glad instead of using its bundled
+    # cmake/GladConfig.cmake: glad_add_library() passes the generator as a
+    # bare positional argument (e.g. "... --api gl:core=3.3 c") which is only
+    # compatible with the exact in-tree CLI, and does not set up the Python
+    # path so the generator can be found.
+    if(NOT EXISTS ${CMAKE_SOURCE_DIR}/third_party/glad/glad/__main__.py)
+        message(FATAL_ERROR "GLAD submodule not found. Please initialize it:\n"
+            "  git submodule update --init --recursive")
+    endif()
+
+    find_package(Python COMPONENTS Interpreter REQUIRED)
+
+    set(GLAD_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/gladsources/glad_gl_core_33)
+    set(GLAD_GEN_GL   ${GLAD_GEN_DIR}/src/gl.c)
+    set(GLAD_GEN_GL_H ${GLAD_GEN_DIR}/include/glad/gl.h)
+    set(GLAD_GEN_KHR  ${GLAD_GEN_DIR}/include/KHR/khrplatform.h)
+
+    message(STATUS "System GLAD not found; building from submodule (third_party/glad)")
+    add_custom_command(
+        OUTPUT ${GLAD_GEN_GL} ${GLAD_GEN_GL_H} ${GLAD_GEN_KHR}
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${GLAD_GEN_DIR}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${GLAD_GEN_DIR}
+        COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${CMAKE_SOURCE_DIR}/third_party/glad"
+            ${Python_EXECUTABLE} -m glad
+            --out-path ${GLAD_GEN_DIR} --api gl:core=3.3 --reproducible c
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        DEPENDS ${CMAKE_SOURCE_DIR}/third_party/glad/glad/__main__.py
+        COMMENT "Generating GLAD from submodule (glad2, OpenGL 3.3 Core)"
+        VERBATIM
+    )
+
+    add_library(glad_gl_core_33 STATIC ${GLAD_GEN_GL})
+    target_include_directories(glad_gl_core_33 PUBLIC ${GLAD_GEN_DIR}/include)
+    target_link_libraries(glad_gl_core_33 PUBLIC ${CMAKE_DL_LIBS})
+
+    set(GLAD_TARGET glad_gl_core_33)
+    set(GLAD_SOURCE "submodule (OpenGL 3.3 Core)")
+    set(GLAD_FOUND TRUE)
+endif()
 
 # ============================================================================
 # GLM (header-only math library, required by Shader.h)
@@ -164,7 +212,7 @@ target_include_directories(${TARGET_NAME} PRIVATE
 
 target_link_libraries(${TARGET_NAME} PRIVATE
     ${GLFW_TARGET}
-    glad
+    ${GLAD_TARGET}
     stb
 )
 
@@ -248,7 +296,8 @@ message(STATUS "  Build Type:      ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Platform:        ${CMAKE_SYSTEM_NAME}")
 message(STATUS "  GLFW:            ${GLFW_FOUND}")
 message(STATUS "  GLFW Target:     ${GLFW_TARGET}")
-message(STATUS "  GLAD:            embedded (OpenGL 3.3 Core)")
+message(STATUS "  GLAD:            ${GLAD_SOURCE}")
+message(STATUS "  GLAD Target:     ${GLAD_TARGET}")
 message(STATUS "  GLM:             ${GLM_INCLUDE_DIR}")
 message(STATUS "  STB:             submodule (${CMAKE_SOURCE_DIR}/third_party/stb)")
 message(STATUS "  Output Directory: ${CMAKE_SOURCE_DIR}/output")
