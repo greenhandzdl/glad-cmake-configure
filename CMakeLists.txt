@@ -106,6 +106,53 @@ if(NOT GLAD_FOUND)
 
     find_package(Python COMPONENTS Interpreter REQUIRED)
 
+    # The glad2 generator requires jinja2. Prefer the system Python if it
+    # already has jinja2; otherwise create an isolated uv venv with jinja2
+    # (keeps the global environment untouched and avoids PEP 668 issues).
+    set(GLAD_GEN_PYTHON ${Python_EXECUTABLE})
+    execute_process(
+        COMMAND ${Python_EXECUTABLE} -c "import jinja2"
+        RESULT_VARIABLE GLAD_JINJA2_RC
+        OUTPUT_QUIET ERROR_QUIET
+    )
+    if(GLAD_JINJA2_RC EQUAL 0)
+        message(STATUS "GLAD generator: system Python (jinja2 available)")
+    else()
+        find_program(UV_EXECUTABLE uv)
+        if(NOT UV_EXECUTABLE)
+            message(FATAL_ERROR "System Python has no jinja2 and 'uv' was not found.\n"
+                "  Install uv (https://docs.astral.sh/uv/) or jinja2:\n"
+                "  macOS: brew install uv   or   ${Python_EXECUTABLE} -m pip install jinja2")
+        endif()
+        set(GLAD_VENV_DIR ${CMAKE_CURRENT_BINARY_DIR}/glad_venv)
+        if(WIN32)
+            set(GLAD_VENV_PYTHON ${GLAD_VENV_DIR}/Scripts/python.exe)
+        else()
+            set(GLAD_VENV_PYTHON ${GLAD_VENV_DIR}/bin/python)
+        endif()
+        if(NOT EXISTS ${GLAD_VENV_PYTHON})
+            message(STATUS "Creating uv venv for GLAD generator (${GLAD_VENV_DIR})...")
+            execute_process(
+                COMMAND ${UV_EXECUTABLE} venv ${GLAD_VENV_DIR}
+                RESULT_VARIABLE GLAD_VENV_RC
+            )
+            if(NOT GLAD_VENV_RC EQUAL 0)
+                message(FATAL_ERROR "Failed to create uv venv for GLAD generator:\n"
+                    "  ${UV_EXECUTABLE} venv ${GLAD_VENV_DIR}")
+            endif()
+            execute_process(
+                COMMAND ${UV_EXECUTABLE} pip install --python ${GLAD_VENV_PYTHON} jinja2
+                RESULT_VARIABLE GLAD_PIP_RC
+            )
+            if(NOT GLAD_PIP_RC EQUAL 0)
+                message(FATAL_ERROR "Failed to install jinja2 into GLAD venv:\n"
+                    "  ${UV_EXECUTABLE} pip install --python ${GLAD_VENV_PYTHON} jinja2")
+            endif()
+        endif()
+        set(GLAD_GEN_PYTHON ${GLAD_VENV_PYTHON})
+        message(STATUS "GLAD generator: uv venv (${GLAD_VENV_DIR})")
+    endif()
+
     set(GLAD_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/gladsources/glad_gl_core_33)
     set(GLAD_GEN_GL   ${GLAD_GEN_DIR}/src/gl.c)
     set(GLAD_GEN_GL_H ${GLAD_GEN_DIR}/include/glad/gl.h)
@@ -117,7 +164,7 @@ if(NOT GLAD_FOUND)
         COMMAND ${CMAKE_COMMAND} -E rm -rf ${GLAD_GEN_DIR}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${GLAD_GEN_DIR}
         COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${CMAKE_SOURCE_DIR}/third_party/glad"
-            ${Python_EXECUTABLE} -m glad
+            ${GLAD_GEN_PYTHON} -m glad
             --out-path ${GLAD_GEN_DIR} --api gl:core=3.3 --reproducible c
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         DEPENDS ${CMAKE_SOURCE_DIR}/third_party/glad/glad/__main__.py
