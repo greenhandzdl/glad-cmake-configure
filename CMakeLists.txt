@@ -202,10 +202,11 @@ message(STATUS "Found GLM: ${GLM_INCLUDE_DIR}")
 # STB (header-only image/utility library - git submodule)
 #
 # stb is a header-only library. The implementation macros
-# (e.g. STB_IMAGE_IMPLEMENTATION, STB_IMAGE_WRITE_IMPLEMENTATION) must be
-# defined in EXACTLY ONE .cpp file that includes the corresponding header,
-# so they are intentionally NOT defined here (global definitions would cause
-# duplicate-symbol errors when multiple translation units include stb).
+# (STB_IMAGE_IMPLEMENTATION, STB_IMAGE_WRITE_IMPLEMENTATION,
+# STB_TRUETYPE_IMPLEMENTATION) are defined in EXACTLY ONE file:
+# src/utils/stb.cpp. Other files can just #include the stb headers directly
+# (include path provided by the `stb` INTERFACE target below) without
+# defining the macros themselves.
 # ============================================================================
 if(NOT EXISTS ${CMAKE_SOURCE_DIR}/third_party/stb/stb_image.h)
     message(FATAL_ERROR "STB not found. Please initialize the submodule:\n"
@@ -241,6 +242,7 @@ set(SOURCE_FILES
     ${CMAKE_SOURCE_DIR}/src/main.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/utils.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/Shader.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/stb.cpp
 )
 
 # ============================================================================

@@ -53,14 +53,15 @@ sudo dnf install glfw-devel cmake gcc-c++ python3-jinja2
 --   GLAD:            submodule (OpenGL 3.3 Core)  # 回退到子模块
 ```
 
-使用 STB 时，在**恰好一个** `.cpp` 文件中、include 对应头文件**之前**定义实现宏：
+STB 的实现宏（`STB_IMAGE_IMPLEMENTATION`、`STB_IMAGE_WRITE_IMPLEMENTATION`、`STB_TRUETYPE_IMPLEMENTATION`）已内置在 `src/utils/stb.cpp`（implementation file）中，且该文件已加入 CMake 编译。其他源文件直接包含 stb 头文件即可使用，**无需自行定义任何 `STB_xxx_IMPLEMENTATION` 宏**：
 
 ```cpp
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+#include "stb_image.h"        // stbi_load / stbi_free 等
+#include "stb_image_write.h"  // stbi_write_png 等
+#include "stb_truetype.h"     // stbtt_* 字体光栅化
 ```
 
-> 注意：实现宏（`STB_IMAGE_IMPLEMENTATION`、`STB_IMAGE_WRITE_IMPLEMENTATION` 等）不应在 CMake 中全局定义，否则多个编译单元 include 同一头文件会导致重复符号错误。
+> 注意：请勿在 CMake 中全局定义实现宏，也不要再在其他 `.cpp` 文件中定义它们，否则多个编译单元 include 同一头文件会导致重复符号错误。如需新增 stb 库（如 `stb_image_resize2.h`），只需在 `src/utils/stb.cpp` 中按同样方式补一行实现宏 + include 即可。
 
 ## 构建 & 运行
 
