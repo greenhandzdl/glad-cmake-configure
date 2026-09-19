@@ -1,6 +1,7 @@
 #include "gfx/camera/Camera.h"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/quaternion.hpp>
 
 namespace gfx {
@@ -58,6 +59,10 @@ void Camera::Dolly(float distanceDelta) {
     const glm::vec3 fwd = Rotate(orientation_, glm::vec3(0.0f, 0.0f, -1.0f));
     position_ += fwd * distanceDelta;
     RecomputeView();
+}
+
+glm::mat4 Camera::InverseViewProjection() const {
+    return glm::inverse(viewProj_);
 }
 
 } // namespace gfx

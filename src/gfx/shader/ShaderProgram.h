@@ -50,6 +50,11 @@ public:
     void Set(const std::string& name, const glm::mat3& v) const;
     void Set(const std::string& name, const glm::mat4& v) const;
 
+    // Associate a named uniform block with a UBO binding point. GLSL 4.10 has
+    // no layout(binding=...) on blocks, so the mapping is done explicitly from
+    // C++ (mirrors what UniformBuffer::BindBase(index) later binds against).
+    void SetBlockBinding(const std::string& blockName, GLuint binding) const;
+
 private:
     GLint Loc(const std::string& name) const;
 

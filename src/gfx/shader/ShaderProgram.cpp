@@ -1,6 +1,7 @@
 #include "gfx/shader/ShaderProgram.h"
 
 #include <array>
+#include <cstdio>
 #include <vector>
 #include <utility>
 
@@ -137,6 +138,16 @@ void ShaderProgram::Set(const std::string& name, const glm::mat3& v) const {
 }
 void ShaderProgram::Set(const std::string& name, const glm::mat4& v) const {
     glProgramUniformMatrix4fv(id_, Loc(name), 1, GL_FALSE, glm::value_ptr(v));
+}
+
+void ShaderProgram::SetBlockBinding(const std::string& blockName, GLuint binding) const {
+    const GLuint idx = glGetUniformBlockIndex(id_, blockName.c_str());
+    if (idx != GL_INVALID_INDEX) {
+        glUniformBlockBinding(id_, idx, binding);
+    } else {
+        RenderContext::AssertRenderThread("ShaderProgram::SetBlockBinding");
+        std::fprintf(stderr, "[ShaderProgram] uniform block '%s' not found\n", blockName.c_str());
+    }
 }
 
 } // namespace gfx

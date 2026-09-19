@@ -34,6 +34,11 @@ public:
     [[nodiscard]] const glm::mat4& ViewProjection()    const noexcept { return viewProj_; }
     [[nodiscard]] const glm::vec3& Position()          const noexcept { return position_; }
 
+    // Perspective parameters + inverse view-projection (needed by CSM splits).
+    [[nodiscard]] float NearPlane() const noexcept { return near_; }
+    [[nodiscard]] float FarPlane()  const noexcept { return far_; }
+    [[nodiscard]] glm::mat4 InverseViewProjection() const;
+
 private:
     void RecomputeView();
 

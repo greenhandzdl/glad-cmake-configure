@@ -173,12 +173,20 @@ set(GFX_SOURCES
     src/gfx/core/RenderContext.cpp
     src/gfx/core/GLBuffer.cpp
     src/gfx/core/VertexArray.cpp
+    src/gfx/core/UniformBuffer.cpp
+    src/gfx/core/Sampler.cpp
     src/gfx/shader/ShaderProgram.cpp
     src/gfx/geometry/Mesh.cpp
     src/gfx/geometry/GeometryFactory.cpp
     src/gfx/texture/Texture2D.cpp
+    src/gfx/texture/TextureCubeMap.cpp
+    src/gfx/texture/RenderTexture.cpp
     src/gfx/camera/Camera.cpp
     src/gfx/render/Renderer.cpp
+    src/gfx/render/Framebuffer.cpp
+    src/gfx/render/SkyboxRenderer.cpp
+    src/gfx/light/EnvironmentMap.cpp
+    src/gfx/shadow/CascadedShadowMap.cpp
     src/gfx/assets/ThreadPool.cpp
     src/gfx/assets/AssetManager.cpp
     src/gfx/assets/ModelLoader.cpp)
