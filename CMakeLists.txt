@@ -77,24 +77,24 @@ else()
         set(GLAD_GEN_PYTHON ${GLAD_VENV_PYTHON})
     endif()
 
-    set(GLAD_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/gladsources/glad_gl_core_33)
+    set(GLAD_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/gladsources/glad_gl_core_41)
     add_custom_command(
         OUTPUT ${GLAD_GEN_DIR}/src/gl.c ${GLAD_GEN_DIR}/include/glad/gl.h ${GLAD_GEN_DIR}/include/KHR/khrplatform.h
         COMMAND ${CMAKE_COMMAND} -E rm -rf ${GLAD_GEN_DIR}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${GLAD_GEN_DIR}
         COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${CMAKE_SOURCE_DIR}/third_party/glad"
-            ${GLAD_GEN_PYTHON} -m glad --out-path ${GLAD_GEN_DIR} --api gl:core=3.3 --reproducible c
+            ${GLAD_GEN_PYTHON} -m glad --out-path ${GLAD_GEN_DIR} --api gl:core=4.1 --reproducible c
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         DEPENDS ${CMAKE_SOURCE_DIR}/third_party/glad/glad/__main__.py
-        COMMENT "Generating GLAD from submodule (OpenGL 3.3 Core)"
+        COMMENT "Generating GLAD from submodule (OpenGL 4.1 Core)"
         VERBATIM)
 
-    add_library(glad_gl_core_33 STATIC ${GLAD_GEN_DIR}/src/gl.c)
-    target_include_directories(glad_gl_core_33 PUBLIC ${GLAD_GEN_DIR}/include)
-    target_link_libraries(glad_gl_core_33 PUBLIC ${CMAKE_DL_LIBS})
+    add_library(glad_gl_core_41 STATIC ${GLAD_GEN_DIR}/src/gl.c)
+    target_include_directories(glad_gl_core_41 PUBLIC ${GLAD_GEN_DIR}/include)
+    target_link_libraries(glad_gl_core_41 PUBLIC ${CMAKE_DL_LIBS})
 
-    set(GLAD_TARGET glad_gl_core_33)
-    set(GLAD_SOURCE "submodule (OpenGL 3.3 Core)")
+    set(GLAD_TARGET glad_gl_core_41)
+    set(GLAD_SOURCE "submodule (OpenGL 4.1 Core)")
 endif()
 
 # ============================================================================
@@ -120,6 +120,48 @@ add_library(stb INTERFACE)
 target_include_directories(stb INTERFACE ${CMAKE_SOURCE_DIR}/third_party/stb)
 
 # ============================================================================
+# Assimp (3D model import library) — vendored as a git submodule and built
+# from source as a static subproject. This keeps the build self-contained
+# across all three CI platforms (no system/vcpkg assimp package needed).
+# ============================================================================
+if(NOT EXISTS ${CMAKE_SOURCE_DIR}/third_party/assimp/CMakeLists.txt)
+    message(FATAL_ERROR
+        "Assimp submodule not found. Initialize it first:\n"
+        "  git submodule update --init --recursive")
+endif()
+
+# Configure Assimp before entering its subtree: library-only static build,
+# no command-line tools / tests, never let upstream warnings become errors,
+# and ASSIMP_INSTALL=OFF keeps its export rules out of our build since we
+# only consume the library target. We build Assimp's BUNDLED zlib so its
+# minizip/unzip sources (needed by the FBX importer) are wired up too.
+set(BUILD_SHARED_LIBS OFF                       CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS OFF               CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_TESTS OFF                      CACHE BOOL "" FORCE)
+set(ASSIMP_NO_EXPORT ON                         CACHE BOOL "" FORCE)  # importers only
+set(ASSIMP_WARNINGS_AS_ERRORS OFF               CACHE BOOL "" FORCE)
+set(ASSIMP_INJECT_DEBUG_POSTFIX OFF             CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ZLIB ON                        CACHE BOOL "" FORCE)  # bundled zlib + minizip
+set(ASSIMP_HUNTER_ENABLED OFF                   CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL OFF                          CACHE BOOL "" FORCE)
+set(GENERATE_DOC OFF                            CACHE BOOL "" FORCE)
+
+add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/assimp EXCLUDE_FROM_ALL)
+
+# Assimp's bundled zlib 1.2.x has a legacy `#if defined(MACOS)||defined(TARGET_OS_MAC)`
+# branch that #defines fdopen(...) NULL, clashing with the modern macOS SDK's
+# <stdio.h> (which transitively defines TARGET_OS_MAC). Defining fdopen to itself
+# makes the `#ifndef fdopen` guard skip that bogus macro without altering calls.
+if(APPLE)
+    foreach(_zlib_target zlib zlibstatic)
+        if(TARGET ${_zlib_target})
+            target_compile_definitions(${_zlib_target} PRIVATE fdopen=fdopen)
+        endif()
+    endforeach()
+endif()
+message(STATUS "Assimp: submodule (static, bundled zlib)")
+
+# ============================================================================
 # Executable
 # ============================================================================
 # The application only calls GLFW (shared) and GLAD (static, loads GL at
@@ -127,20 +169,37 @@ target_include_directories(stb INTERFACE ${CMAKE_SOURCE_DIR}/third_party/stb)
 # dependencies are carried transitively by the GLFW and GLAD targets.
 set(TARGET_NAME "GLFW_Template")
 
+set(GFX_SOURCES
+    src/gfx/core/RenderContext.cpp
+    src/gfx/core/GLBuffer.cpp
+    src/gfx/core/VertexArray.cpp
+    src/gfx/shader/ShaderProgram.cpp
+    src/gfx/geometry/Mesh.cpp
+    src/gfx/geometry/GeometryFactory.cpp
+    src/gfx/texture/Texture2D.cpp
+    src/gfx/camera/Camera.cpp
+    src/gfx/render/Renderer.cpp
+    src/gfx/assets/ThreadPool.cpp
+    src/gfx/assets/AssetManager.cpp
+    src/gfx/assets/ModelLoader.cpp)
+
 add_executable(${TARGET_NAME}
     src/main.cpp
     src/utils/utils.cpp
     src/utils/Shader.cpp
-    src/utils/stb.cpp)
+    src/utils/stb.cpp
+    ${GFX_SOURCES})
 
 target_include_directories(${TARGET_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/src/headers
+    ${CMAKE_SOURCE_DIR}/src
     ${GLM_INCLUDE_DIR})
 
 target_link_libraries(${TARGET_NAME} PRIVATE
     glfw
     ${GLAD_TARGET}
-    stb)
+    stb
+    assimp::assimp)
 
 set_target_properties(${TARGET_NAME} PROPERTIES
     OUTPUT_NAME ${TARGET_NAME}

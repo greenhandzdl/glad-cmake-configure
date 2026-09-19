@@ -19,6 +19,7 @@
 # IDE specific
 .vscode/
 .idea/
+.qoder/
 *.swp
 *.swo
 *~
