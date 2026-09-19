@@ -1,0 +1,35 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 28, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "llvm-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/cmake-build-${presetName}",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "/opt/homebrew/opt/llvm/bin/clang",
+        "CMAKE_CXX_COMPILER": "/opt/homebrew/opt/llvm/bin/clang++"
+      }
+    },
+    {
+      "name": "Debug",
+      "displayName": "Debug (Homebrew clang, C++20 modules)",
+      "description": "Pins the compiler to Homebrew LLVM clang. The engine is a real C++20 named module (gfx); building it needs clang-scan-deps, which Apple's /usr/bin/clang does not ship, so the default Apple-clang profile fails to configure. Named 'Debug' to match CLion's default build profile.",
+      "inherits": "llvm-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "Release",
+      "displayName": "Release (Homebrew clang, C++20 modules)",
+      "inherits": "llvm-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "Debug", "configurePreset": "Debug" },
+    { "name": "Release", "configurePreset": "Release" },
+    { "name": "clean-project", "configurePreset": "Debug", "targets": ["clean-project"] }
+  ]
+}

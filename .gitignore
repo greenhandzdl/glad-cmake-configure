@@ -1,6 +1,7 @@
 # Build output
 /output/
 /build/
+/cmake-build-*/
 
 # Generated scripts
 /scripts/build.sh
