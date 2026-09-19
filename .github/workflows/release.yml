@@ -117,6 +117,17 @@ jobs:
         run: |
           vcpkg install glfw3:x64-windows glm:x64-windows
 
+      - name: Resolve vcpkg root (Windows)
+        if: matrix.os == 'windows'
+        shell: bash
+        run: |
+          # 安装用的 vcpkg CLI 与 toolchain 必须指向同一个根目录。
+          # Windows runner 上 `vcpkg` 实际是 VCPKG_INSTALLATION_ROOT（C:\vcpkg），
+          # 而 VCPKG_ROOT 可能指向 VS 自带的另一个 vcpkg，优先用前者。
+          ROOT="${VCPKG_INSTALLATION_ROOT:-$VCPKG_ROOT}"
+          echo "Resolved vcpkg root: $ROOT"
+          echo "VCPKG_PATH=$ROOT" >> "$GITHUB_ENV"
+
       # ------------------------------------------------------------------
       # 配置 & 构建（统一使用 Ninja，单配置，产物路径固定为 output/）
       # ------------------------------------------------------------------
@@ -130,9 +141,9 @@ jobs:
           # "C:\Program Files\...\vcpkg"）被 bash 拆词。
           ARGS=(-S . -B build -G Ninja "-DCMAKE_BUILD_TYPE=$BUILD_TYPE")
           if [ "$RUN_OS" = "windows" ]; then
-            ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_TARGET_TRIPLET=x64-windows")
+            ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$VCPKG_PATH/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_TARGET_TRIPLET=x64-windows")
           fi
-          echo "vcpkg root: '$VCPKG_ROOT'"
+          echo "vcpkg toolchain root: '$VCPKG_PATH'"
           cmake "${ARGS[@]}"
 
       - name: Build
@@ -151,7 +162,7 @@ jobs:
           ARTIFACT: ${{ matrix.artifact }}
         run: |
           # vcpkg 默认 shared triplet，glfw 运行期需要 dll，一并放入 output/
-          Copy-Item "$env:VCPKG_ROOT/installed/x64-windows/bin/*.dll" output/ -Force
+          Copy-Item "$env:VCPKG_PATH\installed\x64-windows\bin\*.dll" output/ -Force
           Compress-Archive -Path output/* -DestinationPath "$env:ARTIFACT.zip"
 
       - name: Package (Linux / macOS)
