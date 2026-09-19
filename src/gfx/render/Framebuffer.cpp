@@ -38,11 +38,15 @@ void Framebuffer::Create() {
 void Framebuffer::AttachColor(const RenderTexture& tex, int layer, GLuint colorSlot) {
     RenderContext::AssertRenderThread("Framebuffer::AttachColor");
     glBindFramebuffer(GL_FRAMEBUFFER, id_);
-    const GLenum iface = (tex.target() == GL_TEXTURE_2D_ARRAY)
-        ? GL_TEXTURE_2D_ARRAY : GL_TEXTURE_2D;
-    glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + colorSlot,
-                              tex.id(), 0, layer);
-    (void)iface;
+    if (tex.target() == GL_TEXTURE_2D_ARRAY) {
+        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + colorSlot,
+                                  tex.id(), 0, layer);
+    } else {
+        // Plain 2D (and any non-array target): glFramebufferTextureLayer would
+        // be an error here and leave the slot empty (=> INCOMPLETE_DRAW_BUFFER).
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + colorSlot,
+                               GL_TEXTURE_2D, tex.id(), 0);
+    }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
@@ -68,6 +72,34 @@ void Framebuffer::AttachCubeFaceDepth(const TextureCubeMap& cube, GLenum face, i
     RenderContext::AssertRenderThread("Framebuffer::AttachCubeFaceDepth");
     glBindFramebuffer(GL_FRAMEBUFFER, id_);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, face, cube.id(), level);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void Framebuffer::AttachColorMultisample(const RenderTexture& tex, GLuint colorSlot) {
+    RenderContext::AssertRenderThread("Framebuffer::AttachColorMultisample");
+    glBindFramebuffer(GL_FRAMEBUFFER, id_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + colorSlot,
+                           GL_TEXTURE_2D_MULTISAMPLE, tex.id(), 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void Framebuffer::AttachDepthMultisample(const RenderTexture& tex) {
+    RenderContext::AssertRenderThread("Framebuffer::AttachDepthMultisample");
+    glBindFramebuffer(GL_FRAMEBUFFER, id_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                           GL_TEXTURE_2D_MULTISAMPLE, tex.id(), 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void Framebuffer::ResolveColorTo(const Framebuffer& src, const Framebuffer& dst,
+                                 int width, int height) {
+    RenderContext::AssertRenderThread("Framebuffer::ResolveColorTo");
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, src.id_);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dst.id_);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 

@@ -184,7 +184,10 @@ set(GFX_SOURCES
     src/gfx/camera/Camera.cpp
     src/gfx/render/Renderer.cpp
     src/gfx/render/Framebuffer.cpp
+    src/gfx/render/PostProcessChain.cpp
     src/gfx/render/SkyboxRenderer.cpp
+    src/gfx/render/SpriteBatch.cpp
+    src/gfx/text/Font.cpp
     src/gfx/light/EnvironmentMap.cpp
     src/gfx/shadow/CascadedShadowMap.cpp
     src/gfx/assets/ThreadPool.cpp

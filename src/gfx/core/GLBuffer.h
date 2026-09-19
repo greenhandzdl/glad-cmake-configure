@@ -38,6 +38,18 @@ public:
         Create(target, std::as_bytes(data), usage);
     }
 
+    // Reserve `byteCount` bytes of (uninitialised) storage. Used to size a
+    // dynamic buffer once, then feed it via SubData. Render thread.
+    void Reserve(GLenum target, std::size_t byteCount, GLenum usage = GL_DYNAMIC_DRAW);
+
+    // Partial upload at a byte offset (render thread). Buffer must exist.
+    void SubData(std::span<const std::byte> data, std::size_t offsetBytes = 0);
+    template <class T>
+    requires std::is_trivially_copyable_v<T>
+    void SubData(std::span<const T> data, std::size_t offsetBytes = 0) {
+        SubData(std::as_bytes(data), offsetBytes);
+    }
+
     // Re-substitute the whole store (render thread). Must already be created.
     void Replace(std::span<const std::byte> data);
     template <class T>

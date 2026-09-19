@@ -1,12 +1,14 @@
 /**
  * @file main.cpp
- * @brief Phase 2 demo: PBR forward renderer with cascaded shadows, image-based
- *        lighting from a procedural HDR sky, and an orbit camera.
+ * @brief Phase 3 demo: PBR + cascaded shadows + IBL rendered to a linear HDR
+ *        target through an MSAA + Bloom + ACES post-process chain, with a
+ *        sprite-batched text HUD overlaid on the tone-mapped result.
  *
  * Controls:
  *   drag mouse   : orbit          scroll      : zoom
  *   A/D or Left/Right : sun azimuth           W/S or Up/Down : sun elevation
  *   1 : toggle cascaded shadows   2 : toggle image-based lighting
+ *   3 : toggle bloom
  *   Esc : quit
  *
  * All GL work runs on the render thread; the plan's two-phase rule is honoured
@@ -18,6 +20,7 @@
 #include <cmath>
 #include <cstdio>
 #include <iostream>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -34,11 +37,15 @@
 #include "gfx/light/Light.h"
 #include "gfx/light/LightBuffer.h"
 #include "gfx/material/Material.h"
+#include "gfx/render/PostProcessChain.h"
 #include "gfx/render/Renderer.h"
 #include "gfx/render/SkyboxRenderer.h"
+#include "gfx/render/SpriteBatch.h"
 #include "gfx/shader/ShaderLib.h"
 #include "gfx/shader/ShaderProgram.h"
 #include "gfx/shadow/CascadedShadowMap.h"
+#include "gfx/text/Font.h"
+#include "gfx/text/TextRenderer.h"
 #include "gfx/texture/Texture2D.h"
 
 namespace {
@@ -55,6 +62,19 @@ struct Input {
     float sunElevation = 0.85f;   // radians above the horizon
     bool  useShadow = true;
     bool  useIbl = true;
+    bool  useBloom = true;
+};
+
+// A few well-known system fonts, tried in order; HUD text just no-ops if none
+// are found, so a missing font never breaks the render.
+const char* const kFontCandidates[] = {
+    "/System/Library/Fonts/Menlo.ttc",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "C:/Windows/Fonts/consola.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
 };
 
 // Unit vector pointing from the scene toward the sun (elevation > 0 => upward).
@@ -142,6 +162,16 @@ void UploadInto(gfx::Mesh& slot, gfx::MeshData data) {
     slot = std::move(m);
 }
 
+// 1x1 opaque white texel: a cheap solid fill for HUD panels via SpriteBatch.
+gfx::Texture2DDesc MakeSolidDesc() {
+    gfx::Texture2DDesc d;
+    d.width = d.height = 1;
+    d.channels = 4;
+    d.srgb = false;
+    d.pixels = {255, 255, 255, 255};
+    return d;
+}
+
 } // namespace
 
 int main(int /*argc*/, char** /*argv*/) {
@@ -219,6 +249,29 @@ int main(int /*argc*/, char** /*argv*/) {
         gfx::Texture2D checker;
         checker.Upload(MakeCheckerDesc());
 
+        // ---- Phase 3: post-process chain + 2D HUD infrastructure ------------
+        gfx::PostProcessChain post;
+        if (!post.Init()) {
+            std::fprintf(stderr, "PostProcessChain init failed\n");
+            glfwDestroyWindow(window); glfwTerminate(); return 1;
+        }
+        post.SetExposure(1.1f);
+
+        gfx::SpriteBatch sprite;
+        if (!sprite.Init()) {
+            std::fprintf(stderr, "SpriteBatch init failed\n");
+            glfwDestroyWindow(window); glfwTerminate(); return 1;
+        }
+
+        gfx::Font font;
+        for (const char* candidate : kFontCandidates) {
+            if (font.LoadFromFile(candidate, 48.0f)) break;
+        }
+        if (!font.loaded()) std::fprintf(stderr, "HUD font not found; text overlay disabled\n");
+
+        gfx::Texture2D white;
+        white.Upload(MakeSolidDesc());
+
         // ---- scene: PBR test grid (metallic x roughness) + textured cubes ----
         std::vector<SceneObject> objects;
 
@@ -285,17 +338,22 @@ int main(int /*argc*/, char** /*argv*/) {
         pbr->SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);
         pbr->SetBlockBinding("ShadowBlock", gfx::CascadedShadowMap::kShadowBinding);
 
+        double lastFrameTime = glfwGetTime();
         while (!glfwWindowShouldClose(window)) {
             if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
                 glfwSetWindowShouldClose(window, true);
             static bool shadowToggleArmed = true;
             static bool iblToggleArmed = true;
+            static bool bloomToggleArmed = true;
             const bool k1 = glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS;
             const bool k2 = glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS;
+            const bool k3 = glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS;
             if (k1 && shadowToggleArmed) { input.useShadow = !input.useShadow; shadowToggleArmed = false; }
             else if (!k1) shadowToggleArmed = true;
             if (k2 && iblToggleArmed) { input.useIbl = !input.useIbl; iblToggleArmed = false; }
             else if (!k2) iblToggleArmed = true;
+            if (k3 && bloomToggleArmed) { input.useBloom = !input.useBloom; bloomToggleArmed = false; }
+            else if (!k3) bloomToggleArmed = true;
             HandleKeys(window, input);
 
             int fbw = 0, fbh = 0;
@@ -336,8 +394,9 @@ int main(int /*argc*/, char** /*argv*/) {
                 csm.Upload();
             }
 
-            // --- main PBR pass ---
-            renderer.BeginFrame(fbw, fbh);
+            // --- main PBR pass: render linear HDR into the (MSAA) scene target ---
+            post.Resize(fbw, fbh, 4);
+            post.BeginScene();
 
             lightBuffer.Bind();
             csm.BindUniform();
@@ -363,7 +422,43 @@ int main(int /*argc*/, char** /*argv*/) {
             // --- skybox background (drawn last with the LEQUAL-depth trick) ---
             skybox.Draw(camera.ViewProjection(), env.sky(), gfx::texunit::skybox);
 
-            renderer.EndFrame();
+            // --- post-process: MSAA resolve -> bloom -> ACES composite to screen ---
+            post.EndScene();
+            if (input.useBloom) {
+                post.RenderBloom();
+                post.SetBloomStrength(0.45f);
+            } else {
+                post.SetBloomStrength(0.0f);
+            }
+            post.Composite();
+
+            // --- HUD (sprites/text) drawn on the tone-mapped default framebuffer ---
+            const double now = glfwGetTime();
+            static double smoothedFps = 60.0;
+            const double dt = now - lastFrameTime;
+            lastFrameTime = now;
+            if (dt > 0.0) smoothedFps += (1.0 / dt - smoothedFps) * 0.1;
+
+            sprite.Begin(white, fbw, fbh);
+            sprite.Draw(white, 0.0f, 0.0f, 380.0f, 96.0f, 0.0f, 0.0f, 1.0f, 1.0f,
+                        glm::vec4(0.0f, 0.0f, 0.0f, 0.35f));   // translucent panel
+            char line[160];
+            std::snprintf(line, sizeof(line),
+                          "GLFW_Template - Phase 3: HDR / MSAA / Bloom / ACES   %.0f fps",
+                          smoothedFps);
+            gfx::TextRenderer::Draw(sprite, font, line, 12.0f, 8.0f, 22.0f, glm::vec4(1.0f));
+            std::snprintf(line, sizeof(line),
+                          "Shadow %s   IBL %s   Bloom %s",
+                          input.useShadow ? "ON" : "OFF",
+                          input.useIbl ? "ON" : "OFF",
+                          input.useBloom ? "ON" : "OFF");
+            gfx::TextRenderer::Draw(sprite, font, line, 12.0f, 38.0f, 20.0f,
+                                    glm::vec4(0.75f, 0.85f, 1.0f, 1.0f));
+            gfx::TextRenderer::Draw(sprite, font,
+                                    "drag=orbit  scroll=zoom  A/D W/S=sun  1=shadow  2=IBL  3=bloom  Esc=quit",
+                                    12.0f, 64.0f, 18.0f, glm::vec4(0.8f, 0.8f, 0.8f, 1.0f));
+            sprite.End();
+
             glfwSwapBuffers(window);
             glfwPollEvents();
         }

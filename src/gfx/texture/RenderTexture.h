@@ -34,6 +34,11 @@ public:
     // Allocate the store. layers > 1 => GL_TEXTURE_2D_ARRAY. Render-thread only.
     void Allocate(Format fmt, int width, int height, int layers = 1, bool generateMips = false);
 
+    // Allocate a fixed-sample-location multisampled texture (MSAA scene target,
+    // GL_TEXTURE_2D_MULTISAMPLE). Sampled only via blit-resolve, never directly.
+    // Render-thread only.
+    void AllocateMultisample(Format fmt, int width, int height, int samples);
+
     void Bind(unsigned slot = 0) const;   // binds to 2D or 2D_ARRAY per target
     static void Unbind(unsigned slot);
 
@@ -42,6 +47,7 @@ public:
     [[nodiscard]] int    width()  const noexcept { return width_; }
     [[nodiscard]] int    height() const noexcept { return height_; }
     [[nodiscard]] int    layers() const noexcept { return layers_; }
+    [[nodiscard]] int    samples() const noexcept { return samples_; }
     [[nodiscard]] bool   valid()  const noexcept { return id_ != 0; }
 
 private:
@@ -52,6 +58,7 @@ private:
     int width_ = 0;
     int height_ = 0;
     int layers_ = 1;
+    int samples_ = 1;
     Format fmt_ = Format::Rgba16F;
 };
 

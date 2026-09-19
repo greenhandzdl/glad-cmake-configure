@@ -40,6 +40,16 @@ public:
     void AttachCubeFaceColor(const TextureCubeMap& cube, GLenum face, int level = 0, GLuint colorSlot = 0);
     void AttachCubeFaceDepth(const TextureCubeMap& cube, GLenum face, int level = 0);
 
+    // Attach a GL_TEXTURE_2D_MULTISAMPLE texture (MSAA scene target). These use
+    // glFramebufferTexture2D with the multisample target, not the layered path.
+    void AttachColorMultisample(const RenderTexture& tex, GLuint colorSlot = 0);
+    void AttachDepthMultisample(const RenderTexture& tex);
+
+    // Blit-resolve src's colour attachment 0 (multisampled) into dst's colour
+    // attachment 0 (single-sample). Both must already have their attachments.
+    static void ResolveColorTo(const Framebuffer& src, const Framebuffer& dst,
+                               int width, int height);
+
     void Bind();                    // glBindFramebuffer(GL_FRAMEBUFFER, id_)
     void BindRead() const;          // for blits
     void Unbind();

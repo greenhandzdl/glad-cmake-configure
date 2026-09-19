@@ -241,9 +241,8 @@ void main() {
     }
 
     vec3 color = ambient + Lo;
-    // Reinhard tone map + gamma (single-pass; full post chain is Phase 3).
-    color = color / (color + vec3(1.0));
-    color = pow(color, vec3(1.0 / 2.2));
+    // Linear HDR output; exposure + ACES tone map + gamma live in the Phase 3
+    // post-process composite (see PostProcessShaders.h / PostProcessChain).
     FragColor = vec4(color, alpha);
 }
 )GLSL";
@@ -281,9 +280,9 @@ in vec3 vDir;
 out vec4 FragColor;
 uniform samplerCube uEnv;
 void main() {
+    // Linear HDR sky; the post composite tone-maps it like the rest of the
+    // scene so the sun disc blooms consistently with emissive geometry.
     vec3 c = texture(uEnv, normalize(vDir)).rgb;
-    c = c / (c + vec3(1.0));
-    c = pow(c, vec3(1.0 / 2.2));
     FragColor = vec4(c, 1.0);
 }
 )GLSL";
