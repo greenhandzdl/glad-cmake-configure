@@ -1,8 +1,11 @@
 #include "gfx/render/Renderer.h"
 
+#include <utility>
+
 #include <glad/gl.h>
 
 #include "gfx/core/RenderContext.h"
+#include "gfx/render/RenderPasses.h"
 
 namespace gfx {
 
@@ -15,16 +18,22 @@ void Renderer::Init() {
     glFrontFace(GL_CCW);
 }
 
-void Renderer::BeginFrame(int width, int height) {
-    RenderContext::AssertRenderThread("Renderer::BeginFrame");
-    glViewport(0, 0, width, height);
-    glClearColor(clearColor_.r, clearColor_.g, clearColor_.b, clearColor_.a);
-    glClearDepth(1.0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+void Renderer::AddPass(std::unique_ptr<RenderPass> pass) {
+    passes_.push_back(std::move(pass));
 }
 
-void Renderer::EndFrame() {
-    // Swap buffers happens in the main loop; hook kept for future passes.
+void Renderer::BuildDefaultPipeline() {
+    passes_.clear();
+    passes_.push_back(std::make_unique<ShadowPass>());
+    passes_.push_back(std::make_unique<GeometryPass>());
+    passes_.push_back(std::make_unique<PostProcessPass>());
+    passes_.push_back(std::make_unique<DebugHudPass>());
+}
+
+void Renderer::Render(RenderFrame& frame) {
+    RenderContext::AssertRenderThread("Renderer::Render");
+    for (auto& pass : passes_)
+        pass->Execute(frame);
 }
 
 } // namespace gfx

@@ -1,8 +1,10 @@
 /**
  * @file main.cpp
- * @brief Phase 4 demo: the Phase 3 HDR/PBR/CSM/IBL renderer plus frustum
- *        culling, a DebugDraw line overlay, CPU+GPU profiling, mouse picking,
- *        and a GPU-instanced field, surfaced through the sprite-batched text HUD.
+ * @brief Phase 5 demo: the HDR/PBR/CSM/IBL renderer now organised as a scene
+ *        graph (Scene/SceneNode/Transform) driven through an ordered render-pass
+ *        pipeline (Renderer + Shadow/Geometry/PostProcess/DebugHud passes), plus
+ *        frustum culling, a DebugDraw overlay, CPU+GPU profiling, mouse picking,
+ *        and a GPU-instanced field surfaced through the sprite-batched text HUD.
  *
  * Controls:
  *   drag mouse   : orbit          scroll      : zoom
@@ -11,8 +13,10 @@
  *   1 : cascaded shadows   2 : IBL   3 : bloom   4 : debug lines   5 : instanced field
  *   Esc : quit
  *
- * All GL work runs on the render thread; the plan's two-phase rule is honoured
- * by building mesh/texture CPU data up front and uploading once at startup.
+ * The application owns the GL resources (meshes / materials / textures / passes);
+ * scene nodes reference them by non-owning pointer, so the whole frame's draw
+ * sequence - once a wall of inline gl* calls here - is now a single
+ * renderer.Render(frame). All GL still happens on the render thread.
  */
 
 #include "common.h"
@@ -20,6 +24,7 @@
 #include <cmath>
 #include <cstdio>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -44,8 +49,12 @@
 #include "gfx/material/Material.h"
 #include "gfx/render/PostProcessChain.h"
 #include "gfx/render/Renderer.h"
+#include "gfx/render/RenderFrame.h"
 #include "gfx/render/SkyboxRenderer.h"
 #include "gfx/render/SpriteBatch.h"
+#include "gfx/scene/Scene.h"
+#include "gfx/scene/SceneNode.h"
+#include "gfx/scene/Transform.h"
 #include "gfx/shader/ShaderLib.h"
 #include "gfx/shader/ShaderProgram.h"
 #include "gfx/shadow/CascadedShadowMap.h"
@@ -70,7 +79,6 @@ struct Input {
     bool  useBloom = true;
     bool  useDebug = false;
     bool  useInstances = false;
-    int   selected = -1;         // picked object index, -1 = none
     // Pending right-click pick request (consumed + cleared in the main loop).
     bool  pickPending = false;
     float pickX = 0.0f, pickY = 0.0f;
@@ -145,39 +153,12 @@ void HandleKeys(GLFWwindow* win, Input& in) {
         in.sunElevation = std::max(in.sunElevation - step, 0.05f);
 }
 
-// ---- one draw-call record (Mesh is move-only, so SceneObject is too) --------
-struct SceneObject {
+// Owns the GPU mesh + CPU material for one scene object. Scene nodes point here;
+// storing them by unique_ptr keeps the addresses stable across the whole run.
+struct Owned {
     gfx::Mesh        mesh;
-    glm::mat4        model{1.0f};
     gfx::PbrMaterial material;
-    bool             castsShadow = true;
-    // Local-space bounding sphere (from the source MeshData), used for frustum
-    // culling and picking once transformed into world space by `model`.
-    glm::vec3        boundCenter{0.0f};
-    float            boundRadius = 0.5f;
 };
-
-// Axis-aligned bounds of CPU geometry -> a local bounding sphere.
-struct Sphere { glm::vec3 center{0.0f}; float radius = 0.5f; };
-
-Sphere ComputeBounds(const gfx::MeshData& data) {
-    Sphere s;
-    if (data.vertices.empty()) return s;
-    glm::vec3 mn(data.vertices[0].position), mx = mn;
-    for (const auto& v : data.vertices) {
-        mn = glm::min(mn, v.position);
-        mx = glm::max(mx, v.position);
-    }
-    s.center = (mn + mx) * 0.5f;
-    s.radius = glm::length(mx - s.center);
-    return s;
-}
-
-// Largest axis scale of a model matrix (approximates sphere -> world growth).
-float MaxScale(const glm::mat4& m) {
-    auto len = [&m](int c) { return glm::length(glm::vec3(m[c])); };
-    return std::max({len(0), len(1), len(2)});
-}
 
 // CPU-side checker albedo (Stage A, no GL).
 gfx::Texture2DDesc MakeCheckerDesc(int size = 512, int cells = 8) {
@@ -198,21 +179,6 @@ gfx::Texture2DDesc MakeCheckerDesc(int size = 512, int cells = 8) {
         }
     }
     return d;
-}
-
-// Upload a fresh mesh from CPU geometry data (render thread) into `slot`.
-void UploadInto(gfx::Mesh& slot, gfx::MeshData data) {
-    gfx::Mesh m;
-    m.Upload(std::move(data));
-    slot = std::move(m);
-}
-
-// Upload geometry into a scene object and cache its local bounding sphere.
-void AttachMesh(SceneObject& o, gfx::MeshData data) {
-    const Sphere s = ComputeBounds(data);
-    o.boundCenter = s.center;
-    o.boundRadius = s.radius;
-    UploadInto(o.mesh, std::move(data));
 }
 
 // 1x1 opaque white texel: a cheap solid fill for HUD panels via SpriteBatch.
@@ -272,7 +238,7 @@ int main(int /*argc*/, char** /*argv*/) {
     {
         gfx::Renderer renderer;
         renderer.Init();
-        renderer.SetClearColor(glm::vec4(0.02f, 0.02f, 0.03f, 1.0f));
+        renderer.BuildDefaultPipeline();
 
         auto pbr = gfx::ShaderProgram::CreateFromSource(gfx::shaders::kPbrVertex, gfx::shaders::kPbrFragment);
         if (!pbr) {
@@ -302,7 +268,7 @@ int main(int /*argc*/, char** /*argv*/) {
         gfx::Texture2D checker;
         checker.Upload(MakeCheckerDesc());
 
-        // ---- Phase 3: post-process chain + 2D HUD infrastructure ------------
+        // ---- post-process chain + 2D HUD infrastructure ----------------------
         gfx::PostProcessChain post;
         if (!post.Init()) {
             std::fprintf(stderr, "PostProcessChain init failed\n");
@@ -325,73 +291,7 @@ int main(int /*argc*/, char** /*argv*/) {
         gfx::Texture2D white;
         white.Upload(MakeSolidDesc());
 
-        // ---- scene: PBR test grid (metallic x roughness) + textured cubes ----
-        std::vector<SceneObject> objects;
-
-        // Ground plane first (drawn early, never casts).
-        {
-            SceneObject o;
-            AttachMesh(o, gfx::GeometryFactory::Plane(1.0f));
-            o.model = glm::scale(glm::mat4(1.0f), glm::vec3(24.0f, 1.0f, 24.0f));
-            o.material.baseColor = glm::vec4(0.9f, 0.9f, 0.92f, 1.0f);
-            o.material.roughness = 0.85f;
-            o.material.albedo = &checker;
-            o.castsShadow = false;
-            objects.push_back(std::move(o));
-        }
-
-        for (int i = 0; i < 5; ++i) {
-            for (int j = 0; j < 5; ++j) {
-                SceneObject o;
-                AttachMesh(o, gfx::GeometryFactory::Sphere(0.5f, 48, 32));
-                const glm::vec3 pos(-3.0f + i * 1.5f, 0.5f, -3.0f + j * 1.5f);
-                o.model = glm::translate(glm::mat4(1.0f), pos);
-                o.material.metallic = static_cast<float>(i) / 4.0f;
-                o.material.roughness = 0.05f + 0.9f * static_cast<float>(j) / 4.0f;
-                o.material.baseColor = glm::vec4(0.9f, 0.5f, 0.25f, 1.0f);
-                objects.push_back(std::move(o));
-            }
-        }
-
-        for (int k = 0; k < 3; ++k) {
-            SceneObject o;
-            AttachMesh(o, gfx::GeometryFactory::Cube(1.0f));
-            const glm::vec3 pos(-1.6f + k * 1.6f, 0.5f, 3.6f);
-            o.model = glm::translate(glm::mat4(1.0f), pos) *
-                      glm::rotate(glm::mat4(1.0f), 0.5f * k, glm::vec3(0, 1, 0));
-            o.material.baseColor = glm::vec4(1.0f);
-            o.material.roughness = 0.45f;
-            o.material.albedo = &checker;
-            objects.push_back(std::move(o));
-        }
-
-        // Every material samples its four maps from fixed units; give each one a
-        // valid 2D placeholder so units left without a real map still match the
-        // sampler type (see PbrMaterial::placeholder).
-        for (auto& o : objects) o.material.placeholder = &checker;
-
-        gfx::LightBuffer lightBuffer;
-        lightBuffer.Init();
-        gfx::CascadedShadowMap csm;
-        csm.Init(2048);
-
-        gfx::Camera camera;
-        camera.SetPerspective(45.0f, 1.0f, 0.1f, 200.0f);
-
-        const glm::vec3 target(0.0f, 0.6f, 0.0f);
-
-        // Sampler-unit uniforms persist on the program; set them once.
-        pbr->Use();
-        pbr->Set("uShadowMap", static_cast<int>(gfx::texunit::shadowArray));
-        pbr->Set("uIrradiance", static_cast<int>(gfx::texunit::irradiance));
-        pbr->Set("uPrefilter", static_cast<int>(gfx::texunit::prefilter));
-        pbr->Set("uBrdfLut", static_cast<int>(gfx::texunit::brdfLut));
-        // GLSL 4.10: map the std140 blocks onto the fixed UBO binding points
-        // that LightBuffer / CascadedShadowMap bind their buffers to each frame.
-        pbr->SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);
-        pbr->SetBlockBinding("ShadowBlock", gfx::CascadedShadowMap::kShadowBinding);
-
-        // ---- Phase 4: debug overlay, profiler, GPU-instanced field -----------
+        // ---- debug overlay, profiler, GPU-instanced field --------------------
         gfx::DebugDraw debug;
         if (!debug.Init()) std::fprintf(stderr, "DebugDraw init failed\n");
 
@@ -429,7 +329,106 @@ int main(int /*argc*/, char** /*argv*/) {
             instField.Create(std::move(geo), std::move(insts));
         }
 
+        // ---- scene graph -----------------------------------------------------
+        // Objects are owned by `owned` (stable addresses); nodes reference them.
+        std::vector<std::unique_ptr<Owned>> owned;
+        gfx::Scene scene;
+        int nextId = 0;
+
+        auto addObject = [&](gfx::MeshData data, const gfx::PbrMaterial& matCfg,
+                             const gfx::Transform& xf,
+                             gfx::SceneNode* parent = nullptr) -> gfx::SceneNode& {
+            auto o = std::make_unique<Owned>();
+            o->material = matCfg;
+            if (!o->material.placeholder) o->material.placeholder = &checker;
+            glm::vec3 c;
+            float r;
+            gfx::SceneNode::BoundsFromMeshData(data, c, r);
+            o->mesh.Upload(std::move(data));
+            Owned* raw = o.get();
+            owned.push_back(std::move(o));
+            gfx::SceneNode& node = parent ? parent->AddChild(xf) : scene.CreateRoot(xf);
+            node.SetRenderable(&raw->mesh, &raw->material);
+            node.SetLocalBounds(c, r);
+            node.id = nextId++;
+            return node;
+        };
+
+        // Ground plane (large scale, never casts).
+        {
+            gfx::Transform t;
+            t.scale = glm::vec3(24.0f, 1.0f, 24.0f);
+            gfx::PbrMaterial m;
+            m.baseColor = glm::vec4(0.9f, 0.9f, 0.92f, 1.0f);
+            m.roughness = 0.85f;
+            m.albedo = &checker;
+            addObject(gfx::GeometryFactory::Plane(1.0f), m, t).castsShadow = false;
+        }
+
+        // PBR test grid (metallic x roughness).
+        for (int i = 0; i < 5; ++i) {
+            for (int j = 0; j < 5; ++j) {
+                gfx::Transform t;
+                t.translation = glm::vec3(-3.0f + i * 1.5f, 0.5f, -3.0f + j * 1.5f);
+                gfx::PbrMaterial m;
+                m.metallic  = static_cast<float>(i) / 4.0f;
+                m.roughness = 0.05f + 0.9f * static_cast<float>(j) / 4.0f;
+                m.baseColor = glm::vec4(0.9f, 0.5f, 0.25f, 1.0f);
+                addObject(gfx::GeometryFactory::Sphere(0.5f, 48, 32), m, t);
+            }
+        }
+
+        // Textured cubes (checker albedo).
+        for (int k = 0; k < 3; ++k) {
+            gfx::Transform t;
+            t.translation = glm::vec3(-1.6f + k * 1.6f, 0.5f, 3.6f);
+            t.SetAxisAngle(glm::vec3(0, 1, 0), 0.5f * k);
+            gfx::PbrMaterial m;
+            m.baseColor = glm::vec4(1.0f);
+            m.roughness = 0.45f;
+            m.albedo = &checker;
+            addObject(gfx::GeometryFactory::Cube(1.0f), m, t);
+        }
+
+        // Hierarchy demo: an empty pivot carrying orbiting children. The pivot is
+        // spun every frame; the children ride along via world-matrix propagation.
+        gfx::SceneNode* carousel = &scene.CreateRoot();
+        for (int c = 0; c < 3; ++c) {
+            const float a = c * 2.0f * 3.14159265f / 3.0f;
+            gfx::Transform t;
+            t.translation = glm::vec3(std::cos(a) * 1.2f, 1.2f, std::sin(a) * 1.2f);
+            gfx::PbrMaterial m;
+            m.metallic = 0.9f;
+            m.roughness = 0.2f;
+            m.baseColor = glm::vec4(0.2f + 0.4f * c, 0.6f, 0.9f - 0.3f * c, 1.0f);
+            addObject(gfx::GeometryFactory::Cube(0.5f), m, t, carousel);
+        }
+
+        gfx::LightBuffer lightBuffer;
+        lightBuffer.Init();
+        gfx::CascadedShadowMap csm;
+        csm.Init(2048);
+
+        gfx::Camera camera;
+        camera.SetPerspective(45.0f, 1.0f, 0.1f, 200.0f);
+
+        const glm::vec3 target(0.0f, 0.6f, 0.0f);
+
+        // Sampler-unit uniforms persist on the program; set them once.
+        pbr->Use();
+        pbr->Set("uShadowMap", static_cast<int>(gfx::texunit::shadowArray));
+        pbr->Set("uIrradiance", static_cast<int>(gfx::texunit::irradiance));
+        pbr->Set("uPrefilter", static_cast<int>(gfx::texunit::prefilter));
+        pbr->Set("uBrdfLut", static_cast<int>(gfx::texunit::brdfLut));
+        // GLSL 4.10: map the std140 blocks onto the fixed UBO binding points
+        // that LightBuffer / CascadedShadowMap bind their buffers to each frame.
+        pbr->SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);
+        pbr->SetBlockBinding("ShadowBlock", gfx::CascadedShadowMap::kShadowBinding);
+
+        gfx::SceneNode* selected = nullptr;
         double lastFrameTime = glfwGetTime();
+        double smoothedFps = 60.0;
+
         while (!glfwWindowShouldClose(window)) {
             if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
                 glfwSetWindowShouldClose(window, true);
@@ -454,7 +453,12 @@ int main(int /*argc*/, char** /*argv*/) {
             if (k5 && instToggleArmed) { input.useInstances = !input.useInstances; instToggleArmed = false; }
             else if (!k5) instToggleArmed = true;
             HandleKeys(window, input);
-            profiler.BeginFrame();
+
+            // FPS (smoothed) for the HUD.
+            const double now = glfwGetTime();
+            const double dt = now - lastFrameTime;
+            lastFrameTime = now;
+            if (dt > 0.0) smoothedFps += (1.0 / dt - smoothedFps) * 0.1;
 
             int fbw = 0, fbh = 0;
             glfwGetFramebufferSize(window, &fbw, &fbh);
@@ -467,25 +471,6 @@ int main(int /*argc*/, char** /*argv*/) {
                 target.z + input.radius * cp * std::cos(input.yaw));
             camera.LookAt(eye, target, glm::vec3(0, 1, 0));
 
-            // World-space bounding spheres (culling + picking) and the frustum.
-            const glm::mat4 viewProj = camera.ViewProjection();
-            gfx::Frustum frustum;
-            frustum.Extract(viewProj);
-            std::vector<std::pair<glm::vec3, float>> spheres;
-            spheres.reserve(objects.size());
-            for (const auto& o : objects) {
-                const glm::vec3 wc = glm::vec3(o.model * glm::vec4(o.boundCenter, 1.0f));
-                spheres.emplace_back(wc, o.boundRadius * MaxScale(o.model));
-            }
-
-            // Consume a pending right-click pick (bounding-sphere ray test).
-            if (input.pickPending) {
-                input.pickPending = false;
-                const gfx::Ray ray = gfx::PickRay(input.pickX, input.pickY, fbw, fbh,
-                                                  camera.InverseViewProjection(), camera.Position());
-                input.selected = gfx::PickNearest(ray, spheres);
-            }
-
             const glm::vec3 towardSun = SunToward(input);
             const glm::vec3 sunTravel = -towardSun;
 
@@ -496,134 +481,62 @@ int main(int /*argc*/, char** /*argv*/) {
             setup.ambient = input.useIbl ? glm::vec3(0.0f) : glm::vec3(0.05f);
             lightBuffer.Update(setup, camera.Position());
 
-            // --- shadow depth pass ---
-            if (input.useShadow) {
-                csm.Update(camera, towardSun);
-                depth->Use();
-                for (int i = 0; i < gfx::kCascadeCount; ++i) {
-                    csm.BeginCascade(i);
-                    depth->Set("uLightMat", csm.data().lightMat[i]);
-                    for (const auto& o : objects) {
-                        if (!o.castsShadow) continue;
-                        depth->Set("uModel", o.model);
-                        o.mesh.Draw();
-                    }
-                    csm.EndCascade();
-                }
-                csm.Upload();
+            // Advance the animated hierarchy, then refresh world transforms once.
+            carousel->local().SetAxisAngle(glm::vec3(0, 1, 0), static_cast<float>(now) * 0.6f);
+            scene.Update();
+
+            const glm::mat4 viewProj = camera.ViewProjection();
+            gfx::Frustum frustum;
+            frustum.Extract(viewProj);
+
+            // Consume a pending right-click pick against the fresh world spheres.
+            if (input.pickPending) {
+                input.pickPending = false;
+                const auto& targets = scene.PickTargets();
+                std::vector<std::pair<glm::vec3, float>> spheres;
+                spheres.reserve(targets.size());
+                for (const auto& t : targets) spheres.emplace_back(t.center, t.radius);
+                const gfx::Ray ray = gfx::PickRay(
+                    input.pickX, input.pickY, fbw, fbh,
+                    camera.InverseViewProjection(), camera.Position());
+                const int idx = gfx::PickNearest(ray, spheres);
+                selected = (idx >= 0) ? targets[idx].node : nullptr;
             }
 
-            // --- main PBR pass: render linear HDR into the (MSAA) scene target ---
-            post.Resize(fbw, fbh, 4);
-            post.BeginScene();
+            // Assemble the frame and run the whole pipeline.
+            gfx::RenderFrame frame;
+            frame.camera = &camera;
+            frame.frustum = &frustum;
+            frame.scene = &scene;
+            frame.viewProj = viewProj;
+            frame.post = &post;
+            frame.lights = &lightBuffer;
+            frame.shadow = &csm;
+            frame.env = &env;
+            frame.skybox = &skybox;
+            frame.pbr = &*pbr;
+            frame.depth = &*depth;
+            frame.lightSetup = setup;
+            frame.sunToward = towardSun;
+            frame.debug = &debug;
+            frame.sprite = &sprite;
+            frame.font = &font;
+            frame.white = &white;
+            frame.profiler = &profiler;
+            frame.instField = &instField;
+            frame.instProg = instProg ? &*instProg : nullptr;
+            frame.useShadow = input.useShadow;
+            frame.useIbl = input.useIbl;
+            frame.useBloom = input.useBloom;
+            frame.useDebug = input.useDebug;
+            frame.useInstances = input.useInstances;
+            frame.selected = selected;
+            frame.fbWidth = fbw;
+            frame.fbHeight = fbh;
+            frame.smoothedFps = smoothedFps;
 
-            lightBuffer.Bind();
-            csm.BindUniform();
-
-            pbr->Use();
-            pbr->Set("uViewProj", camera.ViewProjection());
-            pbr->Set("uUseShadow", input.useShadow ? 1 : 0);
-            pbr->Set("uUseIbl", input.useIbl ? 1 : 0);
-
-            csm.Bind(gfx::texunit::shadowArray);
-            unsigned unit = gfx::texunit::irradiance;
-            env.BindIrradiance(unit);
-            env.BindPrefilter(unit);
-            env.BindBrdf(unit);
-
-            int visibleCount = 0;
-            for (std::size_t i = 0; i < objects.size(); ++i) {
-                const auto& o = objects[i];
-                if (!frustum.SphereVisible(spheres[i].first, spheres[i].second)) continue;
-                ++visibleCount;
-                pbr->Set("uModel", o.model);
-                pbr->Set("uNormalMatrix", glm::transpose(glm::inverse(glm::mat3(o.model))));
-                if (static_cast<int>(i) == input.selected) {
-                    gfx::PbrMaterial hl = o.material;              // copy: highlight is per-frame
-                    hl.baseColor = glm::vec4(1.0f, 0.85f, 0.2f, 1.0f);
-                    hl.metallic = 0.1f;
-                    hl.roughness = 0.25f;
-                    hl.Apply(*pbr);
-                } else {
-                    o.material.Apply(*pbr);
-                }
-                o.mesh.Draw();
-            }
-
-            // --- GPU-instanced field (lit by the same LightingBlock UBO) ---
-            if (input.useInstances && instProg && instField.valid()) {
-                instProg->Use();
-                instProg->Set("uViewProj", viewProj);
-                instField.Draw();
-            }
-
-            // --- skybox background (drawn last with the LEQUAL-depth trick) ---
-            skybox.Draw(camera.ViewProjection(), env.sky(), gfx::texunit::skybox);
-
-            // --- post-process: MSAA resolve -> bloom -> ACES composite to screen ---
-            post.EndScene();
-            if (input.useBloom) {
-                post.RenderBloom();
-                post.SetBloomStrength(0.45f);
-            } else {
-                post.SetBloomStrength(0.0f);
-            }
-            post.Composite();
-
-            // --- DebugDraw line overlay (world space, on the tone-mapped screen) ---
-            if (input.useDebug || input.selected >= 0) {
-                debug.Clear();
-                if (input.useDebug) {
-                    debug.PushAxes(glm::vec3(0.0f), 2.0f);
-                    for (std::size_t i = 0; i < objects.size(); ++i) {
-                        const auto& [c, r] = spheres[i];
-                        const bool sel = (static_cast<int>(i) == input.selected);
-                        debug.PushBoxCenter(c, glm::vec3(r),
-                                            sel ? glm::vec4(1.0f, 0.85f, 0.2f, 1.0f)
-                                                : glm::vec4(0.2f, 0.9f, 0.4f, 0.6f));
-                    }
-                } else if (input.selected >= 0) {
-                    const auto& [c, r] = spheres[input.selected];
-                    debug.PushBoxCenter(c, glm::vec3(r), glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
-                }
-                debug.Draw(viewProj);
-            }
-
-            // --- HUD (sprites/text) drawn on the tone-mapped default framebuffer ---
-            const double now = glfwGetTime();
-            static double smoothedFps = 60.0;
-            const double dt = now - lastFrameTime;
-            lastFrameTime = now;
-            if (dt > 0.0) smoothedFps += (1.0 / dt - smoothedFps) * 0.1;
-
-            sprite.Begin(white, fbw, fbh);
-            sprite.Draw(white, 0.0f, 0.0f, 470.0f, 118.0f, 0.0f, 0.0f, 1.0f, 1.0f,
-                        glm::vec4(0.0f, 0.0f, 0.0f, 0.35f));   // translucent panel
-            char line[220];
-            std::snprintf(line, sizeof(line),
-                          "GLFW_Template - Phase 4: cull/instance/pick   %.0f fps", smoothedFps);
-            gfx::TextRenderer::Draw(sprite, font, line, 12.0f, 8.0f, 22.0f, glm::vec4(1.0f));
-            std::snprintf(line, sizeof(line),
-                          "CPU %.2f ms   GPU %.2f ms   visible %d/%d   sel %d",
-                          profiler.CpuMs(), profiler.GpuMs(), visibleCount,
-                          static_cast<int>(objects.size()), input.selected);
-            gfx::TextRenderer::Draw(sprite, font, line, 12.0f, 34.0f, 20.0f,
-                                    glm::vec4(0.75f, 0.85f, 1.0f, 1.0f));
-            std::snprintf(line, sizeof(line),
-                          "Shadow %s  IBL %s  Bloom %s  Debug %s  Inst %s",
-                          input.useShadow ? "ON" : "OFF",
-                          input.useIbl ? "ON" : "OFF",
-                          input.useBloom ? "ON" : "OFF",
-                          input.useDebug ? "ON" : "OFF",
-                          input.useInstances ? "ON" : "OFF");
-            gfx::TextRenderer::Draw(sprite, font, line, 12.0f, 60.0f, 20.0f,
-                                    glm::vec4(0.75f, 0.85f, 1.0f, 1.0f));
-            gfx::TextRenderer::Draw(sprite, font,
-                                    "drag=orbit scroll=zoom A/D W/S=sun  1=shd 2=ibl 3=blm 4=dbg 5=inst  rclick=pick",
-                                    12.0f, 86.0f, 17.0f, glm::vec4(0.8f, 0.8f, 0.8f, 1.0f));
-            sprite.End();
-
-            profiler.EndFrame();
+            profiler.BeginFrame();
+            renderer.Render(frame);
 
             glfwSwapBuffers(window);
             glfwPollEvents();

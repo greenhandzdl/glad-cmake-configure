@@ -1,23 +1,42 @@
-# GLFW + GLAD CMake 模板
+# GLFW + GLAD CMake 图形引擎
 
-一个跨平台（Windows / macOS / Linux）的现代 OpenGL 起步模板：用 **GLFW** 创建窗口、**GLAD** 加载 OpenGL 函数，附带 header-only 的 **GLM**（数学）与 **STB**（图像/字体），全部依赖通过 CMake 自动探测，并内置一套 `build/run/clean` 脚本与 GitHub Actions 手动发布流水线。
+跨平台（Windows / macOS / Linux）的 **现代 OpenGL 图形引擎 / PBR 渲染器**，源自一个用 **GLFW** 建窗、**GLAD** 加载函数的 CMake 起步模板，现已成长为一套分层的 `gfx` 引擎子系统，附一个交互式演示程序（`src/main.cpp`）。依赖通过 CMake 自动探测，内置 `build/run/clean` 脚本与 GitHub Actions 手动发布流水线。
 
 - 语言标准：C++23
-- OpenGL：3.3 Core Profile
+- OpenGL：**4.1 Core Profile**（GLSL `#version 410 core`；macOS 对应 "4.1 Metal"）
 - 构建系统：CMake ≥ 3.16（推荐配合 Ninja）
 - 产物：`output/GLFW_Template`（Windows 为 `output/GLFW_Template.exe`）
+
+**已实现的图形能力**：PBR 金属/粗糙工作流、级联阴影（CSM + PCF）、基于图像的照明（IBL：辐照度/预滤波/BRDF LUT）、HDR + MSAA + Bloom + ACES 色调映射、精灵批次 + 位图字体 HUD、实例化绘制、视锥剔除、调试线框、CPU 拾取、帧性能分析、两阶段异步资源管线，以及场景层级（`Scene`/`SceneNode`/`Transform`）+ 渲染管线（`Renderer`/`RenderPass`）。
+
+设计与线程安全说明见 **[doc/](doc/README.md)**。
 
 ## 目录结构
 
 ```
 .
 ├── src/
-│   ├── main.cpp              # 入口：创建窗口 + 初始化 GLAD + 渲染循环
-│   ├── headers/              # common.h / Shader.h
-│   └── utils/                # Shader.cpp / stb.cpp / utils.cpp
+│   ├── main.cpp              # 应用入口：建窗 + 组装场景 + 驱动渲染管线
+│   ├── gfx/                  # 引擎子系统（分层，仅向下依赖）
+│   │   ├── core/             #   RenderContext(线程亲和)/GLBuffer/VertexArray/UBO/Sampler/Framebuffer
+│   │   ├── geometry/         #   Mesh / InstancedMesh / GeometryFactory
+│   │   ├── texture/          #   Texture2D / TextureCubeMap / RenderTexture
+│   │   ├── material/         #   PbrMaterial
+│   │   ├── shader/           #   ShaderProgram + 内嵌 GLSL（ShaderLib/… Shaders.h，单一真源）
+│   │   ├── camera/ light/ shadow/   # Camera / LightBuffer(UBO) / CascadedShadowMap / EnvironmentMap
+│   │   ├── scene/            #   Scene / SceneNode / Transform（纯 CPU 层级）
+│   │   ├── render/           #   Renderer / RenderPass / RenderFrame / 后期链 / SpriteBatch / TextRenderer
+│   │   ├── text/ assets/ debug/     # 字体·异步资源·DebugDraw/Profiler/Picking/Frustum
+│   └── utils/
+│       └── stb.cpp           # 唯一第三方实现 TU（STB 图像/字体解码）
+├── assets/
+│   ├── shaders/              # 内嵌 GLSL 的只读参考镜像（不被编译/加载）
+│   └── models/              # FBX/OBJ/glTF 投放目录（运行期经 AssetManager 异步加载）
+├── doc/                      # 设计思路 + 线程安全说明
 ├── third_party/
-│   ├── glad/                 # git 子模块：Dav1dde/glad（glad2 生成器）
-│   └── stb/                  # git 子模块：nothings/stb（header-only）
+│   ├── glad/                 # 子模块：glad2 生成器（OpenGL 4.1 Core 绑定）
+│   ├── stb/                  # 子模块：header-only 图像/字体
+│   └── assimp/               # 子模块：模型导入（源码内置构建）
 ├── scripts/                  # build.sh / run.sh / clean.sh（由 CMake 生成）
 ├── .github/workflows/        # 手动触发的三平台构建 + 发布流水线
 └── CMakeLists.txt
@@ -28,9 +47,10 @@
 | 依赖 | 来源 | 解析方式 |
 |------|------|----------|
 | **GLFW** | 系统包管理器 | `find_package(glfw3)`，使用导入目标 `glfw`（Homebrew / apt / vcpkg 均导出该目标） |
-| **GLAD** | 系统优先，子模块回退 | 先 `find_package(glad CONFIG)`；未找到时用 `third_party/glad` 生成 OpenGL 3.3 Core 绑定并编译为静态库 `glad_gl_core_33` |
+| **GLAD** | 系统优先，子模块回退 | 先 `find_package(glad CONFIG)`；未找到时用 `third_party/glad` 生成 OpenGL **4.1 Core** 绑定并编译为静态库 `glad_gl_core_41` |
 | **GLM** | 系统包管理器 | `find_path(GLM_INCLUDE_DIR glm/glm.hpp)`，header-only |
-| **STB** | git 子模块 | header-only，提供 `stb` INTERFACE 目标（仅加 include 路径） |
+| **STB** | git 子模块 | header-only，提供 `stb` INTERFACE 目标；由 `src/utils/stb.cpp` 实例化图像/字体解码 |
+| **Assimp** | git 子模块 | `add_subdirectory` 源码内置构建（导入器 only），链接 `assimp::assimp`；三平台无需系统包 |
 
 > GLAD 采用「系统优先、仓库回退」：系统装有 GLAD 时直接链接 `glad::glad`；否则现场调用子模块内的 glad2 生成器（需 Python 3 + jinja2，缺失时回退到隔离的 `uv` venv）生成绑定。无论走哪条路径，最终可执行文件只依赖 GLFW（共享库）与 GLAD（静态库，运行期动态加载 GL），因此无需再手动链接 OpenGL / X11 / Cocoa 等系统库。
 
@@ -81,7 +101,7 @@ cmake --build build
 
 ```
 -- GLFW_Template 1.0.0 configuration:
---   GLAD        : submodule (OpenGL 3.3 Core)   # 或 system
+--   GLAD        : submodule (OpenGL 4.1 Core)   # 或 system
 ```
 
 ### 使用生成脚本
@@ -99,7 +119,11 @@ cmake --build build --target clean-project
 
 ## 运行效果
 
-`main.cpp` 会打开一个 800×600 窗口，清屏为深灰背景，并在终端打印应用名与运行时 OpenGL 版本。它是最小可运行的起点骨架——`Shader`（基于 `std::expected` 的 RAII 着色器封装）、GLM、STB 等工具已就位，可在其基础上扩展渲染逻辑。
+`main.cpp` 打开一个 800×600 窗口，渲染一个交互式 PBR 演示场景：带纹理的地面与球阵、金属立方体、一个旋转的子层级（carousel，演示场景层级变换传播），配合级联阴影、IBL 环境光照、HDR + Bloom + ACES 后期、天空盒，以及精灵批次文本 HUD。
+
+绘制不再是一大堆内联 `gl*` 调用，而是改为逐帧组装一个 `RenderFrame` 后一句 `renderer.Render(frame)`（依序执行 Shadow → Geometry → PostProcess → DebugHud 四个 pass）。
+
+**操作**：拖拽鼠标轨道旋转 / 滚轮缩放；A·D（或←→）太阳方位、W·S（或↑↓）太阳高度；右键拾取物体（包围球射线测试，高亮）；`1` 级联阴影、`2` IBL、`3` Bloom、`4` 调试线框、`5` 实例化场（开关）；`Esc` 退出。
 
 ## CI 与发布（GitHub Actions）
 
@@ -136,7 +160,7 @@ GLFW_Template-windows-x64.zip
 ## 平台说明
 
 - **macOS**：OpenGL 由系统框架提供，GLFW 使用 Cocoa 后端。
-- **Linux**：X11，OpenGL 3.3+ Core Profile。
+- **Linux**：X11，OpenGL 4.1 Core Profile。
 - **Windows**：MSVC + vcpkg（GLFW 为动态库，发布包已附带对应 DLL）。
 
 ## 许可证

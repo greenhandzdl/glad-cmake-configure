@@ -184,7 +184,10 @@ set(GFX_SOURCES
     src/gfx/texture/RenderTexture.cpp
     src/gfx/camera/Camera.cpp
     src/gfx/camera/Frustum.cpp
+    src/gfx/scene/SceneNode.cpp
+    src/gfx/scene/Scene.cpp
     src/gfx/render/Renderer.cpp
+    src/gfx/render/RenderPasses.cpp
     src/gfx/render/Framebuffer.cpp
     src/gfx/render/PostProcessChain.cpp
     src/gfx/render/SkyboxRenderer.cpp
@@ -200,8 +203,6 @@ set(GFX_SOURCES
 
 add_executable(${TARGET_NAME}
     src/main.cpp
-    src/utils/utils.cpp
-    src/utils/Shader.cpp
     src/utils/stb.cpp
     ${GFX_SOURCES})
 

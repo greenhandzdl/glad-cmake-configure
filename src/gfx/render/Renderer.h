@@ -3,27 +3,42 @@
 
 /**
  * @file Renderer.h
- * @brief Per-frame state / clear helpers. All calls are render-thread only.
+ * @brief Frame orchestrator: owns global GL state and an ordered list of render
+ *        passes (plan "Renderer" / "RenderPass"). All calls are render-thread.
  *
- * Phase 1 keeps Renderer intentionally minimal: it owns global GL state and
- * the frame boundary (viewport + clear). Concrete draw calls happen through
- * Mesh::Draw and ShaderProgram::Set from the application layer.
+ * The application builds a RenderFrame each frame and calls Render(), which runs
+ * the passes in sequence. This replaces the old BeginFrame/EndFrame + inline draw
+ * code: frame timing (glClear / targets) now lives inside the passes, so the
+ * Renderer is purely about global state and stage ordering.
  */
 
-#include <glm/glm.hpp>
+#include <memory>
+#include <vector>
+
+#include "gfx/render/RenderPass.h"
 
 namespace gfx {
 
+struct RenderFrame;
+
 class Renderer {
 public:
-    void Init();                               // one-time global state (depth/cull)
-    void BeginFrame(int width, int height);
-    void EndFrame();                           // currently a no-op (swap happens in main loop)
+    Renderer() = default;
 
-    void SetClearColor(const glm::vec4& color) noexcept { clearColor_ = color; }
+    // One-time global state (depth test / face culling). Render-thread only.
+    void Init();
+
+    // Append a custom pass (advanced use). Render-thread only.
+    void AddPass(std::unique_ptr<RenderPass> pass);
+
+    // Install the standard stage order: Shadow -> Geometry -> PostProcess -> DebugHud.
+    void BuildDefaultPipeline();
+
+    // Execute every pass in order against the shared frame. Render-thread only.
+    void Render(RenderFrame& frame);
 
 private:
-    glm::vec4 clearColor_{0.10f, 0.10f, 0.12f, 1.0f};
+    std::vector<std::unique_ptr<RenderPass>> passes_;
 };
 
 } // namespace gfx
