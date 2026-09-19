@@ -26,15 +26,16 @@ src/
                        (STB image / truetype); never leaks onto the module interface
   gfx/shader/*Shaders.h   GLSL lives here as embedded raw strings — the ONLY
                           source of truth for shader code
-assets/
-  shaders/          browsable copies of that GLSL (never compiled/loaded)
-  models/           content loaded through gfx::AssetManager
+  assets/          content kept beside the engine code, inside src/ (no separate
+                   top-level tree):
+    shaders/       browsable copies of that GLSL (never compiled/loaded)
+    models/        content loaded through gfx::AssetManager
 ```
 
 Key rules:
 
 1. **GLSL is embedded, not loaded.** The engine compiles shader source from the
-   `gfx::shaders::k*` string constants; `assets/shaders/` is documentation only.
+   `gfx::shaders::k*` string constants; `src/assets/shaders/` is documentation only.
    This keeps runs free of working-directory / path assumptions, which matters
    for the three-platform CI.
 2. **Models are the only thing loaded from disk at runtime**, and always through

@@ -24,11 +24,12 @@
 // constants + GLFW_PLATFORM_* macros this executable's #if checks rely on.
 #include "gfx/core/Platform.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <cmath>
 #include <cstdio>
 #include <iostream>
 #include <memory>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -211,9 +212,11 @@ int main(int /*argc*/, char** /*argv*/) {
     glfwSetMouseButtonCallback(window, MouseButtonCallback);
     glfwSetScrollCallback(window, ScrollCallback);
 
-    // All GPU-resource owners live in this scope so destructors run while the
-    // context is still current (before the window is destroyed).
-    {
+    // All GPU-resource owners live inside this lambda so their destructors run
+    // when it returns — while the GL context is still current, before the window
+    // is destroyed. A failure path just `return 1;`; the single exit below owns
+    // the glfwDestroyWindow / glfwTerminate teardown, so no context is lost first.
+    auto runDemo = [&]() -> int {
         gfx::Renderer renderer;
         renderer.Init();
         renderer.BuildDefaultPipeline();
@@ -221,18 +224,18 @@ int main(int /*argc*/, char** /*argv*/) {
         auto pbr = gfx::ShaderProgram::CreateFromSource(gfx::shaders::kPbrVertex, gfx::shaders::kPbrFragment);
         if (!pbr) {
             std::fprintf(stderr, "PBR shader error:\n%s\n", pbr.error().c_str());
-            glfwDestroyWindow(window); glfwTerminate(); return 1;
+            return 1;
         }
         auto depth = gfx::ShaderProgram::CreateFromSource(gfx::shaders::kDepthVertex, gfx::shaders::kDepthFragment);
         if (!depth) {
             std::fprintf(stderr, "Depth shader error:\n%s\n", depth.error().c_str());
-            glfwDestroyWindow(window); glfwTerminate(); return 1;
+            return 1;
         }
 
         gfx::SkyboxRenderer skybox;
         if (!skybox.Init()) {
             std::fprintf(stderr, "Skybox init failed\n");
-            glfwDestroyWindow(window); glfwTerminate(); return 1;
+            return 1;
         }
 
         // Procedural HDR sky + IBL precomputes, baked once from the initial sun.
@@ -240,7 +243,7 @@ int main(int /*argc*/, char** /*argv*/) {
         gfx::EnvironmentMap env;
         if (!env.Generate(initialTravel, 256, 32, 256)) {
             std::fprintf(stderr, "Environment generation failed\n");
-            glfwDestroyWindow(window); glfwTerminate(); return 1;
+            return 1;
         }
 
         gfx::Texture2D checker;
@@ -250,14 +253,14 @@ int main(int /*argc*/, char** /*argv*/) {
         gfx::PostProcessChain post;
         if (!post.Init()) {
             std::fprintf(stderr, "PostProcessChain init failed\n");
-            glfwDestroyWindow(window); glfwTerminate(); return 1;
+            return 1;
         }
         post.SetExposure(1.1f);
 
         gfx::SpriteBatch sprite;
         if (!sprite.Init()) {
             std::fprintf(stderr, "SpriteBatch init failed\n");
-            glfwDestroyWindow(window); glfwTerminate(); return 1;
+            return 1;
         }
 
         gfx::Font font;
@@ -519,10 +522,11 @@ int main(int /*argc*/, char** /*argv*/) {
             glfwSwapBuffers(window);
             glfwPollEvents();
         }
-        // Every GPU-resource owner destructs here, on the render thread.
-    }
+        return 0;   // every GPU-resource owner destructs here, on the render thread.
+    };
 
+    const int rc = runDemo();   // destructors run while the context is still current
     glfwDestroyWindow(window);
     glfwTerminate();
-    return 0;
+    return rc;
 }

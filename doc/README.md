@@ -14,7 +14,7 @@ the implementations.
 1. Start with [design.md](design.md) for the big picture and module boundaries.
 2. Read [thread-safety.md](thread-safety.md) before touching anything that owns
    a GL object or crosses a thread boundary.
-3. See [`../assets/README.md`](../assets/README.md) for how content and code are
+3. See [`../src/assets/README.md`](../src/assets/README.md) for how content and code are
    isolated on disk.
 
 ## Scope / roadmap

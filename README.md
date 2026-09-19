@@ -30,10 +30,10 @@
 │   │   ├── render/           #   Renderer / RenderPass / RenderFrame / 后期链 / SpriteBatch / TextRenderer
 │   │   ├── text/ assets/ debug/     # 字体·异步资源·DebugDraw/Profiler/Picking/Frustum
 │   │   └── third_party/      #   stb_image_impl.cpp（唯一第三方实现 TU，非模块接口）
-│   └── ...                   #   引擎各 .cpp 均为 `module gfx;` 实现单元
-├── assets/
-│   ├── shaders/              # 内嵌 GLSL 的只读参考镜像（不被编译/加载）
-│   └── models/              # FBX/OBJ/glTF 投放目录（运行期经 AssetManager 异步加载）
+│   ├── ...                   #   引擎各 .cpp 均为 `module gfx;` 实现单元
+│   └── assets/               # 内容资源（不被编译）：GLSL 参考镜像 + 模型投放目录，与 gfx 代码同级
+│       ├── shaders/          #   内嵌 GLSL 的只读参考镜像（不被编译/加载）
+│       └── models/           #   FBX/OBJ/glTF 投放目录（运行期经 AssetManager 异步加载）
 ├── doc/                      # 设计思路 + 线程安全说明
 ├── third_party/
 │   ├── glad/                 # 子模块：glad2 生成器（OpenGL 4.1 Core 绑定）

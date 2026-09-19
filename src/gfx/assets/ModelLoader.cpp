@@ -75,7 +75,13 @@ ModelLoader::Load(const std::string& path) {
             }
         }
 
-        const int materialIndex = resolveDiffuse(scene->mMaterials[src->mMaterialIndex]);
+        // Guard the material lookup: Assimp normally keeps mMaterialIndex in
+        // range, but resolveDiffuse() already treats a null material as "no
+        // texture", so bound it rather than trusting a malformed scene.
+        aiMaterial* mat = (src->mMaterialIndex < scene->mNumMaterials)
+                              ? scene->mMaterials[src->mMaterialIndex]
+                              : nullptr;
+        const int materialIndex = resolveDiffuse(mat);
 
         // Emit indices per face (already triangulated) as a single range.
         const std::uint32_t start = static_cast<std::uint32_t>(data.indices.size());
