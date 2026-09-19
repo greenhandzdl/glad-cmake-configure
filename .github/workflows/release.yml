@@ -1,0 +1,212 @@
+name: Build & Release
+
+# 手动触发：Actions 页面 -> Build & Release -> Run workflow
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "CMake 构建类型"
+        type: choice
+        required: true
+        default: "Release"
+        options:
+          - Release
+          - Debug
+      release_tag:
+        description: "Release 标签（留空则自动生成 ci-<日期>-<sha>）"
+        type: string
+        required: false
+        default: ""
+      prerelease:
+        description: "标记为预发布 (pre-release)"
+        type: boolean
+        required: false
+        default: false
+      draft:
+        description: "创建为草稿 (draft)"
+        type: boolean
+        required: false
+        default: false
+
+# 同一时间只跑一个发布流水线，避免产物/Release 冲突
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # 创建 Release 需要
+
+env:
+  TARGET_NAME: GLFW_Template
+
+jobs:
+  build:
+    name: Build (${{ matrix.display }})
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            display: Linux-x64
+            runs-on: ubuntu-latest
+            artifact: GLFW_Template-linux-x64
+          - os: macos
+            display: macOS-arm64
+            runs-on: macos-latest
+            artifact: GLFW_Template-macos-arm64
+          - os: windows
+            display: Windows-x64
+            runs-on: windows-latest
+            artifact: GLFW_Template-windows-x64
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      # ------------------------------------------------------------------
+      # 依赖安装：Linux
+      # ------------------------------------------------------------------
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libglfw3-dev libglm-dev \
+            libgl1-mesa-dev xorg-dev \
+            ninja-build python3-jinja2
+          sudo apt-get remove -y cmake || true
+          sudo apt-get install -y cmake
+
+      # ------------------------------------------------------------------
+      # 依赖安装：macOS
+      # ------------------------------------------------------------------
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos'
+        run: |
+          brew install glfw glm ninja uv
+
+      # ------------------------------------------------------------------
+      # 依赖安装：Windows (vcpkg + MSVC + Python/jinja2)
+      # ------------------------------------------------------------------
+      - name: Setup Python (Windows)
+        if: matrix.os == 'windows'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ninja (Windows)
+        if: matrix.os == 'windows'
+        run: choco install ninja -y
+
+      - name: Install jinja2 (Windows)
+        if: matrix.os == 'windows'
+        run: python -m pip install --upgrade pip jinja2
+
+      - name: Setup MSVC environment (Windows)
+        if: matrix.os == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install vcpkg dependencies (Windows)
+        if: matrix.os == 'windows'
+        run: |
+          vcpkg install glfw3:x64-windows glm:x64-windows
+
+      # ------------------------------------------------------------------
+      # 配置 & 构建（统一使用 Ninja，单配置，产物路径固定为 output/）
+      # ------------------------------------------------------------------
+      - name: Configure
+        shell: bash
+        env:
+          BUILD_TYPE: ${{ inputs.build_type }}
+          RUN_OS: ${{ matrix.os }}
+        run: |
+          EXTRA_ARGS=""
+          if [ "$RUN_OS" = "windows" ]; then
+            EXTRA_ARGS="-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows"
+          fi
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            $EXTRA_ARGS
+
+      - name: Build
+        shell: bash
+        env:
+          BUILD_TYPE: ${{ inputs.build_type }}
+        run: cmake --build build --config "$BUILD_TYPE"
+
+      # ------------------------------------------------------------------
+      # 打包产物
+      # ------------------------------------------------------------------
+      - name: Stage runtime DLLs & package (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        env:
+          ARTIFACT: ${{ matrix.artifact }}
+        run: |
+          # vcpkg 默认 shared triplet，glfw 运行期需要 dll，一并放入 output/
+          Copy-Item "$env:VCPKG_ROOT/installed/x64-windows/bin/*.dll" output/ -Force
+          Compress-Archive -Path output/* -DestinationPath "$env:ARTIFACT.zip"
+
+      - name: Package (Linux / macOS)
+        if: matrix.os != 'windows'
+        shell: bash
+        env:
+          ARTIFACT: ${{ matrix.artifact }}
+        run: |
+          cd output
+          zip -r "../$ARTIFACT.zip" .
+          cd ..
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip
+          if-no-files-found: error
+
+  # ======================================================================
+  # 汇总三平台产物，创建 GitHub Release
+  # ======================================================================
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Compute release tag
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.release_tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          else
+            SHORT_SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
+            TAG="ci-$(date +%Y%m%d)-${SHORT_SHA}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Generated release tag: $TAG"
+
+      - name: List artifacts
+        run: ls -R dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: "GLFW_Template ${{ steps.meta.outputs.tag }}"
+          prerelease: ${{ inputs.prerelease }}
+          draft: ${{ inputs.draft }}
+          generate_release_notes: true
+          files: dist/*.zip
