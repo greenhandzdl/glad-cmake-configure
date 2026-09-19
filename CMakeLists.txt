@@ -178,10 +178,12 @@ set(GFX_SOURCES
     src/gfx/shader/ShaderProgram.cpp
     src/gfx/geometry/Mesh.cpp
     src/gfx/geometry/GeometryFactory.cpp
+    src/gfx/geometry/InstancedMesh.cpp
     src/gfx/texture/Texture2D.cpp
     src/gfx/texture/TextureCubeMap.cpp
     src/gfx/texture/RenderTexture.cpp
     src/gfx/camera/Camera.cpp
+    src/gfx/camera/Frustum.cpp
     src/gfx/render/Renderer.cpp
     src/gfx/render/Framebuffer.cpp
     src/gfx/render/PostProcessChain.cpp
@@ -190,6 +192,8 @@ set(GFX_SOURCES
     src/gfx/text/Font.cpp
     src/gfx/light/EnvironmentMap.cpp
     src/gfx/shadow/CascadedShadowMap.cpp
+    src/gfx/debug/DebugDraw.cpp
+    src/gfx/debug/Profiler.cpp
     src/gfx/assets/ThreadPool.cpp
     src/gfx/assets/AssetManager.cpp
     src/gfx/assets/ModelLoader.cpp)
