@@ -1,11 +1,8 @@
-#include "gfx/render/SpriteBatch.h"
+module;
 
-#include <span>
+#include "gfx/gmf.hpp"
 
-#include <glm/gtc/matrix_transform.hpp>
-
-#include "gfx/core/RenderContext.h"
-#include "gfx/shader/SpriteShaders.h"
+module gfx;
 
 namespace gfx {
 

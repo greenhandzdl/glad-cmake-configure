@@ -1,9 +1,8 @@
-#include "gfx/texture/RenderTexture.h"
+module;
 
-#include <cmath>
-#include <utility>
+#include "gfx/gmf.hpp"
 
-#include "gfx/core/RenderContext.h"
+module gfx;
 
 namespace gfx {
 

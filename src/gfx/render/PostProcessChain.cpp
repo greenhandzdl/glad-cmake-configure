@@ -1,11 +1,10 @@
-#include "gfx/render/PostProcessChain.h"
+module;
 
-#include <algorithm>
+#include "gfx/gmf.hpp"
+
 #include <cstdio>
-#include <utility>
 
-#include "gfx/core/RenderContext.h"
-#include "gfx/shader/PostProcessShaders.h"
+module gfx;
 
 namespace gfx {
 

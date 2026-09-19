@@ -19,7 +19,10 @@
  * renderer.Render(frame). All GL still happens on the render thread.
  */
 
-#include "common.h"
+// Platform.h is deliberately a plain text include (not part of module gfx):
+// it pulls <glad/gl.h> before <GLFW/glfw3.h> and defines the app/window
+// constants + GLFW_PLATFORM_* macros this executable's #if checks rely on.
+#include "gfx/core/Platform.h"
 
 #include <cmath>
 #include <cstdio>
@@ -34,33 +37,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 
-#include "gfx/core/RenderContext.h"
-#include "gfx/camera/Camera.h"
-#include "gfx/camera/Frustum.h"
-#include "gfx/camera/Picking.h"
-#include "gfx/debug/DebugDraw.h"
-#include "gfx/debug/Profiler.h"
-#include "gfx/geometry/GeometryFactory.h"
-#include "gfx/geometry/InstancedMesh.h"
-#include "gfx/geometry/Mesh.h"
-#include "gfx/light/EnvironmentMap.h"
-#include "gfx/light/Light.h"
-#include "gfx/light/LightBuffer.h"
-#include "gfx/material/Material.h"
-#include "gfx/render/PostProcessChain.h"
-#include "gfx/render/Renderer.h"
-#include "gfx/render/RenderFrame.h"
-#include "gfx/render/SkyboxRenderer.h"
-#include "gfx/render/SpriteBatch.h"
-#include "gfx/scene/Scene.h"
-#include "gfx/scene/SceneNode.h"
-#include "gfx/scene/Transform.h"
-#include "gfx/shader/ShaderLib.h"
-#include "gfx/shader/ShaderProgram.h"
-#include "gfx/shadow/CascadedShadowMap.h"
-#include "gfx/text/Font.h"
-#include "gfx/text/TextRenderer.h"
-#include "gfx/texture/Texture2D.h"
+// The whole engine as a single C++20 named module: no per-header includes.
+import gfx;
 
 namespace {
 
@@ -206,7 +184,7 @@ int main(int /*argc*/, char** /*argv*/) {
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
-    GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_TITLE, nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(gfx::kWindowWidth, gfx::kWindowHeight, gfx::kWindowTitle, nullptr, nullptr);
     if (!window) {
         std::cerr << "Failed to create GLFW window (OpenGL 4.1 core?)\n";
         glfwTerminate();
@@ -224,7 +202,7 @@ int main(int /*argc*/, char** /*argv*/) {
 
     gfx::RenderContext::MarkAsRenderThread();
 
-    std::printf("%s %s\n", APP_NAME, APP_VERSION);
+    std::printf("%s %s\n", gfx::kAppName, gfx::kAppVersion);
     std::printf("OpenGL %s\n", reinterpret_cast<const char*>(glGetString(GL_VERSION)));
 
     Input input;

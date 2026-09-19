@@ -1,6 +1,8 @@
-#include "gfx/camera/Frustum.h"
+module;
 
-#include <cmath>
+#include "gfx/gmf.hpp"
+
+module gfx;
 
 namespace gfx {
 

@@ -1,7 +1,11 @@
-#include "gfx/core/RenderContext.h"
+module;
+
+#include "gfx/gmf.hpp"
 
 #include <cstdio>
 #include <cstdlib>
+
+module gfx;
 
 namespace gfx {
 

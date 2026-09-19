@@ -1,12 +1,13 @@
-#include "gfx/text/Font.h"
+module;
+
+#include "gfx/gmf.hpp"
 
 #include <cstring>
 #include <fstream>
-#include <vector>
 
 #include <stb_truetype.h>
 
-#include "gfx/core/RenderContext.h"
+module gfx;
 
 namespace gfx {
 

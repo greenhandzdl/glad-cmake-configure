@@ -1,11 +1,10 @@
-#include "gfx/render/SkyboxRenderer.h"
+module;
+
+#include "gfx/gmf.hpp"
 
 #include <cstdio>
-#include <utility>
 
-#include "gfx/core/RenderContext.h"
-#include "gfx/geometry/GeometryFactory.h"
-#include "gfx/shader/ShaderLib.h"
+module gfx;
 
 namespace gfx {
 

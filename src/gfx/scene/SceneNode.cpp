@@ -1,7 +1,8 @@
-#include "gfx/scene/SceneNode.h"
+module;
 
-#include <algorithm>
-#include <cmath>
+#include "gfx/gmf.hpp"
+
+module gfx;
 
 namespace gfx {
 

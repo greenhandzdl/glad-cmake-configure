@@ -149,3 +149,39 @@ Because everything stays linear until the one composite, bloom and the sun disc
 behave physically; toggling bloom off just sets bloom strength to 0, the tone
 map still runs. Sprite/text HUD is drawn **after** the composite, directly to the
 default framebuffer, so it is not double tone-mapped.
+
+## 7. Delivery as a C++20 named module
+
+The whole engine is one C++20 **named module `gfx`** built as a static library
+(`add_library(gfx STATIC)`). The application's only coupling to it is
+`import gfx;` in `src/main.cpp` — no per-header `#include`s of `gfx/**`. This
+replaced the earlier layout where `main.cpp` textually included ~27 engine
+headers and everything was compiled straight into one executable.
+
+- **Primary interface** — `src/gfx/gfx.cppm`: `export { #include "..." }` wraps
+  every public engine header once, so the module re-exports the full API.
+  A single interface unit (rather than one partition per subsystem) matches the
+  header-centric codebase and avoids partition-ordering hazards across vendors.
+- **Implementation units** — the 31 `src/gfx/**/*.cpp` are each a
+  `module gfx;` unit. They see all engine declarations via the implicit import of
+  the primary interface, so they carry **no** `#include "gfx/…"`.
+- **Global module fragment** — GLAD, GLM and the common standard-library headers
+  live in `src/gfx/gmf.hpp`, textually included at the top of every unit's
+  `module;` fragment. That attaches `GLuint` / `glm::vec3` etc. to the *global
+  module* (not to `gfx`), so exported signatures reference global-module types
+  and `main.cpp` — which textually includes the same headers — resolves the
+  identical entities rather than a conflicting module-scoped redeclaration.
+- **Third-party policy** — GLAD + GLM leak into the public API so they are
+  global-fragment includes (never `export`ed as entities). **STB and Assimp are
+  implementation-only**: they stay inside individual units' fragments (e.g.
+  `ModelLoader.cpp`, the `third_party/stb_image_impl.cpp` TU) and never surface
+  on the module interface. The engine headers no longer `#include` them at all.
+- **Windowing stays out of the module** — `src/gfx/core/Platform.h` (GLAD-before-
+  GLFW ordering, `GLFW_PLATFORM_*` macros, the `gfx::kApp*`/`kWindow*` constants)
+  is deliberately a plain text include for `main.cpp` only, because `<GLFW/glfw3.h>`
+  and `#if`-visible macros cannot cross a module boundary cleanly.
+
+Because newer standard libraries dropped transitive `<ostream>`/`<cstdint>`-style
+includes, the vendored Assimp build is force-included with the few headers its
+legacy contrib sources omit (see the `assimp` block in `CMakeLists.txt`) — our own
+sources keep honest, explicit includes.

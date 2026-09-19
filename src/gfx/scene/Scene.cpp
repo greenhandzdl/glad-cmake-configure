@@ -1,4 +1,8 @@
-#include "gfx/scene/Scene.h"
+module;
+
+#include "gfx/gmf.hpp"
+
+module gfx;
 
 namespace gfx {
 

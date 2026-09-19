@@ -1,4 +1,8 @@
-#include "gfx/assets/ThreadPool.h"
+module;
+
+#include "gfx/gmf.hpp"
+
+module gfx;
 
 namespace gfx {
 

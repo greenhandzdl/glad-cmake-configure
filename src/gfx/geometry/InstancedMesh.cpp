@@ -1,10 +1,8 @@
-#include "gfx/geometry/InstancedMesh.h"
+module;
 
-#include <cstddef>
-#include <span>
+#include "gfx/gmf.hpp"
 
-#include "gfx/core/RenderContext.h"
-#include "gfx/geometry/Vertex.h"
+module gfx;
 
 namespace gfx {
 

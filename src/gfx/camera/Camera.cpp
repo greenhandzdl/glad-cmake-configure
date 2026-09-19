@@ -1,8 +1,10 @@
-#include "gfx/camera/Camera.h"
+module;
 
-#include <glm/gtc/matrix_transform.hpp>
+#include "gfx/gmf.hpp"
+
 #include <glm/gtc/matrix_inverse.hpp>
-#include <glm/gtc/quaternion.hpp>
+
+module gfx;
 
 namespace gfx {
 

@@ -1,8 +1,8 @@
-#include "gfx/core/GLBuffer.h"
+module;
 
-#include <utility>
+#include "gfx/gmf.hpp"
 
-#include "gfx/core/RenderContext.h"
+module gfx;
 
 namespace gfx {
 

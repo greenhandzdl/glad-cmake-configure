@@ -1,30 +1,12 @@
-#include "gfx/render/RenderPasses.h"
+module;
+
+#include "gfx/gmf.hpp"
 
 #include <cstdio>
 
-#include <glm/glm.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 
-#include "gfx/camera/Camera.h"
-#include "gfx/camera/Frustum.h"
-#include "gfx/core/RenderContext.h"
-#include "gfx/debug/DebugDraw.h"
-#include "gfx/debug/Profiler.h"
-#include "gfx/geometry/InstancedMesh.h"
-#include "gfx/light/EnvironmentMap.h"
-#include "gfx/light/LightBuffer.h"
-#include "gfx/material/Material.h"
-#include "gfx/render/PostProcessChain.h"
-#include "gfx/render/RenderFrame.h"
-#include "gfx/render/SkyboxRenderer.h"
-#include "gfx/render/SpriteBatch.h"
-#include "gfx/scene/Scene.h"
-#include "gfx/scene/SceneNode.h"
-#include "gfx/shadow/CascadedShadowMap.h"
-#include "gfx/shader/ShaderProgram.h"
-#include "gfx/text/Font.h"
-#include "gfx/text/TextRenderer.h"
-#include "gfx/texture/Texture2D.h"
+module gfx;
 
 namespace gfx {
 

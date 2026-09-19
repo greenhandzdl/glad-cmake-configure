@@ -1,11 +1,10 @@
-#include "gfx/light/EnvironmentMap.h"
+module;
 
-#include <cmath>
+#include "gfx/gmf.hpp"
+
 #include <cstdio>
-#include <utility>
 
-#include "gfx/core/RenderContext.h"
-#include "gfx/shader/IblShaders.h"
+module gfx;
 
 namespace gfx {
 

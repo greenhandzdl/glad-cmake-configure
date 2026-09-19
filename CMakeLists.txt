@@ -1,8 +1,12 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.28)
 project(GLFW_Template VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# C++20 named modules: with CMake >= 3.28 + a recent toolchain the import-graph
+# scanner is wired up automatically for FILE_SET CXX_MODULES sources.
 
 # All runtime artifacts land in <src>/output (single-config friendly, used by CI).
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/output)
@@ -161,12 +165,31 @@ if(APPLE)
 endif()
 message(STATUS "Assimp: submodule (static, bundled zlib)")
 
+# Newer standard libraries (libc++ >= 19, recent MSVC STL) no longer transitively
+# pull <ostream>/<cstdint>/... into every header, which breaks a few legacy Assimp
+# contrib sources (e.g. poly2tri shapes.h uses std::ostream without including it)
+# once the whole tree is compiled by a module-capable toolchain. Force-include the
+# handful of headers they omit — applied only to the vendored Assimp target so our
+# own sources keep honest, explicit includes. (A submodule file edit is not an
+# option: CI checks it out clean.)
+if(TARGET assimp)
+    set(_assimp_force_includes ostream cstdio cstdlib cstring cstdint cstddef string vector memory utility array algorithm numeric)
+    foreach(_h ${_assimp_force_includes})
+        target_compile_options(assimp PRIVATE
+            $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/FI${_h}>
+            $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-include${_h}>)
+    endforeach()
+endif()
+
 # ============================================================================
-# Executable
+# gfx  — the engine, delivered as a C++20 named module (static library)
 # ============================================================================
-# The application only calls GLFW (shared) and GLAD (static, loads GL at
-# runtime), so no direct OpenGL / X11 / Cocoa linking is required here — those
-# dependencies are carried transitively by the GLFW and GLAD targets.
+# Every engine translation unit is a module-implementation unit of `gfx`; the
+# single primary interface unit is src/gfx/gfx.cppm (declared via the CXX_MODULES
+# FILE_SET below). stb / assimp stay private to the library: they are only ever
+# textually included inside individual implementation units, never on the
+# exported interface. GLAD + GLM leak into exported signatures so their include
+# dirs propagate PUBLIC (main.cpp reaches the same global-module types).
 set(TARGET_NAME "GLFW_Template")
 
 set(GFX_SOURCES
@@ -199,23 +222,44 @@ set(GFX_SOURCES
     src/gfx/debug/Profiler.cpp
     src/gfx/assets/ThreadPool.cpp
     src/gfx/assets/AssetManager.cpp
-    src/gfx/assets/ModelLoader.cpp)
+    src/gfx/assets/ModelLoader.cpp
+    src/gfx/assets/ImageLoader.cpp
+    src/gfx/third_party/stb_image_impl.cpp)   # plain (non-module) 3rd-party impl TU
 
-add_executable(${TARGET_NAME}
-    src/main.cpp
-    src/utils/stb.cpp
-    ${GFX_SOURCES})
+add_library(gfx STATIC ${GFX_SOURCES})
 
-target_include_directories(${TARGET_NAME} PRIVATE
-    ${CMAKE_SOURCE_DIR}/src/headers
+target_sources(gfx PUBLIC FILE_SET CXX_MODULES FILES src/gfx/gfx.cppm)
+
+target_include_directories(gfx PUBLIC
     ${CMAKE_SOURCE_DIR}/src
     ${GLM_INCLUDE_DIR})
 
-target_link_libraries(${TARGET_NAME} PRIVATE
+target_link_libraries(gfx PUBLIC
     glfw
-    ${GLAD_TARGET}
+    ${GLAD_TARGET})
+
+target_link_libraries(gfx PRIVATE
     stb
     assimp::assimp)
+
+# Per-compiler module tweaks. CMake >= 3.28 drives named-module compilation and
+# the import-graph scan for all three vendors, so this only patches up details:
+#   * MSVC: /utf-8 so the embedded GLSL raw strings + any non-ASCII comments are
+#     read as UTF-8 regardless of the system code page.
+if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+    target_compile_options(gfx PRIVATE /utf-8)
+endif()
+
+# ============================================================================
+# Executable
+# ============================================================================
+# The application only calls GLFW (shared) and GLAD (static, loads GL at
+# runtime), so no direct OpenGL / X11 / Cocoa linking is required here — those
+# dependencies are carried transitively by the GLFW and GLAD targets, which the
+# gfx library now links PUBLIC. main.cpp is the sole consumer: `import gfx;`.
+add_executable(${TARGET_NAME} src/main.cpp)
+
+target_link_libraries(${TARGET_NAME} PRIVATE gfx)
 
 set_target_properties(${TARGET_NAME} PROPERTIES
     OUTPUT_NAME ${TARGET_NAME}

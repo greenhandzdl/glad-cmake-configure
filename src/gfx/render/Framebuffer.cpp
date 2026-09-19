@@ -1,9 +1,10 @@
-#include "gfx/render/Framebuffer.h"
+module;
+
+#include "gfx/gmf.hpp"
 
 #include <cstdio>
-#include <utility>
 
-#include "gfx/core/RenderContext.h"
+module gfx;
 
 namespace gfx {
 

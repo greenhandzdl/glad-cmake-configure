@@ -1,12 +1,8 @@
-#include "gfx/shadow/CascadedShadowMap.h"
+module;
 
-#include <algorithm>
-#include <cmath>
+#include "gfx/gmf.hpp"
 
-#include <glm/gtc/matrix_transform.hpp>
-
-#include "gfx/camera/Camera.h"
-#include "gfx/core/RenderContext.h"
+module gfx;
 
 namespace gfx {
 

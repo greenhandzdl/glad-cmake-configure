@@ -1,6 +1,16 @@
-#include "gfx/assets/ModelLoader.h"
+module;
 
-#include <glm/glm.hpp>
+#include "gfx/gmf.hpp"
+
+// Assimp is an implementation detail of the assets module: <glad/gl.h> comes
+// first so any transitive <GL/gl.h> pulled by Assimp is shadowed by our loader
+// (project convention). These stay out of ModelLoader.h to keep them off the
+// exported module interface.
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+
+module gfx;
 
 namespace gfx {
 

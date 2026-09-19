@@ -1,13 +1,12 @@
-#include "gfx/shader/ShaderProgram.h"
+module;
 
-#include <array>
+#include "gfx/gmf.hpp"
+
 #include <cstdio>
-#include <vector>
-#include <utility>
 
 #include <glm/gtc/type_ptr.hpp>
 
-#include "gfx/core/RenderContext.h"
+module gfx;
 
 namespace gfx {
 

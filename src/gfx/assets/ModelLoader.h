@@ -9,19 +9,14 @@
  * types plus a list of texture file paths, with no GL calls. AssetManager
  * uploads the result on the render thread (Stage B).
  *
- * <glad/gl.h> is included before the Assimp headers so any transitive <GL/gl.h>
- * is shadowed by our loader (project convention).
+ * Assimp (and GLAD) are implementation details kept entirely in ModelLoader.cpp
+ * so this public header - and therefore the `gfx` module interface that exports
+ * it - never leaks assimp or GL types. The API speaks only gfx value types.
  */
 
 #include <expected>
 #include <string>
 #include <vector>
-
-#include <glad/gl.h>
-
-#include <assimp/Importer.hpp>
-#include <assimp/scene.h>
-#include <assimp/postprocess.h>
 
 #include "gfx/geometry/Mesh.h"
 

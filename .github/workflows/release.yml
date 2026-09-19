@@ -69,6 +69,8 @@ jobs:
 
       # ------------------------------------------------------------------
       # 依赖安装：Linux
+      #   gfx 是 C++20 named module，需要成熟的模块实现 + clang-scan-deps，
+      #   Ubuntu 自带的 gcc-13/clang-18 不足以编译，故从 apt.llvm.org 装 clang-20。
       # ------------------------------------------------------------------
       - name: Install dependencies (Linux)
         if: matrix.os == 'linux'
@@ -77,17 +79,31 @@ jobs:
           sudo apt-get install -y \
             libglfw3-dev libglm-dev \
             libgl1-mesa-dev xorg-dev \
-            ninja-build python3-jinja2
+            ninja-build python3-jinja2 wget
           sudo apt-get remove -y cmake || true
           sudo apt-get install -y cmake
+          # 固定较新的 Clang（named modules + clang-scan-deps）
+          sudo apt-get install -y gnupg lsb-release
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          CODENAME=$(. /etc/os-release; echo "$VERSION_CODENAME")
+          echo "deb http://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y clang-20 llvm-20
+          echo "CC=clang-20"  >> "$GITHUB_ENV"
+          echo "CXX=clang++-20" >> "$GITHUB_ENV"
 
       # ------------------------------------------------------------------
       # 依赖安装：macOS
+      #   AppleClang 对 named modules 支持不完整，统一用 brew 的 LLVM clang。
       # ------------------------------------------------------------------
       - name: Install dependencies (macOS)
         if: matrix.os == 'macos'
         run: |
-          brew install glfw glm ninja uv
+          brew install glfw glm ninja uv llvm cmake
+          LLVM_PREFIX="$(brew --prefix llvm)"
+          echo "CC=$LLVM_PREFIX/bin/clang"    >> "$GITHUB_ENV"
+          echo "CXX=$LLVM_PREFIX/bin/clang++" >> "$GITHUB_ENV"
+          echo "$LLVM_PREFIX/bin" >> "$GITHUB_PATH"
 
       # ------------------------------------------------------------------
       # 依赖安装：Windows (vcpkg + MSVC + Python/jinja2)

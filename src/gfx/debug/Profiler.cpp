@@ -1,6 +1,8 @@
-#include "gfx/debug/Profiler.h"
+module;
 
-#include "gfx/core/RenderContext.h"
+#include "gfx/gmf.hpp"
+
+module gfx;
 
 namespace gfx {
 

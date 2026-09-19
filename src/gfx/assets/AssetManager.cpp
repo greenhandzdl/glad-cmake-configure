@@ -1,12 +1,10 @@
-#include "gfx/assets/AssetManager.h"
+module;
 
-#include <chrono>
+#include "gfx/gmf.hpp"
+
 #include <cstdio>
-#include <utility>
 
-#include "gfx/assets/ImageLoader.h"
-#include "gfx/core/RenderContext.h"
-#include "gfx/geometry/Mesh.h"
+module gfx;
 
 namespace gfx {
 

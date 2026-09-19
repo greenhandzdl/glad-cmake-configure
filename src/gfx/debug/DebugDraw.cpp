@@ -1,11 +1,8 @@
-#include "gfx/debug/DebugDraw.h"
+module;
 
-#include <cstddef>
-#include <span>
-#include <utility>
+#include "gfx/gmf.hpp"
 
-#include "gfx/core/RenderContext.h"
-#include "gfx/shader/DebugShaders.h"
+module gfx;
 
 namespace gfx {
 

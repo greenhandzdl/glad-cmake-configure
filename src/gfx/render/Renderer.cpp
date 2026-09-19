@@ -1,11 +1,8 @@
-#include "gfx/render/Renderer.h"
+module;
 
-#include <utility>
+#include "gfx/gmf.hpp"
 
-#include <glad/gl.h>
-
-#include "gfx/core/RenderContext.h"
-#include "gfx/render/RenderPasses.h"
+module gfx;
 
 namespace gfx {
 

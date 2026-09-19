@@ -16,7 +16,7 @@ Everything below is a way of holding that line.
 `RenderContext` (`src/gfx/core/RenderContext.{h,cpp}`) is the gatekeeper:
 
 - `MarkAsRenderThread()` sets a `thread_local bool g_isRenderThread = true`.
-  `src/main.cpp:225` calls it once, on the thread that owns the GL context, right
+  `src/main.cpp` calls it once, on the thread that owns the GL context, right
   after context creation.
 - `IsRenderThread()` reports the flag.
 - `AssertRenderThread(where)` prints a `FATAL` line to stderr and `std::abort()`s
@@ -115,6 +115,29 @@ the render thread each frame (`Scene::Update`) and read by passes; because they
 are value-semantic and GL-free, they carry no affinity constraint and can be
 inspected or tested without a context. The scene graph was placed at this same
 level on purpose.
+
+## 9. The named module does not change any of the above
+
+Since Phase 6 the engine ships as the C++20 named module `gfx` (see
+[design.md](design.md) §7). That is a *linkage/packaging* change, not a
+concurrency one, and the thread-affinity guarantees survive it unchanged:
+
+- **One render-thread TLS.** `g_isRenderThread` lives in an anonymous namespace
+  inside `RenderContext.cpp` — a single `module gfx;` implementation unit — so it
+  has exactly one definition in the library. Every unit reaches it only through
+  the exported `RenderContext` member functions, never a second copy.
+- **No header-inline mutable state.** Nothing thread-affine is defined in a
+  header, so wrapping headers in `gfx.cppm` cannot fork a singleton or a static.
+  The only header-scope objects are `inline constexpr`/`inline const` value data
+  (GLSL sources, layout constants) — immutable, so sharing them across the module
+  boundary is race-free by construction.
+- **Assertion coverage is intact.** The include-only refactor never touched
+  function bodies; the 90+ `AssertRenderThread` call sites across the 23
+  GL-touching units are unchanged.
+- **Global-module types are shared, not duplicated.** GLAD/GLM entities sit in
+  each unit's global module fragment (via `src/gfx/gmf.hpp`), so `GLuint`,
+  `glm::vec3`, `std::mutex`, … are the same global-module types in `gfx` and in
+  `main.cpp` — there is no second, module-local definition that could desync.
 
 ---
 

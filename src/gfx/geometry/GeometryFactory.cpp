@@ -1,8 +1,10 @@
-#include "gfx/geometry/GeometryFactory.h"
+module;
 
-#include <cmath>
-#include <glm/glm.hpp>
+#include "gfx/gmf.hpp"
+
 #include <glm/gtc/constants.hpp>
+
+module gfx;
 
 namespace gfx {
 

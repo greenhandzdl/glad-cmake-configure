@@ -17,9 +17,13 @@ The whole tree is deliberately split so that *engine code*, *application code*,
 src/
   gfx/**            engine subsystems (core, geometry, texture, material,
                     shader, camera, light, shadow, scene, render, text,
-                    assets, debug) — no application logic
-  main.cpp          the demo application entry point (wires subsystems together)
-  utils/stb.cpp     single third-party implementation TU (STB image / truetype)
+                    assets, debug) — no application logic; the whole set is
+                    delivered as the C++20 named module `gfx` (gfx.cppm)
+  gfx/core/Platform.h  the demo's plain-text include (GLFW + window constants);
+                       deliberately NOT part of the module
+  main.cpp          the demo application entry point — `import gfx;` wires it up
+  gfx/third_party/stb_image_impl.cpp  single third-party implementation TU
+                       (STB image / truetype); never leaks onto the module interface
   gfx/shader/*Shaders.h   GLSL lives here as embedded raw strings — the ONLY
                           source of truth for shader code
 assets/
