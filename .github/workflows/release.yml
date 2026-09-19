@@ -126,13 +126,14 @@ jobs:
           BUILD_TYPE: ${{ inputs.build_type }}
           RUN_OS: ${{ matrix.os }}
         run: |
-          EXTRA_ARGS=""
+          # 用数组传参，避免 $VCPKG_ROOT 中含空格的路径（如
+          # "C:\Program Files\...\vcpkg"）被 bash 拆词。
+          ARGS=(-S . -B build -G Ninja "-DCMAKE_BUILD_TYPE=$BUILD_TYPE")
           if [ "$RUN_OS" = "windows" ]; then
-            EXTRA_ARGS="-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows"
+            ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_TARGET_TRIPLET=x64-windows")
           fi
-          cmake -S . -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-            $EXTRA_ARGS
+          echo "vcpkg root: '$VCPKG_ROOT'"
+          cmake "${ARGS[@]}"
 
       - name: Build
         shell: bash
