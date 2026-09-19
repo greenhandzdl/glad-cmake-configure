@@ -9,7 +9,7 @@
 
 **已实现的图形能力**：PBR 金属/粗糙工作流、级联阴影（CSM + PCF）、基于图像的照明（IBL：辐照度/预滤波/BRDF LUT）、HDR + MSAA + Bloom + ACES 色调映射、精灵批次 + 位图字体 HUD、实例化绘制、视锥剔除、调试线框、CPU 拾取、帧性能分析、两阶段异步资源管线，以及场景层级（`Scene`/`SceneNode`/`Transform`）+ 渲染管线（`Renderer`/`RenderPass`）。
 
-设计与线程安全说明见 **[doc/](doc/README.md)**。
+文档按读者角色分三条路径，入口见 **[doc/](doc/README.md)**：使用者请看 [`doc/user/`](doc/user/README.md)（按难易分入门/基础/进阶/排错四篇），开发者请看 [`doc/developer/`](doc/developer/README.md)（[design](doc/developer/design.md) + [thread-safety](doc/developer/thread-safety.md)），AI agent 速查见根目录 [AGENTS.md](AGENTS.md)。
 
 ## 目录结构
 
@@ -34,7 +34,7 @@
 │   └── assets/               # 内容资源（不被编译）：GLSL 参考镜像 + 模型投放目录，与 gfx 代码同级
 │       ├── shaders/          #   内嵌 GLSL 的只读参考镜像（不被编译/加载）
 │       └── models/           #   FBX/OBJ/glTF 投放目录（运行期经 AssetManager 异步加载）
-├── doc/                      # 设计思路 + 线程安全说明
+├── doc/                      # 使用者(user/) + 开发者(developer/: 设计+线程安全)；agent 速查见根 AGENTS.md
 ├── third_party/
 │   ├── glad/                 # 子模块：glad2 生成器（OpenGL 4.1 Core 绑定）
 │   ├── stb/                  # 子模块：header-only 图像/字体

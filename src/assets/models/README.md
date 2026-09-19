@@ -22,7 +22,7 @@ no GL call ever happens off the render thread:
 `AssetManager` is safe to call from any thread: it owns a worker queue
 (`std::mutex` + `std::condition_variable`) and a result cache guarded by a
 `std::shared_mutex`; callers get handles / `shared_ptr<const …>`, never mutable
-GL objects. See [`doc/thread-safety.md`](../../doc/thread-safety.md) for the full
+GL objects. See [`doc/developer/thread-safety.md`](../../../doc/developer/thread-safety.md) for the full
 invariant list.
 
 ## Textures / materials
