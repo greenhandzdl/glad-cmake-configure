@@ -23,7 +23,12 @@ std::expected<void, std::string> Font::LoadFromFile(const std::string& path, flo
 
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file) return std::unexpected("Font: cannot open " + path);
-    const auto size = file.tellg();
+    const std::streamoff size = file.tellg();
+    // tellg() yields -1 for a non-seekable stream; a crafted or oversized file
+    // must never drive an unbounded allocation (crash / DoS). Bound it first.
+    constexpr std::streamoff kMaxFontBytes = 64LL * 1024 * 1024;   // 64 MB sanity limit
+    if (size <= 0 || size > kMaxFontBytes)
+        return std::unexpected("Font: invalid or oversized font file " + path);
     file.seekg(0, std::ios::beg);
     std::vector<unsigned char> data(static_cast<std::size_t>(size));
     if (!file.read(reinterpret_cast<char*>(data.data()), size))

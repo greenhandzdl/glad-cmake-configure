@@ -28,7 +28,14 @@ void ThreadPool::WorkerMain() {
             task = std::move(tasks_.front());
             tasks_.pop();
         }
-        task();
+        try {
+            task();
+        } catch (...) {
+            // A throwing task must not escape the worker thread's top level —
+            // an exception leaving a std::thread calls std::terminate and aborts
+            // the whole process. Drop it; any linked std::future is delivered as
+            // broken_promise, which the consumer on the render thread handles.
+        }
     }
 }
 

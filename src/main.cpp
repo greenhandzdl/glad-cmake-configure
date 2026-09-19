@@ -413,26 +413,18 @@ int main(int /*argc*/, char** /*argv*/) {
         while (!glfwWindowShouldClose(window)) {
             if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
                 glfwSetWindowShouldClose(window, true);
-            static bool shadowToggleArmed = true;
-            static bool iblToggleArmed = true;
-            static bool bloomToggleArmed = true;
-            static bool debugToggleArmed = true;
-            static bool instToggleArmed = true;
-            const bool k1 = glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS;
-            const bool k2 = glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS;
-            const bool k3 = glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS;
-            const bool k4 = glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS;
-            const bool k5 = glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS;
-            if (k1 && shadowToggleArmed) { input.useShadow = !input.useShadow; shadowToggleArmed = false; }
-            else if (!k1) shadowToggleArmed = true;
-            if (k2 && iblToggleArmed) { input.useIbl = !input.useIbl; iblToggleArmed = false; }
-            else if (!k2) iblToggleArmed = true;
-            if (k3 && bloomToggleArmed) { input.useBloom = !input.useBloom; bloomToggleArmed = false; }
-            else if (!k3) bloomToggleArmed = true;
-            if (k4 && debugToggleArmed) { input.useDebug = !input.useDebug; debugToggleArmed = false; }
-            else if (!k4) debugToggleArmed = true;
-            if (k5 && instToggleArmed) { input.useInstances = !input.useInstances; instToggleArmed = false; }
-            else if (!k5) instToggleArmed = true;
+            // Edge-detect the 1..5 toggles: flip once per press, rearm on release.
+            auto edgeToggle = [](bool pressed, bool& armed, bool& flag) {
+                if (pressed && armed) { flag = !flag; armed = false; }
+                else if (!pressed) armed = true;
+            };
+            static bool shadowArmed = true, iblArmed = true, bloomArmed = true,
+                        debugArmed = true, instArmed = true;
+            edgeToggle(glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS, shadowArmed, input.useShadow);
+            edgeToggle(glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS, iblArmed,    input.useIbl);
+            edgeToggle(glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS, bloomArmed,  input.useBloom);
+            edgeToggle(glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS, debugArmed,  input.useDebug);
+            edgeToggle(glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS, instArmed,   input.useInstances);
             HandleKeys(window, input);
 
             // FPS (smoothed) for the HUD.
