@@ -48,7 +48,16 @@ layout(std140) uniform LightingBlock {
     vec4  ambientTint;
     ivec4 pointCount;
     PL points[32];
+    vec4  fogColor;       // linear HDR rgb + pad
+    vec4  fogParams;      // x enabled, y start, z end
 };
+
+vec3 ApplyFog(vec3 color, vec3 worldPos) {
+    if (fogParams.x < 0.5) return color;
+    float dist = length(cameraPos.xyz - worldPos);
+    float t = clamp((dist - fogParams.y) / max(fogParams.z - fogParams.y, 1e-4), 0.0, 1.0);
+    return mix(color, fogColor.rgb, t);
+}
 
 void main() {
     vec3 N = normalize(vNormal);
@@ -60,5 +69,6 @@ void main() {
 
     vec3 sun = dirColor.rgb * dirColor.w;
     vec3 color = vColor.rgb * (ambientTint.xyz + sun * ndl) + sun * spec;
+    color = ApplyFog(color, vWorldPos);
     FragColor = vec4(color, 1.0);                     // linear HDR; composite tone-maps
 }

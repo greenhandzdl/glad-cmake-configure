@@ -6,11 +6,16 @@
  * @brief CPU-side light data + a std140-compatible GPU block (no GL).
  *
  * LightSetup is the artist/game-facing description (one directional "sun" that
- * drives cascaded shadows + a bounded list of point lights). PackLighting()
- * lowers it into LightingBlockGpu, whose layout mirrors the GLSL
- * `layout(std140) uniform LightingBlock` consumed by the PBR shader. Because
- * every GPU-block member is a 16-byte vec4/ivec4, the C++ struct needs no
- * manual padding to match std140.
+ * drives cascaded shadows + a bounded list of point lights, plus an optional
+ * linear distance fog). PackLighting() lowers it into LightingBlockGpu, whose
+ * layout mirrors the GLSL `layout(std140) uniform LightingBlock` consumed by
+ * the PBR / instanced / voxel shaders. Because every GPU-block member is a
+ * 16-byte vec4/ivec4, the C++ struct needs no manual padding to match std140.
+ *
+ * The fog members are appended at the end of the block: a GLSL uniform block
+ * may be declared with fewer members than the buffer holds, so older programs
+ * keep working, and PackLighting() leaves fog disabled unless the caller sets
+ * fogStart/fogEnd explicitly — existing demos render bit-identically.
  */
 
 #include <algorithm>
@@ -41,6 +46,15 @@ struct LightSetup {
     DirectionalLight sun;
     std::vector<PointLight> points;          // capped to kMaxPointLights when packed
     glm::vec3 ambient{0.03f};                // fallback ambient when no IBL present
+    // Linear distance fog, applied in the same place as the shading output
+    // (before the post-process tone map), so fogColor lives in linear HDR
+    // space like everything else the fragment stage writes — matching the
+    // skybox horizon colour is what makes distant geometry dissolve instead
+    // of sitting on a grey band. Disabled while fogStart <= 0 or
+    // fogEnd <= fogStart.
+    glm::vec3 fogColor{0.35f, 0.5f, 0.65f};
+    float fogStart = 0.0f;
+    float fogEnd   = 0.0f;
 };
 
 // ---- GPU (std140) representation ----
@@ -56,6 +70,8 @@ struct alignas(16) LightingBlockGpu {
     glm::vec4 ambient{0.0f};            // ambient rgb + pad
     glm::ivec4 pointCount{0};           // active point-light count in x
     std::array<PointLightGpu, kMaxPointLights> points{};
+    glm::vec4 fogColor{0.0f};           // linear rgb + pad
+    glm::vec4 fogParams{0.0f};          // x = enabled, y = start, z = end
 };
 
 // Lower the CPU-side description into the GPU block.
@@ -82,6 +98,13 @@ inline LightingBlockGpu PackLighting(const LightSetup& setup, const glm::vec3& c
     for (int i = n; i < kMaxPointLights; ++i) {
         b.points[i] = PointLightGpu{};
     }
+
+    // Fog is opt-in: any interval that cannot produce a gradient keeps the
+    // shader on the disabled branch, so callers who never touched these
+    // fields see exactly the previous image.
+    const bool fogOn = setup.fogStart > 0.0f && setup.fogEnd > setup.fogStart;
+    b.fogColor = glm::vec4(setup.fogColor, 0.0f);
+    b.fogParams = glm::vec4(fogOn ? 1.0f : 0.0f, setup.fogStart, setup.fogEnd, 0.0f);
     return b;
 }
 
