@@ -43,9 +43,55 @@ mkdir -p "$BUILD_DIR"
 # Navigate to build directory
 cd "$BUILD_DIR"
 
+# Module gfx is C++20 modules, which needs two things that the macOS defaults do
+# not provide: a generator with a module scanner (Ninja, not Unix Makefiles) and
+# a clang that can run that scanner (Homebrew LLVM, not AppleClang). CI installs
+# both, so do the same here - unless the caller already chose a compiler.
+GENERATOR="${CMAKE_GENERATOR:-}"
+if [ -z "$GENERATOR" ] && command -v ninja >/dev/null 2>&1; then
+  GENERATOR="Ninja"
+fi
+
+CONFIGURE_ARGS=()
+if [ -n "$GENERATOR" ]; then
+  CONFIGURE_ARGS+=("-G" "$GENERATOR")
+fi
+
+PREV_GEN=""
+PREV_CXX=""
+if [ -f "CMakeCache.txt" ]; then
+  PREV_GEN="$(sed -n 's/^CMAKE_GENERATOR:INTERNAL=\(.*\)$/\1/p' CMakeCache.txt | head -1)"
+  PREV_CXX="$(sed -n 's/^CMAKE_CXX_COMPILER:[^=]*=\(.*\)$/\1/p' CMakeCache.txt | head -1)"
+fi
+
+if [ "$(uname)" = "Darwin" ] && [ -z "${CXX:-}" ] && command -v brew >/dev/null 2>&1; then
+  LLVM_HOME="$(brew --prefix llvm 2>/dev/null || true)"
+  if [ -n "$LLVM_HOME" ] && [ -x "$LLVM_HOME/bin/clang++" ]; then
+    # Only take over when nothing is configured yet or the cache points at the
+    # Apple toolchain; another hand-picked compiler is left alone.
+    case "$PREV_CXX" in
+      ""|*/usr/bin/c++|*Xcode.app*|*CommandLineTools*)
+        export CC="$LLVM_HOME/bin/clang"
+        export CXX="$LLVM_HOME/bin/clang++"
+        ;;
+    esac
+  fi
+fi
+
+# A directory left over from another generator or compiler cannot be
+# reconfigured in place, so start that cache over instead of failing with
+# CMake's "does not match the generator used previously" error.
+if [ -f "CMakeCache.txt" ]; then
+  if { [ -n "$GENERATOR" ] && [ -n "$PREV_GEN" ] && [ "$PREV_GEN" != "$GENERATOR" ]; } ||
+     { [ -n "${CXX:-}" ] && [ -n "$PREV_CXX" ] && [ "$PREV_CXX" != "$CXX" ]; }; then
+    echo "Build directory was configured with '$PREV_GEN' / '$PREV_CXX'; configuring fresh."
+    CONFIGURE_ARGS=("--fresh" "${CONFIGURE_ARGS[@]}")
+  fi
+fi
+
 # Configure with CMake
 echo "Configuring with CMake..."
-cmake -DCMAKE_BUILD_TYPE="$BUILD_TYPE" "$PROJECT_ROOT"
+cmake "${CONFIGURE_ARGS[@]}" -DCMAKE_BUILD_TYPE="$BUILD_TYPE" "$PROJECT_ROOT"
 
 # Build
 echo "Building..."
@@ -53,5 +99,5 @@ cmake --build . --config "$BUILD_TYPE"
 
 echo "========================================="
 echo "Build complete!"
-echo "Executable: $OUTPUT_DIR/@TARGET_NAME@"
+echo "Executables: $OUTPUT_DIR/@TARGET_NAME@ and $OUTPUT_DIR/voxel_demo"
 echo "========================================="
