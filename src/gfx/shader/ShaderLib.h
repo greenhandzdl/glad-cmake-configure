@@ -201,6 +201,7 @@ void main() {
         float G = GeometrySmith(N, V, L, roughness);
         vec3 spec = (D * G * F) / max(4.0 * max(dot(N, V), 0.0) * NdotL + 1e-4, 1e-4);
         vec3 kD = (1.0 - F) * (1.0 - metallic);
+        spec *= 3.0;   // lift the sun highlight into HDR so the bloom bright pass keys on it
         Lo += (kD * albedo / PI + spec) * radiance * NdotL * ShadowFactor(vWorldPos, N, L);
     }
 

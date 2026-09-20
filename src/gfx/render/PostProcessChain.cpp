@@ -41,6 +41,13 @@ void PostProcessChain::Resize(int width, int height, int msaaSamples) {
 
     width_ = width;
     height_ = height;
+    // Half-resolution bloom. Full-res preserved the 1-2px sun glints through
+    // the bright pass, but the blur taps are spaced spread/bloomW_ apart, so at
+    // native res the halo was only a few pixels wide and invisible. Half res
+    // doubles every texel's screen coverage so the same blur spreads a glint
+    // into a readable soft glow; the low bright-pass threshold (see
+    // PostProcessPass) keeps the glints' HDR energy above the cut-off even after
+    // the 2x2 downsample averaging.
     bloomW_ = std::max(1, width / 2);
     bloomH_ = std::max(1, height / 2);
     msaaSamples_ = std::clamp(msaaSamples, 1, maxSamples_);
@@ -88,6 +95,14 @@ void PostProcessChain::BeginScene() {
     RenderContext::AssertRenderThread("PostProcessChain::BeginScene");
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
+    // Own the raster state the scene relies on: prior passes (env generation,
+    // bloom, composite, HUD) toggle GL_CULL_FACE without a guaranteed restore,
+    // so the geometry pass must set it explicitly. Mesh windings are authored
+    // for back-face culling (see GeometryFactory::Plane), so this halves the
+    // fragment load rather than changing the image.
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CCW);
     if (msaaSamples_ > 1) msaaFbo_.Bind();
     else hdrFbo_.Bind();
     glViewport(0, 0, width_, height_);
@@ -125,8 +140,10 @@ void PostProcessChain::RenderBloom() {
     DrawFullscreen();
 
     // Separable gaussian blur, ping-ponged bloomA <-> bloomB. Final result ends
-    // up back in bloomA after each full H+V pair.
-    const float spread = 1.0f;
+    // up back in bloomA after each full H+V pair. Spread >1 pushes the kernel
+    // taps past adjacent texels so a 1-2px specular hot spot grows into a soft,
+    // visible halo rather than blurring away to nothing.
+    const float spread = 4.0f;
     blur_.Use();
     blur_.Set("uImage", 0);
     for (int i = 0; i < bloomIterations_; ++i) {
