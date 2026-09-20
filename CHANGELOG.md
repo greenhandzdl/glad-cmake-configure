@@ -3,6 +3,36 @@
 本文件记录 `GLFW_Template`（`gfx` 引擎 + 演示应用）各版本的变更。
 版本标签遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## v1.3.0
+
+### 新增
+
+- **体素子系统 `src/gfx/voxel/`**：`Chunk`（16³ uint16 方块存储 + 本地/越界查询 + dirty 与邻居 dirty 标记 + 包围球）、
+  `BlockRegistry`（header-only，内置 air/grass/dirt/stone/sand/wood/leaves/water/snow，`solid/transparent/cutout/emissive` 属性）、
+  `ChunkMesher`（纯 CPU、可在 worker 线程跑：相邻不透明面剔除、同种方块互剔皮肤、逐顶点 4 档 AO + 方向 tint、
+  输出 opaque / transparent 两份网格）、`VoxelMeshGpu`（一条 chunk 的 GPU 记录，`Update` 原地换缓冲）。不做 greedy meshing。
+- **`Texture2DArray`**：一方块一个纹理层，生成完整 mipmap 链，语义对齐 `Texture2D`；层间隔离彻底规避图集 bleed，
+  顶点只需携带一个 layer float。
+- **`Mesh::Update(MeshData&&)`**：glBufferData 整缓冲 orphan 重传、VAO 复用，chunk remesh 不再重建 GPU 资源。
+- **`VoxelOpaquePass` / `VoxelTransparentPass`**：chunk 不进 `Scene` 节点图，pass 直接持有渲染记录列表，
+  按相机距离降序（back-to-front）绘制透明流并关掉 depth-write，不透明流与 cutout（树叶）同批走 alpha cutoff；
+  两者都做包围球视锥剔除。
+- **`VoxelShaders`**（GLSL 410）：采样 `sampler2DArray`，顶点 light 通道调制 + `LightingBlock` 平行光近似 + 雾 + 水面 uv scroll。
+- **`RaycastVoxel`（DDA）**：`src/gfx/camera/VoxelRay.h`，Amanatides & Woo 逐格步进，header-only 纯函数，
+  对 solidity 谓词做模板参数（chunk / chunk 网格 / 扁平数组皆可），返回命中格 + 进入面法向 + 距离，放置方块不必二次查询。
+- **`Camera` 飞行接口**：`MoveForward/MoveRight/MoveUp(dt)` 与 `SetYawPitch`，原有 orbit 行为不变。
+- **`Noise`（`src/gfx/util/`）**：seeded 排列表的 Perlin 2D/3D + `Fbm2d(x, z, octaves)` + `ToUnit`；确定性、无全局状态、worker 线程安全。
+- **`ParticleBatch`**：POINT sprite 批次，`Spawn/Update/Draw`，着色器内按 lifetime 缩尺寸与淡出（挖掘碎屑、放置反馈）。
+- **线性距离雾**：`LightingBlock` 尾部追加 `fogColor` / `fogParams`，`LightSetup` 加 CPU 侧字段，PBR / Instanced / Voxel
+  三条 fragment 程序统一 `mix`；默认关闭，未开启时既有场景视觉零变化（2D 精灵不雾）。
+- **`voxel_demo` 可执行目标**：第二个 target（`src/voxel_main.cpp`），fBm 高度场地形 + 水位 + 树，
+  worker 生成/网格化 + 渲染线程限量上传，飞行相机、DDA 破坏/放置、碎屑粒子、雾与 HUD；
+  `scripts/run.sh [target]` 据此选择运行目标。世界层（chunk 网格、流式策略、地形生成、编辑规则）刻意留在 demo 侧。
+
+### 边界（本轮不含，留作后续增量）
+
+- 火把光 flood-fill 传播、greedy meshing、方块实体 / 生物 / 合成 / 存档 / 网络；`Chunk` 尺寸固定 16³。
+
 ## v1.2.0
 
 ### 新增

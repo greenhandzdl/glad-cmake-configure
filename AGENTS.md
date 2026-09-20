@@ -10,9 +10,9 @@
 
 ## TL;DR 关键事实
 
-- 项目：跨平台 **OpenGL 4.1 Core / PBR 图形引擎**（`gfx`）+ 交互式演示 `src/main.cpp`。仓库名 `glad-cmake-configure`，可执行目标 `GLFW_Template`。
+- 项目：跨平台 **OpenGL 4.1 Core / PBR 图形引擎**（`gfx`）+ 交互式演示 `src/main.cpp`。仓库名 `glad-cmake-configure`，可执行目标 `GLFW_Template`（PBR 演示）与 `voxel_demo`（体素演示）。
 - 语言：**C++23**；引擎以 **C++20 named module `gfx`** 交付（静态库）。
-- 构建：**CMake ≥ 3.28 + Ninja**。产物固定 `output/GLFW_Template`（Win 为 `.exe`）。
+- 构建：**CMake ≥ 3.28 + Ninja**。产物固定 `output/GLFW_Template` 与 `output/voxel_demo`（Win 加 `.exe`）。
 - 平台：Windows / macOS / Linux。
 - 依赖：GLFW（系统包）、GLAD（系统优先/子模块回退）、GLM（header-only）、STB + Assimp（git 子模块内置）。
 - 子模块：`third_party/glad`、`third_party/stb`、`third_party/assimp`。
@@ -43,13 +43,14 @@ cd glad-cmake-configure
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ./output/GLFW_Template
+./output/voxel_demo
 
 # macOS 预设（已钉 Homebrew clang，仅 Darwin 生效）
 cmake --preset Debug && cmake --build --preset Debug
 
 # 脚本
 ./scripts/build.sh [debug|release]   # 配置+构建
-./scripts/run.sh                     # 运行
+./scripts/run.sh [target]            # 运行（默认 GLFW_Template，例：run.sh voxel_demo）
 ./scripts/clean.sh                   # 清理（等价 cmake --build build --target clean-project）
 ```
 
@@ -58,24 +59,28 @@ cmake --preset Debug && cmake --build --preset Debug
 ```bash
 cmake --build build 2>&1 | grep -E 'src/(main|gfx)' | grep -iE 'warning|error'   # 期望：无（自有代码零告警）
 ./output/GLFW_Template >/tmp/o 2>/tmp/e & p=$!; sleep 6; kill $p 2>/dev/null; wc -c /tmp/e   # 期望：stderr 0 字节
+./output/voxel_demo    >/tmp/o 2>/tmp/e & p=$!; sleep 6; kill $p 2>/dev/null; wc -c /tmp/e   # 同上（改了体素侧就跑这条）
 ```
 
 ## 文件地图
 
 ```
-src/main.cpp                 应用入口：#include "gfx/core/Platform.h" + import gfx; 建窗/组场景/每帧 renderer.Render(frame)
+src/main.cpp                 PBR 演示入口：#include "gfx/core/Platform.h" + import gfx; 建窗/组场景/每帧 renderer.Render(frame)
 src/gfx/gfx.cppm             模块 primary interface：export { #include } 聚合全部公共头
 src/gfx/gmf.hpp              共享 global module fragment（GLAD/GLM/std 预包含；GLuint/glm::vec3 挂 global module）
 src/gfx/core/                Platform.h(窗口/GLFW/宏/常量) · RenderContext(线程亲和) · GLBuffer · VertexArray · UniformBuffer · Sampler · Framebuffer
 src/gfx/geometry/            Mesh · InstancedMesh · GeometryFactory(Cube/Sphere/Plane)
-src/gfx/texture/             Texture2D · TextureCubeMap · RenderTexture
+src/gfx/texture/             Texture2D · Texture2DArray · TextureCubeMap · RenderTexture
+src/gfx/voxel/               BlockRegistry · Chunk · ChunkMesher（纯 CPU 网格化）· VoxelMeshGpu
+src/gfx/util/                Noise（Perlin 2D/3D + fBm，seeded、无全局状态）
 src/gfx/material/            PbrMaterial
 src/gfx/shader/              ShaderProgram + 内嵌 GLSL（ShaderLib.h / PostProcessShaders.h / IblShaders.h，单一真源）
-src/gfx/camera|light|shadow/ Camera·Frustum·Picking / LightBuffer(UBO) / CascadedShadowMap·EnvironmentMap
+src/gfx/camera|light|shadow/ Camera(orbit+飞行)·Frustum·Picking·VoxelRay(DDA) / LightBuffer(UBO) / CascadedShadowMap·EnvironmentMap
 src/gfx/scene/               Scene · SceneNode · Transform（纯 CPU 层级）
-src/gfx/render/              Renderer · RenderPass · RenderFrame · RenderPasses · PostProcessChain · SpriteBatch · TextRenderer
+src/gfx/render/              Renderer · RenderPass · RenderFrame · RenderPasses(含 Voxel 两 pass) · PostProcessChain · SpriteBatch · TextRenderer · ParticleBatch
 src/gfx/text|assets|debug/   Font / AssetManager·ThreadPool·ModelLoader·ImageLoader / DebugDraw·Profiler
 src/gfx/third_party/         stb_image_impl.cpp（唯一第三方实现 TU，非模块接口）
+src/voxel_main.cpp           体素演示入口：chunk 流式生成/网格化（ThreadPool worker + 渲染线程上传）+ 方块编辑
 src/assets/                  运行期内容（不编译）：models/ 投放目录 · shaders/ 只读参考镜像（不加载）
 third_party/                 glad · stb · assimp（子模块）
 scripts/                     build.sh.in / run.sh.in / clean.sh.in（CMake 配置期生成 .sh）

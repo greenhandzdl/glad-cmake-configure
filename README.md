@@ -1,13 +1,15 @@
 # GLFW + GLAD CMake 图形引擎
 
-跨平台（Windows / macOS / Linux）的 **现代 OpenGL 图形引擎 / PBR 渲染器**，源自一个用 **GLFW** 建窗、**GLAD** 加载函数的 CMake 起步模板，现已成长为一套分层的 `gfx` 引擎子系统，附一个交互式演示程序（`src/main.cpp`）。依赖通过 CMake 自动探测，内置 `build/run/clean` 脚本与 GitHub Actions 手动发布流水线。
+跨平台（Windows / macOS / Linux）的 **现代 OpenGL 图形引擎 / PBR 渲染器**，源自一个用 **GLFW** 建窗、**GLAD** 加载函数的 CMake 起步模板，现已成长为一套分层的 `gfx` 引擎子系统，附两个交互式演示程序（`src/main.cpp` 的 PBR 场景、`src/voxel_main.cpp` 的可玩体素世界）。依赖通过 CMake 自动探测，内置 `build/run/clean` 脚本与 GitHub Actions 手动发布流水线。
 
 - 语言标准：C++23；引擎以 **C++20 named module `gfx`** 交付（`main.cpp` 只需 `import gfx;`）
 - OpenGL：**4.1 Core Profile**（GLSL `#version 410 core`；macOS 对应 "4.1 Metal"）
 - 构建系统：CMake ≥ 3.28（配合 Ninja），需支持 named modules 的编译器（Clang ≥ 19 / GCC ≥ 14 / 最新 MSVC）
-- 产物：`output/GLFW_Template`（Windows 为 `output/GLFW_Template.exe`）
+- 产物：`output/GLFW_Template` 与 `output/voxel_demo`（Windows 加 `.exe`）
 
 **已实现的图形能力**：PBR 金属/粗糙工作流、级联阴影（CSM + PCF）、基于图像的照明（IBL：辐照度/预滤波/BRDF LUT）、HDR + MSAA + Bloom + ACES 色调映射、精灵批次 + 位图字体 HUD、实例化绘制、视锥剔除、调试线框、CPU 拾取、帧性能分析、两阶段异步资源管线，以及场景层级（`Scene`/`SceneNode`/`Transform`）+ 渲染管线（`Renderer`/`RenderPass`）。
+
+**体素 / 世界层原语**（v1.3）：`Chunk` + `ChunkMesher`（面剔除 + 逐顶点 AO，产出 opaque / transparent 两份网格）、`BlockRegistry`、`Texture2DArray`（一方块一纹理层）、`VoxelOpaquePass` / `VoxelTransparentPass`（视距排序 + 球剔除 + 混合）、`VoxelShaders`（sampler2DArray + 平行光近似 + alpha cutoff）、`RaycastVoxel`（DDA 逐格拾取，返回命中格与进入面法向）、`Camera` 飞行接口、`Noise`（Perlin + fBm，seeded 且 worker 线程安全）、`ParticleBatch`（挖掘碎屑）、`Mesh::Update`（chunk remesh 整缓冲重传）、线性距离雾。
 
 文档按读者角色分三条路径，入口见 **[doc/](doc/README.md)**：使用者请看 [`doc/user/`](doc/user/README.md)（按难易分入门/基础/进阶/排错四篇），开发者请看 [`doc/developer/`](doc/developer/README.md)（[design](doc/developer/design.md) + [thread-safety](doc/developer/thread-safety.md)），AI agent 速查见根目录 [AGENTS.md](AGENTS.md)。
 
@@ -16,18 +18,21 @@
 ```
 .
 ├── src/
-│   ├── main.cpp              # 应用入口：`import gfx;` + 建窗 + 组装场景 + 驱动渲染管线
+│   ├── main.cpp              # PBR 演示入口：`import gfx;` + 建窗 + 组装场景 + 驱动渲染管线
+│   ├── voxel_main.cpp        # 体素演示入口：chunk 流式网格化 + 方块编辑（世界层在 demo 侧，不进引擎）
 │   ├── gfx/                  # 引擎子系统（分层，仅向下依赖），整体编译为 named module `gfx`
 │   │   ├── gfx.cppm          #   primary interface：export { #include } 聚合全部公共头
 │   │   ├── gmf.hpp           #   共享 global module fragment（GLAD/GLM/std 预包含）
 │   │   ├── core/             #   Platform.h(窗口/GLFW) · RenderContext(线程亲和)/GLBuffer/VertexArray/UBO/Sampler/Framebuffer
 │   │   ├── geometry/         #   Mesh / InstancedMesh / GeometryFactory
-│   │   ├── texture/          #   Texture2D / TextureCubeMap / RenderTexture
+│   │   ├── texture/          #   Texture2D / Texture2DArray / TextureCubeMap / RenderTexture
 │   │   ├── material/         #   PbrMaterial
 │   │   ├── shader/           #   ShaderProgram + 内嵌 GLSL（ShaderLib/… Shaders.h，单一真源）
-│   │   ├── camera/ light/ shadow/   # Camera / LightBuffer(UBO) / CascadedShadowMap / EnvironmentMap
+│   │   ├── camera/ light/ shadow/   # Camera(orbit+飞行) / VoxelRay(DDA) / LightBuffer(UBO) / CascadedShadowMap / EnvironmentMap
+│   │   ├── voxel/            #   BlockRegistry / Chunk / ChunkMesher / VoxelMeshGpu（纯 CPU 网格化 + 上传记录）
+│   │   ├── util/             #   Noise（Perlin 2D/3D + fBm，确定性、无全局状态）
 │   │   ├── scene/            #   Scene / SceneNode / Transform（纯 CPU 层级）
-│   │   ├── render/           #   Renderer / RenderPass / RenderFrame / 后期链 / SpriteBatch / TextRenderer
+│   │   ├── render/           #   Renderer / RenderPass / RenderFrame / 后期链 / SpriteBatch / TextRenderer / ParticleBatch / Voxel 两 pass
 │   │   ├── text/ assets/ debug/     # 字体·异步资源·DebugDraw/Profiler/Picking/Frustum
 │   │   └── third_party/      #   stb_image_impl.cpp（唯一第三方实现 TU，非模块接口）
 │   ├── ...                   #   引擎各 .cpp 均为 `module gfx;` 实现单元
@@ -112,7 +117,8 @@ CMake 配置阶段会由 `scripts/*.sh.in` 生成三个可执行脚本：
 
 ```bash
 ./scripts/build.sh [debug|release]   # 配置并构建
-./scripts/run.sh                     # 运行 output 下的可执行文件
+./scripts/run.sh                     # 运行默认目标 GLFW_Template
+./scripts/run.sh voxel_demo          # 运行体素演示（其后参数原样传给程序）
 ./scripts/clean.sh                   # 清理
 
 # 等价的 CMake 目标：
@@ -124,6 +130,10 @@ cmake --build build --target clean-project
 `main.cpp` 打开一个 800×600 窗口，渲染一个交互式 PBR 演示场景：带纹理的地面与球阵、金属立方体、一个旋转的子层级（carousel，演示场景层级变换传播），配合级联阴影、IBL 环境光照、HDR + Bloom + ACES 后期、天空盒，以及精灵批次文本 HUD。
 
 绘制不再是一大堆内联 `gl*` 调用，而是改为逐帧组装一个 `RenderFrame` 后一句 `renderer.Render(frame)`（依序执行 Shadow → Geometry → PostProcess → DebugHud 四个 pass）。
+
+**体素演示 `voxel_demo`**（`./scripts/run.sh voxel_demo`）是上述体素原语的验收场：fBm 高度场地形 + 沙滩 + 湖泊 + 树冠，worker 线程生成与网格化、渲染线程限量上传，雾随距离收掉视距边缘。世界层（chunk 网格、流式策略、地形生成、编辑规则、HUD）全部写在 `src/voxel_main.cpp`，引擎只提供原语、不含任何世界概念。
+
+**操作**：鼠标转向（指针捕获）；`W`/`A`/`S`/`D` 飞行、`Space`/`Shift` 上下、按住 `Q`+`E` 减速；左键破坏（碎屑粒子）、右键放置；`1`–`8` 选方块；`F` 切换飞行/轨道相机；`[`/`]` 太阳方位、`-`/`=` 太阳高度；`P` 开关粒子；`X` 退出。
 
 **操作**：拖拽鼠标轨道旋转 / 滚轮缩放；A·D（或←→）太阳方位、W·S（或↑↓）太阳高度；右键拾取物体（包围球射线测试，高亮）；`1` 级联阴影、`2` IBL、`3` Bloom、`4` 调试线框、`5` 实例化场（开关）；`Esc` 退出。
 
