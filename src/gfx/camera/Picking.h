@@ -25,16 +25,25 @@ struct Ray {
     glm::vec3 dir;   // normalised
 };
 
-// pixelX from the left, pixelY from the top (GLFW cursor space).
+// pixelX/pixelY in framebuffer pixels, measured from the left/top. The caller
+// must convert from GLFW cursor (window) coordinates first, because on a
+// content-scaled display (macOS Retina) the two spaces differ by the scale.
+//
+// The ray is built by unprojecting the same NDC xy at the near and far planes.
+// That is projection-agnostic: perspective gives (eye -> far point) as before,
+// while an orthographic box gets the correct perpendicular through the pixel.
+// Anchoring on the camera position instead (as a pure perspective shortcut)
+// would tilt every off-centre ray in ortho mode and pick the wrong object.
 inline Ray PickRay(float pixelX, float pixelY, int fbWidth, int fbHeight,
-                   const glm::mat4& invViewProj, const glm::vec3& eye) {
+                   const glm::mat4& invViewProj) {
     const float ndcX = 2.0f * pixelX / static_cast<float>(fbWidth)  - 1.0f;
     const float ndcY = 1.0f - 2.0f * pixelY / static_cast<float>(fbHeight);
 
-    glm::vec4 farP = invViewProj * glm::vec4(ndcX, ndcY, 1.0f, 1.0f);
-    farP /= farP.w;
-    glm::vec3 dir = glm::normalize(glm::vec3(farP) - eye);
-    return {eye, dir};
+    glm::vec4 nearP = invViewProj * glm::vec4(ndcX, ndcY, -1.0f, 1.0f);
+    glm::vec4 farP  = invViewProj * glm::vec4(ndcX, ndcY,  1.0f, 1.0f);
+    nearP /= nearP.w;
+    farP  /= farP.w;
+    return {glm::vec3(nearP), glm::normalize(glm::vec3(farP) - glm::vec3(nearP))};
 }
 
 // Nearest positive intersection distance with a sphere, or -1 if no hit.
