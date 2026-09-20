@@ -34,6 +34,7 @@ class Font;
 class Texture2D;
 class Profiler;
 class InstancedMesh;
+class ParticleBatch;
 
 struct RenderFrame {
     // Camera + derived view state (owned by the application).
@@ -65,6 +66,10 @@ struct RenderFrame {
     // GPU-instanced field (optional demo).
     InstancedMesh*       instField = nullptr;
     const ShaderProgram* instProg  = nullptr;
+
+    // World-space point particles, drawn by VoxelTransparentPass right after
+    // the blended terrain so debris sits correctly against water (optional).
+    ParticleBatch* particles = nullptr;
 
     // Feature toggles + interaction state.
     bool useShadow   = false;

@@ -39,6 +39,8 @@ inline constexpr unsigned irradiance  = 5;
 inline constexpr unsigned prefilter   = 6;
 inline constexpr unsigned brdfLut     = 7;
 inline constexpr unsigned skybox      = 8;   // background cube (drawn separately)
+inline constexpr unsigned voxelAtlas  = 9;   // block Texture2DArray (voxel passes)
+inline constexpr unsigned particle    = 10;  // point-sprite particle texture
 } // namespace texunit
 
 class Material {

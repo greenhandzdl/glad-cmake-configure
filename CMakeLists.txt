@@ -207,6 +207,11 @@ set(GFX_SOURCES
     src/gfx/texture/RenderTexture.cpp
     src/gfx/camera/Camera.cpp
     src/gfx/camera/Frustum.cpp
+    src/gfx/texture/Texture2DArray.cpp
+    src/gfx/util/Noise.cpp
+    src/gfx/voxel/ChunkMesher.cpp
+    src/gfx/voxel/VoxelMeshGpu.cpp
+    src/gfx/render/ParticleBatch.cpp
     src/gfx/scene/SceneNode.cpp
     src/gfx/scene/Scene.cpp
     src/gfx/render/Renderer.cpp
