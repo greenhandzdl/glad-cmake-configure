@@ -239,9 +239,9 @@ int main(int argc, char** argv) {
     // toggles have nothing to show at the default view: the instanced field sits
     // out toward +x (yaw about -pi/2) and the sky only enters the frame once the
     // pitch goes negative. Unset, these are the Input defaults, byte for byte.
-    input.yaw   = static_cast<float>(flags.number("yaw", input.yaw));
-    input.pitch = static_cast<float>(flags.number("pitch", input.pitch));
-    input.radius = std::clamp(static_cast<float>(flags.number("radius", input.radius)), 2.0f, 60.0f);
+    input.yaw   = flags.real("yaw", input.yaw);
+    input.pitch = flags.real("pitch", input.pitch);
+    input.radius = flags.real("radius", input.radius, 2.0f, 60.0f);
     input.useShadow = flags.on("shadow");
     input.useIbl = flags.on("ibl");
     input.useBloom = flags.on("bloom");

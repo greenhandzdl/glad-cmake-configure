@@ -156,7 +156,7 @@ cmake --build build --target clean-project
 
 CPU 侧原语（体素 DDA、Chunk、ChunkMesher、BlockRegistry、Noise、Frustum）另跑过一轮
 AddressSanitizer + UndefinedBehaviorSanitizer 的对抗输入自检（NaN / inf / 1e30 / `INT_MIN` 坐标、
-未注册 id、越界访问、反向包围盒），做法记在 `AGENTS.md` 的"CPU 侧原语的对抗输入自检"一节。
+未注册 id、越界访问、反向包围盒），做法记在 `AGENTS.md` 的"CPU 侧原语的对抗输入自检"一节。上表这些开关同样按这个形状喂过一遍畸形 argv（`--select inf`、`--rise nan`、`--auto-break 1e300`、拼错的功能名），两个 demo 都正常退出且不会把 `inf` 转成整数。
 
 ## 运行效果
 

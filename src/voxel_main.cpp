@@ -579,7 +579,7 @@ int main(int argc, char** argv) {
     input.ortho = flags.on("ortho", false);
     // Which block --auto-place builds with; the sweep uses 7 (water) to put a
     // transparent sheet in the frame without needing a lake to be nearby.
-    input.selected = std::clamp(static_cast<int>(flags.number("select", input.selected)),
+    input.selected = std::clamp(flags.integer("select", input.selected),
                                 1, static_cast<int>(Block::kBuiltinCount) - 1);
     glfwSetWindowUserPointer(window, &input);
     glfwSetCursorPosCallback(window, MouseCallback);
@@ -688,13 +688,17 @@ int main(int argc, char** argv) {
             // an empty chunk wall.
             const int sx = kWorldX / 2, sz = kWorldZ / 2;
             const int h = TerrainHeight(world.noise, sx, sz);
+            // --rise is bounded by the world height, which also keeps the sum
+            // below inside the int range however absurd the argument is. It may
+            // go negative: the sweep starts one block lower than the default
+            // spawn to keep the freshly dug shaft centred in the frame.
+            const int rise = std::clamp(flags.integer("rise"), -kWorldY, kWorldY);
             input.focus = glm::vec3(
                 static_cast<float>(sx) + 0.5f,
-                static_cast<float>(std::max(h, kSeaLevel) + 6
-                                    + static_cast<int>(flags.number("rise"))),
+                static_cast<float>(std::max(h, kSeaLevel) + 6 + rise),
                 static_cast<float>(sz) + 0.5f);
-            input.yaw   = static_cast<float>(flags.number("yaw", input.yaw));
-            input.pitch = static_cast<float>(flags.number("pitch", input.pitch));
+            input.yaw   = flags.real("yaw", input.yaw);
+            input.pitch = flags.real("pitch", input.pitch);
             camera.SetYawPitch(input.yaw, input.pitch);
             camera.Translate(input.focus - camera.Position());
         }
@@ -941,10 +945,13 @@ int main(int argc, char** argv) {
         // headless feature sweep. Each tick goes through exactly the same path a
         // click does (DDA pick -> Edit -> remesh -> debris), so a screenshot taken
         // after it says something about all four without a keyboard attached.
-        int autoBreakLeft = static_cast<int>(flags.number("auto-break"));
-        int autoPlaceLeft = static_cast<int>(flags.number("auto-place"));
         // Scripted edits tick every 0.25 s of fixed-step time, so their cadence is
-        // as reproducible as the debris they spawn.
+        // as reproducible as the debris they spawn. The upper bound is not
+        // cosmetic: the two counters are summed below, so saturating straight at
+        // INT_MAX would overflow that addition.
+        constexpr int kMaxScriptedEdits = 100000;
+        int autoBreakLeft = std::clamp(flags.integer("auto-break"), 0, kMaxScriptedEdits);
+        int autoPlaceLeft = std::clamp(flags.integer("auto-place"), 0, kMaxScriptedEdits);
         constexpr int kBreakPeriodSteps = 30;
         int nextBreakStep = 240;                              // first tick 2 s in
         int spawnedTotal = 0, frames = 0, breaks = 0;

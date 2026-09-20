@@ -51,6 +51,16 @@
   虽然被 `BlockRegistry::Get` 当作 air 解析，却仍然生成贴图切片 0 的幽灵面。新增
   `BlockRegistry::IsAir(id)`（id 为 0 或超出表长），生成面与邻居遮挡判定都改用它。
 
+- **demo 自己的命令行也在这条链上**：`strtod` 乐意把 `inf`、`nan`、`1e300` 当成合法数字，而
+  `voxel_main.cpp` 里有四处 `static_cast<int>(flags.number(...))`（`--select` / `--rise` /
+  `--auto-break` / `--auto-place`）——正是上面那两个探针抓到的同一类 UB（独立探针实测
+  `(int)strtod("inf")` 在 UBSan 下 rc=134）。新增 `Flags::integer()`（越界饱和、NaN 落到下界）
+  与 `Flags::real()`（非有限值回退默认，边界在 double 域内夹好之后再转 float），四个 int 调用点
+  与 `--yaw` / `--pitch` / `--radius` 全部改用它们。`--auto-break` / `--auto-place` 另有 100000
+  上限：下一行就要把两者相加，只饱和到 `INT_MAX` 会让那个加法回绕成负数。
+  一点如实的区分：double→float 的越界转换在这套工具链上 UBSan 并不报（实测 `static_cast<float>(1e300)`
+  rc=0，加 `-fstrict-float-cast-overflow` 也不报），所以 `real()` 是防御性收敛，不是被抓到的 UB。
+
 ### 新增
 
 - **`src/demo_cli.h`**：两个 demo 共用的 header-only 命令行开关（不进 `module gfx`）。
@@ -69,13 +79,18 @@
   `glTexImage2D` 的那个不变式。探针本身是仓外的临时工具（`/tmp/adv/advcheck.cpp`）：它是 `import gfx;` 的
   模块消费者，因为定义在 module 实现单元里的实体带着模块附着（`__ZN3gfxW3gfx5NoiseC1Ej`），
   文本 include 同一份头文件链不上。
+- **对抗 argv**：两个 demo 用 UBSan 构建跑畸形命令行——`--select inf`、`--auto-break 1e300`、
+  `--rise nan`、`--auto-place -inf`、`--pitch nan`、`--radius -1e300`、`--yaw 1e300`、`--off nosuch`、
+  `--on bogus`、缺值的 `--auto-break`、`--freeze-at abc`、空值、`+` 与 `x`——退出码全 0，无一条 sanitizer
+  报告；拼错的 feature 与非数字的值各自留下一行 stderr，而不是被静默吞掉。
+
 - **性能**（60 s × 3 轮，`/usr/bin/time -l`）：PBR CPU 18.3 s / RSS 117 MB；体素空闲 20.7 s / 131.8 MB /
   平均 116 fps（最低 81.5）/ `chunks gen 243 == meshed 243`（流式收敛）；体素压力（`--auto-break 200`）
   25.3 s / RSS 131.5 MB（长跑不涨）/ 平均 117.3 fps / `spawned 748`、退出时 `live 0`（粒子池全部退休，无泄漏）。
 
 12 个开关全部拿到“信号 ≫ 噪声底”的截图证据（每组噪声底 0.000%，即同参数两跑逐像素全等）：
 PBR `shadow` 0.14% / `ibl` 15.4% / `bloom` 57.8% / `debug` 3.7% / `instances` 6.6% / `sky` 91.4% / `ortho` 18.7%；
-体素 `particles` 3.59% / `fog` 63.5% / `sky` 36.5% / `ortho` 77.8% / `water` 4.5%（均为画面变化像素占比）。
+体素 `particles` 3.59% / `fog` 63.5% / `sky` 36.5% / `ortho` 77.8% / `water` 4.5%（均为画面变化像素占比）。改完 CLI 的数字访问器后整轮复跑，12 项数值与改前逐项相同——默认命令行下的画面一字未动。
 
 ## v1.3.0
 

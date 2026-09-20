@@ -18,10 +18,12 @@
  * script is reported rather than silently ignored.
  */
 
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -95,6 +97,35 @@ public:
         for (const auto& [key, value] : values_)
             if (key == name) return value;
         return fallback;
+    }
+
+    // The same option read as a count or an index. argv is user input and
+    // strtod() cheerfully accepts "inf", "nan" and "1e300", while casting one
+    // of those to int is undefined behaviour - so the range test happens while
+    // the value is still a double and anything outside it saturates. A NaN lands
+    // on the lower bound: a NaN count means “no scripted edits”, which is also
+    // what an absent one means.
+    [[nodiscard]] int integer(std::string_view name, int fallback = 0) const {
+        constexpr double kMin = static_cast<double>(std::numeric_limits<int>::min());
+        constexpr double kMax = static_cast<double>(std::numeric_limits<int>::max()) - 1.0;
+        const double value = number(name, static_cast<double>(fallback));
+        if (!(value > kMin)) return std::numeric_limits<int>::min();
+        if (value > kMax) return std::numeric_limits<int>::max();
+        return static_cast<int>(value);   // in range now, truncation intended
+    }
+
+    // The same option read as an angle or a distance. The standard leaves a
+    // double that float cannot represent undefined at the conversion, and on the
+    // toolchains tried here not even UBSan reports it - so the bound is applied
+    // while the value is still a double, and a NaN or infinity falls back to the
+    // default instead of silently poisoning the camera.
+    [[nodiscard]] float real(std::string_view name, float fallback = 0.0f,
+                              float lo = -3.0e38f, float hi = 3.0e38f) const {
+        double value = number(name, static_cast<double>(fallback));
+        if (!std::isfinite(value)) return fallback;
+        if (value < static_cast<double>(lo)) value = lo;
+        if (value > static_cast<double>(hi)) value = hi;
+        return static_cast<float>(value);
     }
 
     // Seconds before the window closes itself; 0 means "until the user does".

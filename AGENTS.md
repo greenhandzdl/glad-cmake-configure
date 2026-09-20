@@ -98,6 +98,12 @@ cmake -S . -B cmake-build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
 `static_cast<int>` 吃下了超出 int32 的 float（DDA 的 `(int)floor(NaN)`、Noise 的倍频坐标），
 编译器不报错、`-ftrapv` 也抓不到，只有 UBSan 看得见。
 
+同一把尺子也要量 demo 自己：`strtod` 接受 `inf`、`nan`、`1e300`，于是任何
+`static_cast<int>(flags.number(...))` 都是同一个 UB 形状。这条链不必改 CMakeLists——按上面的 flags 配一个
+构建目录、直接 build 两个 demo 目标，再用 `--select inf --rise nan --auto-break 1e300` 这类 argv 跑一遍即可。
+一个要记住的不对称：double→float 的越界转换 UBSan 并不报（加 `-fstrict-float-cast-overflow` 也不报），
+所以喂给 float 的角度与距离必须先在 double 域里夹好范围再转。
+
 ## 文件地图
 
 ```
