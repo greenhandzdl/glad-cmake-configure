@@ -37,6 +37,42 @@ void Mesh::Upload(MeshData&& data) {
     vbo_.Unbind(GL_ARRAY_BUFFER);
 }
 
+void Mesh::Update(MeshData&& data) {
+    RenderContext::AssertRenderThread("Mesh::Update");
+    if (!vao_.valid()) {           // first upload wins the full path
+        Upload(std::move(data));
+        return;
+    }
+
+    vertexCount_ = data.vertices.size();
+    indexCount_  = data.indices.size();
+    ranges_      = std::move(data.ranges);
+
+    // glBufferData re-substitution orphans the old store, so sizes may change
+    // freely and the GPU never stalls on an in-flight previous frame's copy.
+    if (vbo_.valid()) {
+        vbo_.Replace(std::span<const Vertex>(data.vertices));
+    } else {
+        vbo_.Create(GL_ARRAY_BUFFER, std::span<const Vertex>(data.vertices));
+    }
+    if (!data.indices.empty()) {
+        if (ebo_.valid()) {
+            ebo_.Replace(std::span<const std::uint32_t>(data.indices));
+        } else {
+            ebo_.Create(GL_ELEMENT_ARRAY_BUFFER, std::span<const std::uint32_t>(data.indices));
+        }
+    }
+
+    // The VAO snapshots the element-buffer binding, so re-record it whenever an
+    // EBO was (re)created after the VAO was built. Attribute bindings survive
+    // because the VBO name never changes (Replace) — only its storage does.
+    if (!data.indices.empty() && ebo_.valid()) {
+        vao_.Bind();
+        ebo_.Bind(GL_ELEMENT_ARRAY_BUFFER);
+        vao_.Unbind();
+    }
+}
+
 void Mesh::Draw() const {
     RenderContext::AssertRenderThread("Mesh::Draw");
     if (!vao_.valid()) return;

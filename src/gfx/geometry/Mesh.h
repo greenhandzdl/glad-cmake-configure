@@ -49,6 +49,14 @@ public:
     // Stage B: create GL objects from CPU data. Render-thread only.
     void Upload(MeshData&& data);
 
+    // Stage B re-run: replace the buffer contents in place (glBufferData full
+    // store re-substitution, i.e. orphan + realloc) while keeping the VAO and
+    // its attribute setup. Used by callers that remesh over time (voxel chunks
+    // after an edit). Falls back to Upload() when nothing was created yet.
+    // The vertex layout is fixed by Vertex, so only the bytes change. Render-
+    // thread only; the new MeshData may be built on any worker thread first.
+    void Update(MeshData&& data);
+
     void Draw() const;                       // whole mesh (or all implicit range)
     void DrawRange(const GeometryRange& range) const;
 
