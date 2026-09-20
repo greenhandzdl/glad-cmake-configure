@@ -51,6 +51,8 @@ export {
 #include "gfx/shader/IblShaders.h"
 #include "gfx/shader/PostProcessShaders.h"
 #include "gfx/shader/SpriteShaders.h"
+#include "gfx/shader/ParticleShaders.h"
+#include "gfx/shader/VoxelShaders.h"
 
 // --- geometry --------------------------------------------------------------
 #include "gfx/geometry/Vertex.h"
@@ -61,6 +63,7 @@ export {
 
 // --- texture ---------------------------------------------------------------
 #include "gfx/texture/Texture2D.h"
+#include "gfx/texture/Texture2DArray.h"
 #include "gfx/texture/TextureCubeMap.h"
 #include "gfx/texture/RenderTexture.h"
 
@@ -68,6 +71,7 @@ export {
 #include "gfx/camera/Camera.h"
 #include "gfx/camera/Frustum.h"
 #include "gfx/camera/Picking.h"
+#include "gfx/camera/VoxelRay.h"
 
 // --- light / shadow --------------------------------------------------------
 #include "gfx/light/Light.h"
@@ -93,6 +97,7 @@ export {
 #include "gfx/render/PostProcessChain.h"
 #include "gfx/render/SkyboxRenderer.h"
 #include "gfx/render/SpriteBatch.h"
+#include "gfx/render/ParticleBatch.h"
 
 // --- text ------------------------------------------------------------------
 #include "gfx/text/Font.h"
@@ -107,4 +112,15 @@ export {
 #include "gfx/assets/ImageLoader.h"
 #include "gfx/assets/ModelLoader.h"
 #include "gfx/assets/AssetManager.h"
+
+// --- util ------------------------------------------------------------------
+#include "gfx/util/Noise.h"
+
+// --- voxel -----------------------------------------------------------------
+// Chunk storage + meshing are pure CPU data types; the GPU records and the
+// render passes that consume them sit above (render/RenderPasses.h).
+#include "gfx/voxel/BlockRegistry.h"
+#include "gfx/voxel/Chunk.h"
+#include "gfx/voxel/ChunkMesher.h"
+#include "gfx/voxel/VoxelMeshGpu.h"
 }

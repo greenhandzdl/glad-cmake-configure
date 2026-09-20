@@ -1,6 +1,7 @@
 #!/bin/bash
-# run.sh - Run the GLFW Template application
-# Usage: ./scripts/run.sh [executable_name]
+# run.sh - Run a GLFW_Template demo executable
+# Usage: ./scripts/run.sh [target]      target defaults to @TARGET_NAME@
+#        e.g. ./scripts/run.sh voxel_demo
 
 set -e
 
@@ -8,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_ROOT/@BUILD_DIR_NAME@"
 OUTPUT_DIR="$PROJECT_ROOT/@OUTPUT_DIR_NAME@"
-EXECUTABLE="$OUTPUT_DIR/@TARGET_NAME@"
+EXECUTABLE="$OUTPUT_DIR/${1:-@TARGET_NAME@}"
 
 echo "========================================="
 echo "GLFW Template Run Script"
@@ -23,7 +24,7 @@ if [ ! -f "$EXECUTABLE" ]; then
     exit 1
 fi
 
-# Run the executable
+# Run the executable; anything past the target name goes to the app itself.
 echo "Running application..."
 echo ""
-"$EXECUTABLE"
+"$EXECUTABLE" "${@:2}"

@@ -256,18 +256,30 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
 endif()
 
 # ============================================================================
-# Executable
+# Executables
 # ============================================================================
-# The application only calls GLFW (shared) and GLAD (static, loads GL at
+# The applications only call GLFW (shared) and GLAD (static, loads GL at
 # runtime), so no direct OpenGL / X11 / Cocoa linking is required here — those
 # dependencies are carried transitively by the GLFW and GLAD targets, which the
-# gfx library now links PUBLIC. main.cpp is the sole consumer: `import gfx;`.
+# gfx library now links PUBLIC. Each demo is a sole consumer of `import gfx;`.
+#
+#   GLFW_Template  the PBR showcase (model + scene graph + post-process HUD)
+#   voxel_demo     the voxel playground (chunked terrain, water, mining/fill)
+# Both share one gfx build; pick one with ./scripts/run.sh <target>.
 add_executable(${TARGET_NAME} src/main.cpp)
 
 target_link_libraries(${TARGET_NAME} PRIVATE gfx)
 
 set_target_properties(${TARGET_NAME} PROPERTIES
     OUTPUT_NAME ${TARGET_NAME}
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/output)
+
+add_executable(voxel_demo src/voxel_main.cpp)
+
+target_link_libraries(voxel_demo PRIVATE gfx)
+
+set_target_properties(voxel_demo PROPERTIES
+    OUTPUT_NAME voxel_demo
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/output)
 
 # ============================================================================
