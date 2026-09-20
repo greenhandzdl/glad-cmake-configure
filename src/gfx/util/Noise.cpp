@@ -48,8 +48,15 @@ Noise::Noise(std::uint32_t seed) {
 
 double Noise::Perlin2(double x, double y) const {
     const auto floorMask = [](double v, int& cell) {
-        cell = static_cast<int>(std::floor(v));
-        return v - cell;
+        // Fold into the 256-periodic lattice before casting: Perlin only ever
+        // uses (int)floor(v) & 255 plus the fractional part, and both are
+        // unchanged by subtracting a multiple of 256. Casting straight through
+        // would be undefined for |v| past the int32 range, which an fbm octave
+        // ladder reaches as soon as a caller feeds it world-scale coordinates.
+        double w = std::isfinite(v) ? std::fmod(v, 256.0) : 0.0;
+        if (w < 0.0) w += 256.0;
+        cell = static_cast<int>(w);   // w is in [0, 256): truncation is floor
+        return w - cell;
     };
     int cx, cy;
     const double fx = floorMask(x, cx);
@@ -69,8 +76,15 @@ double Noise::Perlin2(double x, double y) const {
 
 double Noise::Perlin3(double x, double y, double z) const {
     const auto floorMask = [](double v, int& cell) {
-        cell = static_cast<int>(std::floor(v));
-        return v - cell;
+        // Fold into the 256-periodic lattice before casting: Perlin only ever
+        // uses (int)floor(v) & 255 plus the fractional part, and both are
+        // unchanged by subtracting a multiple of 256. Casting straight through
+        // would be undefined for |v| past the int32 range, which an fbm octave
+        // ladder reaches as soon as a caller feeds it world-scale coordinates.
+        double w = std::isfinite(v) ? std::fmod(v, 256.0) : 0.0;
+        if (w < 0.0) w += 256.0;
+        cell = static_cast<int>(w);   // w is in [0, 256): truncation is floor
+        return w - cell;
     };
     int cx, cy, cz;
     const double fx = floorMask(x, cx);

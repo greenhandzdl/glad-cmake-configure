@@ -12,7 +12,7 @@ namespace gfx {
 
 void ShadowPass::Execute(RenderFrame& f) {
     RenderContext::AssertRenderThread("ShadowPass::Execute");
-    if (!f.useShadow || !f.shadow || !f.depth || !f.scene) return;
+    if (!f.useShadow || !f.camera || !f.shadow || !f.depth || !f.scene) return;
 
     f.shadow->Update(*f.camera, f.sunToward);
     const ShaderProgram& depth = *f.depth;
@@ -31,29 +31,38 @@ void ShadowPass::Execute(RenderFrame& f) {
 
 void GeometryPass::Execute(RenderFrame& f) {
     RenderContext::AssertRenderThread("GeometryPass::Execute");
+    // The contract VoxelOpaquePass already follows: a pass may only be handed
+    // the subsystems the application actually brought. These five are what
+    // drawing the scene minimum needs; shadow / env / skybox are optional and
+    // each guarded where it is used.
+    if (!f.camera || !f.post || !f.lights || !f.pbr || !f.scene) return;
 
     // Linear HDR into the (MSAA) scene target.
     f.post->Resize(f.fbWidth, f.fbHeight, 4);
     f.post->BeginScene();
 
     f.lights->Bind();
-    f.shadow->BindUniform();
+    if (f.shadow) f.shadow->BindUniform();
 
     const ShaderProgram& pbr = *f.pbr;
     pbr.Use();
     pbr.Set("uViewProj", f.viewProj);
-    pbr.Set("uUseShadow", f.useShadow ? 1 : 0);
-    pbr.Set("uUseIbl", f.useIbl ? 1 : 0);
+    // Ask for the feature only where the data behind it exists: the shader
+    // would otherwise sample a shadow array or IBL set that was never bound.
+    pbr.Set("uUseShadow", (f.useShadow && f.shadow) ? 1 : 0);
+    pbr.Set("uUseIbl", (f.useIbl && f.env) ? 1 : 0);
 
-    f.shadow->Bind(texunit::shadowArray);
-    unsigned unit = texunit::irradiance;
-    f.env->BindIrradiance(unit);
-    f.env->BindPrefilter(unit);
-    f.env->BindBrdf(unit);
+    if (f.shadow) f.shadow->Bind(texunit::shadowArray);
+    if (f.env) {
+        unsigned unit = texunit::irradiance;
+        f.env->BindIrradiance(unit);
+        f.env->BindPrefilter(unit);
+        f.env->BindBrdf(unit);
+    }
 
     int visible = 0;
     for (SceneNode* n : f.scene->Renderables()) {
-        if (!f.frustum->SphereVisible(n->worldCenter(), n->worldRadius())) continue;
+        if (f.frustum && !f.frustum->SphereVisible(n->worldCenter(), n->worldRadius())) continue;
         ++visible;
         pbr.Set("uModel", n->world());
         pbr.Set("uNormalMatrix", glm::transpose(glm::inverse(glm::mat3(n->world()))));
@@ -81,7 +90,9 @@ void GeometryPass::Execute(RenderFrame& f) {
     // Skybox last (LEQUAL-depth trick fills uncovered pixels). SkyboxViewProj
     // strips the view translation (cube surrounds the camera) and always uses a
     // perspective box, so it stays correct in orthographic mode too.
-    f.skybox->Draw(f.camera->SkyboxViewProj(), f.env->sky(), texunit::skybox);
+    if (f.skybox && f.env && f.skybox->ready()) {
+        f.skybox->Draw(f.camera->SkyboxViewProj(), f.env->sky(), texunit::skybox);
+    }
 }
 
 namespace {
@@ -210,6 +221,7 @@ void VoxelTransparentPass::Execute(RenderFrame& f) {
 
 void PostProcessPass::Execute(RenderFrame& f) {
     RenderContext::AssertRenderThread("PostProcessPass::Execute");
+    if (!f.post) return;   // no HDR target: nothing to composite from
     f.post->EndScene();
     if (f.useBloom) {
         // The PBR spheres are lit to roughly 0.2-0.9 linear-HDR (their bright
@@ -234,7 +246,7 @@ void DebugHudPass::Execute(RenderFrame& f) {
     RenderContext::AssertRenderThread("DebugHudPass::Execute");
 
     // World-space line overlay on the tone-mapped screen.
-    if ((f.useDebug || f.selected) && f.debug) {
+    if ((f.useDebug || f.selected) && f.debug && f.scene) {
         f.debug->Clear();
         if (f.useDebug) {
             f.debug->PushAxes(glm::vec3(0.0f), 2.0f);
@@ -254,8 +266,16 @@ void DebugHudPass::Execute(RenderFrame& f) {
 
     // 2D HUD.
     if (!f.sprite || !f.font || !f.white) return;
+    constexpr std::string_view kHudControls =
+        "drag=orbit scroll=zoom A/D W/S=sun  1=shd 2=ibl 3=blm 4=dbg 5=inst 6=sky"
+        " Tab=proj  rclick=pick";
+    // The control line below is the widest string in the block; the panel is
+    // sized to it rather than a magic constant, so adding a key hint cannot make
+    // the text stick out of its own background.
+    const float hintW = TextRenderer::Measure(*f.font, kHudControls, 16.0f);
+    const float panelW = std::max(470.0f, 12.0f + hintW + 12.0f);
     f.sprite->Begin(*f.white, f.fbWidth, f.fbHeight);
-    f.sprite->Draw(*f.white, 0.0f, 0.0f, 470.0f, 118.0f, 0.0f, 0.0f, 1.0f, 1.0f,
+    f.sprite->Draw(*f.white, 0.0f, 0.0f, panelW, 118.0f, 0.0f, 0.0f, 1.0f, 1.0f,
                    glm::vec4(0.0f, 0.0f, 0.0f, 0.35f));
     char line[220];
     std::snprintf(line, sizeof(line),
@@ -270,15 +290,14 @@ void DebugHudPass::Execute(RenderFrame& f) {
     TextRenderer::Draw(*f.sprite, *f.font, line, 12.0f, 34.0f, 20.0f,
                        glm::vec4(0.75f, 0.85f, 1.0f, 1.0f));
     std::snprintf(line, sizeof(line),
-                  "Shadow %s  IBL %s  Bloom %s  Debug %s  Inst %s  %s",
+                  "Shadow %s  IBL %s  Bloom %s  Debug %s  Inst %s  Sky %s  %s",
                   f.useShadow ? "ON" : "OFF", f.useIbl ? "ON" : "OFF",
                   f.useBloom ? "ON" : "OFF", f.useDebug ? "ON" : "OFF",
-                  f.useInstances ? "ON" : "OFF",
+                  f.useInstances ? "ON" : "OFF", f.skybox ? "ON" : "OFF",
                   f.ortho ? "ORTHO" : "PERSP");
     TextRenderer::Draw(*f.sprite, *f.font, line, 12.0f, 60.0f, 20.0f,
                        glm::vec4(0.75f, 0.85f, 1.0f, 1.0f));
-    TextRenderer::Draw(*f.sprite, *f.font,
-                       "drag=orbit scroll=zoom A/D W/S=sun  1=shd 2=ibl 3=blm 4=dbg 5=inst Tab=proj  rclick=pick",
+    TextRenderer::Draw(*f.sprite, *f.font, kHudControls,
                        12.0f, 86.0f, 16.0f, glm::vec4(0.8f, 0.8f, 0.8f, 1.0f));
     f.sprite->End();
 

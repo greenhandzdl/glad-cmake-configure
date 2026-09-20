@@ -53,7 +53,7 @@ VoxelChunkMesh ChunkMesher::Build(const std::uint16_t* chunkCells,
         for (int z = 0; z < kChunkSize; ++z) {
             for (int x = 0; x < kChunkSize; ++x) {
                 const std::uint16_t id = chunkCells[VoxelIndex(x, y, z)];
-                if (id == 0) continue;
+                if (registry_.IsAir(id)) continue;   // includes unregistered ids
                 const BlockDef& def = registry_.Get(id);
                 VoxelMeshData& out =
                     def.transparent ? result.transparent : result.opaque;
@@ -66,7 +66,9 @@ VoxelChunkMesh ChunkMesher::Build(const std::uint16_t* chunkCells,
                     const std::uint16_t neighbor = source.Sample(world + n);
                     // Interior faces: opaque neighbours hide us; identical
                     // ids hide each other (water body / leaf cluster skins).
-                    if (neighbor != 0 &&
+                    // IsAir, not `!= 0`, because an unregistered neighbour is
+                    // air and has to leave the face open.
+                    if (!registry_.IsAir(neighbor) &&
                         (registry_.IsOpaque(neighbor) || neighbor == id)) {
                         continue;
                     }

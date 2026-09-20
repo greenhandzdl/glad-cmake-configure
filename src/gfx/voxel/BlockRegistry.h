@@ -16,6 +16,7 @@
  * read-only once world generation has started.
  */
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -64,10 +65,17 @@ public:
 
     // Runtime extension point: appended ids continue from the built-in range.
     // Nodiscard because a caller that appends must know the id it just created.
+    // The id space is 16-bit (a chunk cell stores one uint16), so a full
+    // registry refuses the type rather than wrapping the returned id onto
+    // another block: kAir is the unmistakable "you got no id" answer.
     [[nodiscard]] std::uint16_t Add(BlockDef def) {
+        if (defs_.size() >= kMaxTypes) return kAir;
         defs_.push_back(std::move(def));
         return static_cast<std::uint16_t>(defs_.size() - 1);
     }
+
+    // kMaxTypes keeps count() representable in the 16-bit id space as well.
+    static constexpr std::size_t kMaxTypes = 65535;
 
     [[nodiscard]] std::uint16_t count() const noexcept {
         return static_cast<std::uint16_t>(defs_.size());
@@ -77,6 +85,15 @@ public:
     [[nodiscard]] const BlockDef& Get(std::uint16_t id) const {
         static const BlockDef kAirDef{"air", 0, false, false, false, false};
         return id < defs_.size() ? defs_[id] : kAirDef;
+    }
+
+    // The question the mesher has to ask, and why `id == 0` is not enough: a
+    // cell whose id was never registered (a save from an older block table, a
+    // mod that unloaded) resolves to air above, so it must also render nothing.
+    // Testing the raw id instead would emit phantom quads textured with slice 0
+    // while reporting them as opaque geometry.
+    [[nodiscard]] bool IsAir(std::uint16_t id) const noexcept {
+        return id == kAir || static_cast<std::size_t>(id) >= defs_.size();
     }
 
     // Meshing conveniences.

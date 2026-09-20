@@ -49,6 +49,10 @@ struct VoxelHit {
 // Cells outside the range are treated as void: the ray leaves the volume and
 // reports a miss, which keeps a chunk-boundary edit from picking a phantom
 // block in a neighbouring chunk the caller did not intend to query.
+//
+// A ray with any non-finite component (a NaN from an unprojected degenerate
+// matrix, an inf from a camera that blew up) is a miss rather than a crash: the
+// walk has no honest answer for it, and callers already handle nullopt.
 template <typename SolidityFn>
 inline std::optional<VoxelHit> RaycastVoxel(const Ray& ray,
                                             const glm::ivec3& min,
@@ -62,6 +66,19 @@ inline std::optional<VoxelHit> RaycastVoxel(const Ray& ray,
 
     const glm::vec3 o = ray.origin;
     const glm::vec3 d = ray.dir;
+
+    // The setup below turns world coordinates into cell indices, and a float to
+    // int conversion is undefined once the value leaves the int32 range. Ray
+    // usually comes from PickRay unprojecting a view-projection, so a degenerate
+    // matrix (or a camera that blew up) can hand this function a NaN or a 1e30
+    // component. Answer "miss" instead of reading it as an arbitrary cell.
+    if (!(std::isfinite(o.x) && std::isfinite(o.y) && std::isfinite(o.z))
+        || !(std::isfinite(d.x) && std::isfinite(d.y) && std::isfinite(d.z)))
+        return std::nullopt;
+
+    // Written as `!(maxDist > 0)` so a NaN reach rejects itself instead of
+    // turning every later "travelled > maxDist" comparison into a no.
+    if (!(maxDist > 0.0f)) return std::nullopt;
 
     for (int axis = 0; axis < 3; ++axis) {
         const float oA = axis == 0 ? o.x : (axis == 1 ? o.y : o.z);
@@ -86,23 +103,39 @@ inline std::optional<VoxelHit> RaycastVoxel(const Ray& ray,
         }
 
         const float inv = 1.0f / dA;
+        // Find the first cell in the double domain and cast only once the value
+        // is known to sit inside the queried range. An origin far outside the
+        // volume is legitimate -- the ray just has to travel further -- but
+        // (int)floor(1e30f), and the `lo - cell` skip that used to follow it,
+        // are both undefined. The closed-form tMax below equals the old
+        // "compute, then add (lo - cell) * tDelta" for every in-range origin.
         if (dA > 0.0f) {
-            cell[axis] = static_cast<int>(std::floor(oA));
-            tMax[axis] = (static_cast<float>(cell[axis]) + 1.0f - oA) * inv;
-            tDelta[axis] = inv;
             step[axis] = 1;
-            if (cell[axis] < lo) {
-                tMax[axis] += static_cast<float>(lo - cell[axis]) * tDelta[axis];
+            tDelta[axis] = inv;
+            const double first = std::floor(static_cast<double>(oA));
+            if (first < static_cast<double>(lo)) {
+                tMax[axis] = static_cast<float>((static_cast<double>(lo) + 1.0
+                                                 - static_cast<double>(oA)) * static_cast<double>(inv));
                 cell[axis] = lo;
+            } else {
+                if (first > static_cast<double>(hi)) return std::nullopt;
+                cell[axis] = static_cast<int>(first);
+                tMax[axis] = static_cast<float>((first + 1.0 - static_cast<double>(oA))
+                                                * static_cast<double>(inv));
             }
         } else {
-            cell[axis] = static_cast<int>(std::ceil(oA)) - 1;
-            tMax[axis] = (oA - static_cast<float>(cell[axis])) * -inv;
-            tDelta[axis] = -inv;
             step[axis] = -1;
-            if (cell[axis] > hi) {
-                tMax[axis] += static_cast<float>(cell[axis] - hi) * tDelta[axis];
+            tDelta[axis] = -inv;
+            const double first = std::ceil(static_cast<double>(oA)) - 1.0;
+            if (first > static_cast<double>(hi)) {
+                tMax[axis] = static_cast<float>((static_cast<double>(oA) - static_cast<double>(hi))
+                                                * static_cast<double>(-inv));
                 cell[axis] = hi;
+            } else {
+                if (first < static_cast<double>(lo)) return std::nullopt;
+                cell[axis] = static_cast<int>(first);
+                tMax[axis] = static_cast<float>((static_cast<double>(oA) - first)
+                                                * static_cast<double>(-inv));
             }
         }
         if (cell[axis] < lo || cell[axis] > hi) return std::nullopt;

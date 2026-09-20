@@ -7,6 +7,8 @@ module gfx;
 namespace gfx {
 
 namespace {
+// Upload() rejects anything wider than this (see the size check below).
+constexpr int kMaxTextureSide = 16384;
 GLenum DataFormat(int channels) {
     switch (channels) {
         case 1: return GL_RED;
@@ -63,7 +65,19 @@ void Texture2D::Upload(const Texture2DDesc& desc) {
         glDeleteTextures(1, &id_);
         id_ = 0;
     }
-    if (desc.pixels.empty() || desc.width <= 0 || desc.height <= 0) return;
+    // Same contract as Texture2DArray::Upload: glTexImage2D is handed
+    // desc.pixels.data() and reads width*height*channels bytes from it, so the
+    // vector has to be proven at least that long first. The channel bounds are
+    // part of the check because DataFormat() maps anything else onto RGBA, and
+    // the side bound keeps the byte product far away from wrapping (no desktop
+    // GL of the 4.1 era samples a larger texture either).
+    if (desc.width <= 0 || desc.height <= 0 || desc.channels < 1 || desc.channels > 4
+        || desc.width > kMaxTextureSide || desc.height > kMaxTextureSide) {
+        return;
+    }
+    const std::size_t bytes =
+        static_cast<std::size_t>(desc.width) * desc.height * desc.channels;
+    if (desc.pixels.size() < bytes) return;
 
     glGenTextures(1, &id_);
     glBindTexture(GL_TEXTURE_2D, id_);

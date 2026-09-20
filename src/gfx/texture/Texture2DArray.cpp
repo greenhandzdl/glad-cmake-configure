@@ -7,6 +7,10 @@ module gfx;
 namespace gfx {
 
 namespace {
+// Same bound as Texture2D.cpp: it keeps the size arithmetic out of wrap-around
+// territory, and no desktop GL of the 4.1 era samples larger than this.
+constexpr int kMaxTextureSide = 16384;
+constexpr int kMaxTextureLayers = 4096;
 GLenum ArrayDataFormat(int channels) {
     switch (channels) {
         case 1: return GL_RED;
@@ -64,10 +68,22 @@ void Texture2DArray::Upload(const Texture2DArrayDesc& desc) {
         glDeleteTextures(1, &id_);
         id_ = 0;
     }
+    // A description is only usable when its byte count can be checked against
+    // the pixel vector, so the channel count has to be one the formats below
+    // actually map to (0 would divide by zero, >4 would upload as RGBA while
+    // being measured as something else).
+    if (desc.pixels.empty() || desc.width <= 0 || desc.height <= 0 || desc.layers <= 0
+        || desc.channels < 1 || desc.channels > 4
+        || desc.width > kMaxTextureSide || desc.height > kMaxTextureSide
+        || desc.layers > kMaxTextureLayers) {
+        return;
+    }
     const std::size_t layerBytes =
         static_cast<std::size_t>(desc.width) * desc.height * desc.channels;
-    if (desc.pixels.empty() || desc.width <= 0 || desc.height <= 0 || desc.layers <= 0 ||
-        desc.pixels.size() < layerBytes * static_cast<std::size_t>(desc.layers)) {
+    // Division rather than `layerBytes * layers`: the product of a hostile
+    // description can wrap back into range and talk glTexImage3D into reading
+    // past the caller's buffer, a quotient cannot.
+    if (desc.pixels.size() / layerBytes < static_cast<std::size_t>(desc.layers)) {
         return;
     }
 
