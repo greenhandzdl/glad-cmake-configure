@@ -11,8 +11,16 @@
  *   A/D or Left/Right : sun azimuth           W/S or Up/Down : sun elevation
  *   right click  : pick an object (bounding-sphere ray test)
  *   1 : cascaded shadows   2 : IBL   3 : bloom   4 : debug lines   5 : instanced field
+ *   6 : sky background
  *   Tab : toggle perspective / orthographic projection
  *   Esc : quit
+ *
+ * The same features answer to the command line (--off shadow,ibl, --help for
+ * the list, --quit-after SECONDS to end a scripted run), so a regression sweep
+ * can switch each one without a keyboard: see demo_cli.h. --yaw / --pitch /
+ * --radius aim the orbit camera, which a sweep needs to bring the instanced
+ * field and the sky into the frame at all; --freeze-at SECONDS parks the
+ * animation clock, which is what makes two runs of one setting pixel-identical.
  *
  * The application owns the GL resources (meshes / materials / textures / passes);
  * scene nodes reference them by non-owning pointer, so the whole frame's draw
@@ -39,6 +47,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 
+#include "demo_cli.h"
+
 // The whole engine as a single C++20 named module: no per-header includes.
 import gfx;
 
@@ -59,6 +69,7 @@ struct Input {
     bool  useBloom = true;
     bool  useDebug = false;
     bool  useInstances = false;
+    bool  useSky = true;     // background cube; off leaves the clear colour
     bool  ortho = false;   // current projection: false=perspective, true=ortho
     // Pending right-click pick request (consumed + cleared in the main loop).
     // Stored normalised to the window, not raw cursor pixels: the pick ray is
@@ -181,7 +192,15 @@ gfx::Texture2DDesc MakeSolidDesc() {
 
 } // namespace
 
-int main(int /*argc*/, char** /*argv*/) {
+int main(int argc, char** argv) {
+    const demo::Flags flags(argc, argv,
+                            {"shadow", "ibl", "bloom", "debug", "instances", "sky", "ortho"},
+                            {"freeze-at", "yaw", "pitch", "radius"}, "GLFW_Template");
+    if (flags.wantsHelp()) {
+        flags.printUsage();
+        return 0;
+    }
+
     if (!glfwInit()) {
         std::cerr << "Failed to initialize GLFW\n";
         return 1;
@@ -216,6 +235,20 @@ int main(int /*argc*/, char** /*argv*/) {
     std::printf("OpenGL %s\n", reinterpret_cast<const char*>(glGetString(GL_VERSION)));
 
     Input input;
+    // Aim the orbit camera from the command line. Needed because two of the
+    // toggles have nothing to show at the default view: the instanced field sits
+    // out toward +x (yaw about -pi/2) and the sky only enters the frame once the
+    // pitch goes negative. Unset, these are the Input defaults, byte for byte.
+    input.yaw   = static_cast<float>(flags.number("yaw", input.yaw));
+    input.pitch = static_cast<float>(flags.number("pitch", input.pitch));
+    input.radius = std::clamp(static_cast<float>(flags.number("radius", input.radius)), 2.0f, 60.0f);
+    input.useShadow = flags.on("shadow");
+    input.useIbl = flags.on("ibl");
+    input.useBloom = flags.on("bloom");
+    input.useDebug = flags.on("debug", false);
+    input.useInstances = flags.on("instances", false);
+    input.useSky = flags.on("sky");
+    input.ortho = flags.on("ortho", false);
     glfwSetWindowUserPointer(window, &input);
     glfwSetCursorPosCallback(window, MouseCallback);
     glfwSetMouseButtonCallback(window, MouseButtonCallback);
@@ -401,6 +434,10 @@ int main(int /*argc*/, char** /*argv*/) {
 
         gfx::Camera camera;
         camera.SetPerspective(45.0f, 1.0f, 0.1f, 200.0f);
+        // The camera owns the projection state; --on ortho just gives it the one
+        // kick the Tab key would have, and input.ortho mirrors the result for the
+        // HUD (same arrangement as the per-frame toggle below).
+        if (input.ortho) camera.ToggleProjection();
 
         const glm::vec3 target(0.0f, 0.6f, 0.0f);
 
@@ -416,24 +453,29 @@ int main(int /*argc*/, char** /*argv*/) {
         pbr->SetBlockBinding("ShadowBlock", gfx::CascadedShadowMap::kShadowBinding);
 
         gfx::SceneNode* selected = nullptr;
-        double lastFrameTime = glfwGetTime();
+        const double startedAt = glfwGetTime();
+        const double quitAfter = flags.quitAfter();
+        const double freezeAt = flags.number("freeze-at");
         double smoothedFps = 60.0;
+        int fpsFrames = 0;
+        double fpsWindowStart = startedAt;
 
         while (!glfwWindowShouldClose(window)) {
             if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
                 glfwSetWindowShouldClose(window, true);
-            // Edge-detect the 1..5 toggles: flip once per press, rearm on release.
+            // Edge-detect the 1..6 toggles: flip once per press, rearm on release.
             auto edgeToggle = [](bool pressed, bool& armed, bool& flag) {
                 if (pressed && armed) { flag = !flag; armed = false; }
                 else if (!pressed) armed = true;
             };
             static bool shadowArmed = true, iblArmed = true, bloomArmed = true,
-                        debugArmed = true, instArmed = true, projArmed = true;
+                        debugArmed = true, instArmed = true, skyArmed = true, projArmed = true;
             edgeToggle(glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS, shadowArmed, input.useShadow);
             edgeToggle(glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS, iblArmed,    input.useIbl);
             edgeToggle(glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS, bloomArmed,  input.useBloom);
             edgeToggle(glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS, debugArmed,  input.useDebug);
             edgeToggle(glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS, instArmed,   input.useInstances);
+            edgeToggle(glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS, skyArmed,    input.useSky);
             // Tab swaps perspective <-> orthographic once per press.
             if (bool tabDown = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS; tabDown && projArmed) {
                 input.ortho = camera.ToggleProjection()
@@ -444,11 +486,18 @@ int main(int /*argc*/, char** /*argv*/) {
             }
             HandleKeys(window, input);
 
-            // FPS (smoothed) for the HUD.
+            // FPS for the HUD, averaged over a fixed wall-clock window rather
+            // than an EMA of 1/dt: the EMA only echoed whichever frame last
+            // stalled, so the readout never matched the frame it was drawn on.
             const double now = glfwGetTime();
-            const double dt = now - lastFrameTime;
-            lastFrameTime = now;
-            if (dt > 0.0) smoothedFps += (1.0 / dt - smoothedFps) * 0.1;
+            ++fpsFrames;
+            if (const double span = now - fpsWindowStart; span >= 0.5) {
+                smoothedFps = static_cast<double>(fpsFrames) / span;
+                fpsFrames = 0;
+                fpsWindowStart = now;
+            }
+            if (quitAfter > 0.0 && now - startedAt >= quitAfter)
+                glfwSetWindowShouldClose(window, true);
 
             int fbw = 0, fbh = 0;
             glfwGetFramebufferSize(window, &fbw, &fbh);
@@ -473,7 +522,18 @@ int main(int /*argc*/, char** /*argv*/) {
             lightBuffer.Update(setup, camera.Position());
 
             // Advance the animated hierarchy, then refresh world transforms once.
-            carousel->local().SetAxisAngle(glm::vec3(0, 1, 0), static_cast<float>(now) * 0.6f);
+            // --freeze-at S parks the animation clock S seconds after start, which
+            // is what makes two runs of the same settings pixel-identical for a
+            // screenshot sweep; unset, the clock is plain wall time as always.
+            // The carousel turns on seconds *since start*, not the absolute
+            // timer: glfwGetTime() counts from machine boot, so an absolute clock
+            // left the parked phase different on every run (and lost precision on
+            // a long-lived desktop, where the float cast alone moved the angle by
+            // thousandths of a radian per frame).
+            const double animTime =
+                freezeAt > 0.0 ? startedAt + std::min(now - startedAt, freezeAt) : now;
+            carousel->local().SetAxisAngle(glm::vec3(0, 1, 0),
+                                           static_cast<float>(animTime - startedAt) * 0.6f);
             scene.Update();
 
             const glm::mat4 viewProj = camera.ViewProjection();
@@ -505,7 +565,7 @@ int main(int /*argc*/, char** /*argv*/) {
             frame.lights = &lightBuffer;
             frame.shadow = &csm;
             frame.env = &env;
-            frame.skybox = &skybox;
+            frame.skybox = input.useSky ? &skybox : nullptr;
             frame.pbr = &*pbr;
             frame.depth = &*depth;
             frame.lightSetup = setup;

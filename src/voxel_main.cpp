@@ -20,16 +20,26 @@
  *
  * Controls:
  *   mouse        : look around (pointer captured)
- *   W/A/S/D      : fly forward / left / right / back    Space/Shift : up/down
- *   hold Q+E     : slower flight (Q toggles nothing else)
+ *   W/A/S/D      : fly forward / back / left / right
+ *   Space / Ctrl : fly up / down          hold LeftShift : slower flight
  *   left click   : break the aimed block (debris particles)
  *   right click  : place the selected block on the aimed face
  *   1..8         : choose the block type
- *   F            : toggle fly / orbit camera            ESC : release pointer
- *   A/D + W/S also move the sun when in orbit mode is NOT used; here:
- *   [ / ]        : sun azimuth                          - / = : sun elevation
- *   P            : toggle the point particles (debug)
- *   X            : quit
+ *   F            : toggle fly / orbit camera (ESC releases the pointer, or
+ *                  quits while orbiting)       X : quit
+ *   [ / ]        : sun azimuth                - / = : sun elevation
+ *   P            : toggle the debris particles
+ *   Tab          : toggle perspective / orthographic projection
+ *   scroll       : zoom the orbit camera (orbit mode)
+ *
+ * Every renderer feature can also be switched from the command line, which is
+ * what lets a script diff one feature at a time without a keyboard: see
+ * demo_cli.h and `--help` for the list (--off fog,water,sky,particles,
+ * --on ortho, --auto-break N, --quit-after SECONDS). --yaw / --pitch / --rise
+ * aim and lift the fly camera: at the spawn tilt the crosshair ray lands past
+ * the interaction reach, so scripted mining needs a steeper pitch, and
+ * --auto-place N with --select 7 builds the water a water test cannot find on
+ * its own in this part of the world.
  *
  * The window is created with the same 4.1-core hints as the PBR demo; see
  * main.cpp for the engine's other showcase.
@@ -57,6 +67,8 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+
+#include "demo_cli.h"
 
 // The whole engine as a single C++20 named module.
 import gfx;
@@ -410,6 +422,10 @@ struct Input {
     float sunAzimuth = 0.75f, sunElevation = 0.8f;
     bool wantBreak = false, wantPlace = false;
     bool showParticles = true;
+    // Renderer features that --off can switch off before the first frame.
+    bool showSky = true;
+    bool showFog = true;
+    float waterAlpha = 0.85f;
 };
 
 const char* const kFontCandidates[] = {
@@ -508,7 +524,16 @@ void VoxelHudPass::Execute(gfx::RenderFrame& f) {
 
 } // namespace
 
-int main(int /*argc*/, char** /*argv*/) {
+int main(int argc, char** argv) {
+    const demo::Flags flags(argc, argv,
+                            {"particles", "fog", "water", "sky", "ortho"},
+                            {"auto-break", "auto-place", "freeze-at", "yaw", "pitch", "rise",
+                             "select"}, "voxel_demo");
+    if (flags.wantsHelp()) {
+        flags.printUsage();
+        return 0;
+    }
+
     if (!glfwInit()) {
         std::cerr << "Failed to initialize GLFW\n";
         return 1;
@@ -544,6 +569,18 @@ int main(int /*argc*/, char** /*argv*/) {
     std::printf("OpenGL %s\n", reinterpret_cast<const char*>(glGetString(GL_VERSION)));
 
     Input input;
+    input.showParticles = flags.on("particles");
+    input.showFog = flags.on("fog");
+    input.showSky = flags.on("sky");
+    // The water sheet is alpha-blended, so "off" means fully transparent rather
+    // than a pass removed from the pipeline: the pass also draws the particles,
+    // and the two switches have to stay independent.
+    input.waterAlpha = flags.on("water") ? 0.85f : 0.0f;
+    input.ortho = flags.on("ortho", false);
+    // Which block --auto-place builds with; the sweep uses 7 (water) to put a
+    // transparent sheet in the frame without needing a lake to be nearby.
+    input.selected = std::clamp(static_cast<int>(flags.number("select", input.selected)),
+                                1, static_cast<int>(Block::kBuiltinCount) - 1);
     glfwSetWindowUserPointer(window, &input);
     glfwSetCursorPosCallback(window, MouseCallback);
     glfwSetMouseButtonCallback(window, MouseButtonCallback);
@@ -588,6 +625,10 @@ int main(int /*argc*/, char** /*argv*/) {
             std::fprintf(stderr, "Skybox init failed\n");
             return 1;
         }
+        // Procedural HDR sky + IBL, baked once from the initial sun (same
+        // contract as main.cpp): [ ] and - = move the direct light, not the sun
+        // disc in the sky - regenerating the cube per frame would cost more than
+        // the feature is worth in a demo.
         const glm::vec3 initialTravel = -SunToward(input);
         gfx::EnvironmentMap env;
         if (!env.Generate(initialTravel, 256, 32, 256)) {
@@ -633,6 +674,9 @@ int main(int /*argc*/, char** /*argv*/) {
 
         gfx::Camera camera;
         camera.SetPerspective(60.0f, 1.0f, 0.1f, 400.0f);
+        // --on ortho gives the camera the one kick the Tab key would have; the
+        // camera stays the projection authority and input.ortho mirrors it.
+        if (input.ortho) camera.ToggleProjection();
 
         // ---- world + streaming state ---------------------------------------
         World world;
@@ -644,9 +688,13 @@ int main(int /*argc*/, char** /*argv*/) {
             // an empty chunk wall.
             const int sx = kWorldX / 2, sz = kWorldZ / 2;
             const int h = TerrainHeight(world.noise, sx, sz);
-            input.focus = glm::vec3(static_cast<float>(sx) + 0.5f,
-                                    static_cast<float>(std::max(h, kSeaLevel) + 6),
-                                    static_cast<float>(sz) + 0.5f);
+            input.focus = glm::vec3(
+                static_cast<float>(sx) + 0.5f,
+                static_cast<float>(std::max(h, kSeaLevel) + 6
+                                    + static_cast<int>(flags.number("rise"))),
+                static_cast<float>(sz) + 0.5f);
+            input.yaw   = static_cast<float>(flags.number("yaw", input.yaw));
+            input.pitch = static_cast<float>(flags.number("pitch", input.pitch));
             camera.SetYawPitch(input.yaw, input.pitch);
             camera.Translate(input.focus - camera.Position());
         }
@@ -657,8 +705,9 @@ int main(int /*argc*/, char** /*argv*/) {
         vx.chunks = &world.gpu;
         // The atlas slice is already 0.72 alpha; the pass multiplies, so 0.85
         // lands the water sheet near two-thirds opacity - enough to read as
-        // liquid while still showing the sand bottom through it.
-        vx.waterAlpha = 0.85f;
+        // liquid while still showing the sand bottom through it. --off water
+        // brings that down to 0 (see the input setup above).
+        vx.waterAlpha = input.waterAlpha;
         opaqueRaw->SetPipeline(vx);
         transpRaw->SetPipeline(vx);
 
@@ -862,8 +911,25 @@ int main(int /*argc*/, char** /*argv*/) {
         };
 
         ApplyCapture(window, input);
-        double lastFrameTime = glfwGetTime();
+        const double startedAt = glfwGetTime();
+        const double quitAfter = flags.quitAfter();
+        const double freezeAt = flags.number("freeze-at");
+        // Everything time-driven (flight speed, water scroll, debris) advances on
+        // this clock rather than on wall time, so --freeze-at can park it.
+        double animTime = startedAt;
+        double lastAnimTime = animTime;
+        // Debris integrates on a fixed 120 Hz step counted off that clock instead
+        // of the frame delta. Two reasons, one of them a test: with a variable
+        // step, the parked burst sat at a different height in every run, which put
+        // the noise floor of a particles-off screenshot diff at 2% of the frame
+        // and made the switch unmeasurable; in play it means the same puff falls
+        // identically at 30 and at 300 fps.
+        constexpr double kSimStep = 1.0 / 120.0;
+        int simSteps = 0;
         double smoothedFps = 60.0;
+        // Fixed-window frame counter for the HUD readout (see the loop).
+        int fpsFrames = 0;
+        double fpsWindowStart = startedAt;
         static const char* const kBlockKeys[9] = {
             "", "1 grass", "2 dirt", "3 stone", "4 sand",
             "5 wood", "6 leaves", "7 water", "8 snow"
@@ -871,6 +937,18 @@ int main(int /*argc*/, char** /*argv*/) {
         // The HUD shows the previous frame's cull counters: the passes write
         // them into the frame, which is assembled after the text is built.
         int prevVisible = 0, prevTotal = 0;
+        // --auto-break N / --auto-place N: scripted mining and building, for the
+        // headless feature sweep. Each tick goes through exactly the same path a
+        // click does (DDA pick -> Edit -> remesh -> debris), so a screenshot taken
+        // after it says something about all four without a keyboard attached.
+        int autoBreakLeft = static_cast<int>(flags.number("auto-break"));
+        int autoPlaceLeft = static_cast<int>(flags.number("auto-place"));
+        // Scripted edits tick every 0.25 s of fixed-step time, so their cadence is
+        // as reproducible as the debris they spawn.
+        constexpr int kBreakPeriodSteps = 30;
+        int nextBreakStep = 240;                              // first tick 2 s in
+        int spawnedTotal = 0, frames = 0, breaks = 0;
+        double minFps = 1e9;
 
         while (!glfwWindowShouldClose(window)) {
             // ---- edge-detected toggles + keys -------------------------------
@@ -912,9 +990,63 @@ int main(int /*argc*/, char** /*argv*/) {
             }
 
             const double now = glfwGetTime();
-            const float dt = static_cast<float>(std::min(now - lastFrameTime, 0.25));
-            lastFrameTime = now;
-            if (dt > 0.0f) smoothedFps += (1.0 / dt - smoothedFps) * 0.1;
+            // --freeze-at S parks the demo clock S seconds after start: dt falls to
+            // 0, so the scroll, the debris and the scripted breaks all stop, and
+            // two runs with the same settings become pixel-identical for a sweep.
+            // The clamp is applied to *elapsed* seconds rather than to an absolute
+            // timestamp: (startedAt + S) - startedAt is not exactly S in binary
+            // floating point, and the lost ulp was enough to make the fixed-step
+            // count below flicker between 959 and 960 - one step of debris, a few
+            // pixels of pure noise in every screenshot pair.
+            const double elapsed = freezeAt > 0.0 ? std::min(now - startedAt, freezeAt)
+                                                 : now - startedAt;
+            animTime = startedAt + elapsed;
+            const float dt = static_cast<float>(std::min(animTime - lastAnimTime, 0.25));
+            lastAnimTime = animTime;
+            // Catch the fixed-step clock up with the demo clock. Both are clamped
+            // by --freeze-at, so the step count reached at the parked moment is a
+            // function of S alone and no frame pacing can shift it. The one thing
+            // pacing can still shift is *where a frame starts*: a slow frame
+            // advances two or three steps at once and can jump clean over a
+            // scripted-edit boundary, leaving that burst a step older here than
+            // there. So the boundary is used as an intermediate target - the loop
+            // stops on it, the edit below runs, and the rest of the frame's steps
+            // are taken afterwards.
+            const int targetSteps = static_cast<int>(elapsed / kSimStep + 0.5);
+            int stepGoal = targetSteps;
+            if (autoBreakLeft + autoPlaceLeft > 0)
+                stepGoal = std::min(targetSteps, nextBreakStep);
+            while (simSteps < stepGoal) {
+                ++simSteps;
+                particles.Update(static_cast<float>(kSimStep));
+            }
+            // Averaged over a fixed wall-clock window instead of an EMA of 1/dt
+            // per frame: the latter is dominated by whichever frame last
+            // stalled, so the number never agreed with the frame it was drawn on.
+            ++fpsFrames;
+            if (const double span = now - fpsWindowStart; span >= 0.5) {
+                smoothedFps = static_cast<float>(fpsFrames) / static_cast<float>(span);
+                minFps = std::min(minFps, static_cast<double>(smoothedFps));
+                fpsFrames = 0;
+                fpsWindowStart = now;
+            }
+            if (quitAfter > 0.0 && now - startedAt >= quitAfter)
+                glfwSetWindowShouldClose(window, true);
+            ++frames;
+
+            // ---- sun direction ([ ] azimuth, - = elevation) ------------------
+            // Polled rather than edge-triggered: re-aiming the sun is a dragging
+            // sort of job, and scaling by dt keeps the sweep rate the same on a
+            // 30 fps laptop as on a 300 fps one.
+            constexpr float kSunRate = 0.6f;
+            if (glfwGetKey(window, GLFW_KEY_LEFT_BRACKET) == GLFW_PRESS)
+                input.sunAzimuth -= kSunRate * dt;
+            if (glfwGetKey(window, GLFW_KEY_RIGHT_BRACKET) == GLFW_PRESS)
+                input.sunAzimuth += kSunRate * dt;
+            if (glfwGetKey(window, GLFW_KEY_MINUS) == GLFW_PRESS)
+                input.sunElevation = std::max(0.05f, input.sunElevation - kSunRate * dt);
+            if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS)
+                input.sunElevation = std::min(1.45f, input.sunElevation + kSunRate * dt);
 
             int fbw = 0, fbh = 0;
             glfwGetFramebufferSize(window, &fbw, &fbh);
@@ -957,6 +1089,25 @@ int main(int /*argc*/, char** /*argv*/) {
             }
 
             // ---- block editing (DDA pick through the screen centre) ---------
+            bool scriptedBreak = false;
+            if (autoBreakLeft + autoPlaceLeft > 0 && simSteps >= nextBreakStep) {
+                // Re-anchor on the *absolute* cadence (period multiples from the
+                // first tick), not on "now + period": the latter let the frame
+                // that happened to cross the 2 s mark shift every later tick by
+                // however many steps it had jumped, so the last scripted break
+                // fell inside or outside --freeze-at depending on frame pacing.
+                // Ticks missed during a stall are dropped, never replayed.
+                nextBreakStep += kBreakPeriodSteps;
+                if (nextBreakStep <= simSteps) nextBreakStep = simSteps + kBreakPeriodSteps;
+                if (autoBreakLeft > 0) {
+                    --autoBreakLeft;
+                    input.wantBreak = true;
+                    scriptedBreak = true;
+                } else {
+                    --autoPlaceLeft;
+                    input.wantPlace = true;
+                }
+            }
             if (input.wantBreak || input.wantPlace) {
                 const gfx::Ray ray = gfx::PickRay(fbw * 0.5f, fbh * 0.5f, fbw, fbh,
                                                   camera.InverseViewProjection());
@@ -974,20 +1125,31 @@ int main(int /*argc*/, char** /*argv*/) {
                         return world.Sample(hit->position);
                     }();
                     if (input.wantBreak) {
+                        ++breaks;   // reported at exit: proves the scripted sweep mined
                         world.Edit(hit->position, 0);
                         // Debris: a short outward burst, tinted by the block's
                         // own slice colour so the puff reads as "that material".
                         const glm::vec3 tint = BlockTint(broken);
                         const glm::vec3 c = glm::vec3(hit->position) + 0.5f;
                         for (int i = 0; i < 22 && input.showParticles; ++i) {
-                            const std::uint32_t h = Hash2(i * 7, static_cast<int>(now * 10) + i);
+                            // Seeded off the break counter, not the clock: an
+                            // animTime-derived seed changed wholesale whenever the
+                            // frame happened to land on a different tenth of a
+                            // second, which made each puff irreproducible.
+                            const std::uint32_t h = Hash2(i * 7, breaks * 31 + i);
                             const glm::vec3 v(
                                 (static_cast<float>(h & 255) / 255.0f - 0.5f) * 4.0f,
                                 1.2f + static_cast<float>((h >> 8) & 255) / 255.0f * 2.4f,
                                 (static_cast<float>((h >> 16) & 255) / 255.0f - 0.5f) * 4.0f);
-                            particles.Spawn(c + 0.4f * glm::vec3(hit->normal), v,
-                                            glm::vec4(tint, 1.0f), 0.55f, 0.14f);
+                            if (particles.Spawn(c + 0.4f * glm::vec3(hit->normal), v,
+                                                glm::vec4(tint, 1.0f), 0.55f, 0.14f))
+                                ++spawnedTotal;
                         }
+                        // Drop the eye with the floor just removed: a shaft dug
+                        // under the feet otherwise gets deeper than the
+                        // interaction reach and the remaining ticks would pick
+                        // empty air.
+                        if (scriptedBreak) camera.Translate({0.0f, -1.0f, 0.0f});
                     }
                     if (input.wantPlace) {
                         const glm::ivec3 target = hit->position + hit->normal;
@@ -1002,9 +1164,13 @@ int main(int /*argc*/, char** /*argv*/) {
                 }
                 input.wantBreak = input.wantPlace = false;
             }
+            // The steps this frame skipped on the way to the boundary.
+            while (simSteps < targetSteps) {
+                ++simSteps;
+                particles.Update(static_cast<float>(kSimStep));
+            }
 
             streamChunks(camera.Position());
-            particles.Update(dt);
 
             // ---- lighting + fog ---------------------------------------------
             const glm::vec3 towardSun = SunToward(input);
@@ -1015,16 +1181,19 @@ int main(int /*argc*/, char** /*argv*/) {
             setup.ambient = glm::vec3(0.30f, 0.34f, 0.40f);
             // Fog closes just inside the render distance, so chunk pop-in
             // happens behind the haze rather than in front of the camera.
+            // Leaving fogStart at 0 is what switches it off in the shader.
             setup.fogColor = ToLinear(glm::vec3(0.60f, 0.72f, 0.88f));
-            setup.fogStart = static_cast<float>(kRenderDistance) * kChunk * 0.35f;
-            setup.fogEnd   = static_cast<float>(kRenderDistance) * kChunk * 0.98f;
+            if (input.showFog) {
+                setup.fogStart = static_cast<float>(kRenderDistance) * kChunk * 0.35f;
+                setup.fogEnd   = static_cast<float>(kRenderDistance) * kChunk * 0.98f;
+            }
             lightBuffer.Update(setup, camera.Position());
 
             const glm::mat4 viewProj = camera.ViewProjection();
             gfx::Frustum frustum;
             frustum.Extract(viewProj);
 
-            vx.time = static_cast<float>(now);
+            vx.time = static_cast<float>(elapsed);
 
             char line[512];
             std::snprintf(line, sizeof(line),
@@ -1032,7 +1201,7 @@ int main(int /*argc*/, char** /*argv*/) {
                           "%.0f fps   CPU %.2f ms  GPU %.2f ms   chunks %d (meshed %d)  pos %.0f %.0f %.0f\n"
                           "streaming gen %zu mesh %zu   particles %zu   visible %d/%d\n"
                           "picked: %s   (WASD fly, space/ctrl up/down, shift slow, LMB break, RMB place)\n"
-                          "F camera %s   ESC pointer %s   P particles %s   X quit",
+                          "F camera %s   ESC pointer %s   P particles %s   [ ] - = sun   X quit",
                           gfx::kAppVersion,
                           input.cam == Input::Cam::Fly ? "FLY" : "ORBIT",
                           smoothedFps,
@@ -1055,7 +1224,7 @@ int main(int /*argc*/, char** /*argv*/) {
             frame.post = &post;
             frame.lights = &lightBuffer;
             frame.env = &env;
-            frame.skybox = &skybox;
+            frame.skybox = input.showSky ? &skybox : nullptr;
             frame.lightSetup = setup;
             frame.sunToward = towardSun;
             frame.sprite = &sprite;
@@ -1077,6 +1246,17 @@ int main(int /*argc*/, char** /*argv*/) {
             glfwSwapBuffers(window);
             glfwPollEvents();
         }
+
+        // One summary line per run: the counters a scripted sweep or a CI smoke
+        // cannot read back out of a screenshot (streaming convergence in
+        // particular - the HUD shows them, but only to whoever is looking).
+        const double ranFor = glfwGetTime() - startedAt;
+        std::printf("voxel_demo: ran %.1fs  %d frames  fps avg %.1f min %.1f   "
+                    "chunks gen %d meshed %d   blocks broken %d   particles live %zu spawned %d\n",
+                    ranFor, frames,
+                    ranFor > 0.0 ? static_cast<double>(frames) / ranFor : 0.0,
+                    minFps > 1e8 ? 0.0 : minFps,
+                    genCount, meshCount, breaks, particles.count(), spawnedTotal);
 
         pool.shutdown();
         return 0;   // GPU owners destruct here, on the render thread
