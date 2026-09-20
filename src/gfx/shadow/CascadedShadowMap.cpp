@@ -138,9 +138,20 @@ void CascadedShadowMap::BeginCascade(int cascade) {
     glViewport(0, 0, resolution_, resolution_);
     glClearDepth(1.0f);
     glClear(GL_DEPTH_BUFFER_BIT);
+    // The shadow pass is the first pass of the frame, but the HUD/sprite/debug
+    // passes at the end of the *previous* frame leave GL_DEPTH_TEST disabled and
+    // never restore it. Depth writes during rasterisation require the test to be
+    // enabled, so this pass must set its own state or the map stays empty.
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
     glEnable(GL_DEPTH_CLAMP);
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(1.5f, 4.0f);
+    // Same leak class as depth: the previous frame's composite/post passes leave
+    // GL_CULL_FACE disabled, so glCullFace below would be a no-op and the
+    // front-face-culling acne mitigation silently does nothing.
+    glEnable(GL_CULL_FACE);
     glCullFace(GL_FRONT);   // front-face culling reduces shadow acne for closed casters
 }
 

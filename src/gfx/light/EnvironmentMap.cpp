@@ -68,7 +68,10 @@ bool EnvironmentMap::Generate(const glm::vec3& sunDir, int skySize, int irradian
     fbo_.Unbind();
     ShaderProgram::Unuse();
     glClearDepth(1.0f);
+    // Restore both states disabled above (depth was restored here already, but
+    // culling was not, leaking a cull-off state into every later pass).
     glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
 
     if (!valid()) {
         std::fprintf(stderr, "[EnvironmentMap] generation produced invalid textures\n");
@@ -102,6 +105,7 @@ void EnvironmentMap::RenderSky() {
     emptyVao_.Bind();
     for (int f = 0; f < 6; ++f) {
         fbo_.AttachCubeFaceColor(sky_, kFaceTargets[f], 0, 0);
+        fbo_.Bind();
         fbo_.Viewport(skySize_, skySize_);
         skyGenShader_.Set("uRight",   kFaceBasis[f][0]);
         skyGenShader_.Set("uUp",      kFaceBasis[f][1]);
@@ -117,6 +121,7 @@ void EnvironmentMap::RenderIrradiance() {
     emptyVao_.Bind();
     for (int f = 0; f < 6; ++f) {
         fbo_.AttachCubeFaceColor(irradiance_, kFaceTargets[f], 0, 0);
+        fbo_.Bind();
         fbo_.Viewport(irradianceSize_, irradianceSize_);
         irradianceShader_.Set("uRight",  kFaceBasis[f][0]);
         irradianceShader_.Set("uUp",     kFaceBasis[f][1]);
@@ -137,6 +142,7 @@ void EnvironmentMap::RenderPrefilter() {
         const int size = (prefilterSize_ >> level) > 0 ? (prefilterSize_ >> level) : 1;
         for (int f = 0; f < 6; ++f) {
             fbo_.AttachCubeFaceColor(prefilter_, kFaceTargets[f], level, 0);
+            fbo_.Bind();
             fbo_.Viewport(size, size);
             prefilterShader_.Set("uRight",  kFaceBasis[f][0]);
             prefilterShader_.Set("uUp",     kFaceBasis[f][1]);
@@ -149,6 +155,7 @@ void EnvironmentMap::RenderPrefilter() {
 void EnvironmentMap::RenderBrdf() {
     brdfShader_.Use();
     fbo_.AttachColor(brdf_, 0, 0);
+    fbo_.Bind();
     fbo_.Viewport(512, 512);
     emptyVao_.Bind();
     glDrawArrays(GL_TRIANGLES, 0, 3);

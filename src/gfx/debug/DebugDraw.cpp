@@ -74,7 +74,11 @@ void DebugDraw::Draw(const glm::mat4& viewProj) {
     vao_.Unbind();
     ShaderProgram::Unuse();
 
+    // Restore every state toggled above. Depth is drawn-over here (lines ignore
+    // the scene), but leaving GL_DEPTH_TEST disabled would leak into the next
+    // frame the same way the HUD used to; re-enable it to the global default.
     glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
 }
 
 } // namespace gfx

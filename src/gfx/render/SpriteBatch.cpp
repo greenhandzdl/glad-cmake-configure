@@ -34,6 +34,10 @@ bool SpriteBatch::Init() {
 void SpriteBatch::Begin(const Texture2D& tex, int fbWidth, int fbHeight) {
     RenderContext::AssertRenderThread("SpriteBatch::Begin");
     glDisable(GL_DEPTH_TEST);
+    // Screen-aligned quads are authored CW in NDC; if any earlier pass left face
+    // culling on they would be culled away (empty HUD). Own the state instead of
+    // relying on the post pass to have cleared it.
+    glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
