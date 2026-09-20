@@ -39,6 +39,25 @@ public:
     void Orbit(float yawDeltaRad, float pitchDeltaRad);
     void Dolly(float distanceDelta);
 
+    // Free-fly / first-person controls (voxel demo). Orthogonal to the orbit
+    // helpers: both mutate the same orientation_ + position_, so a demo can
+    // toggle between the two models without rebuilding the camera.
+    //
+    // Angles are radians with the classic voxel-game convention: yaw 0 looks
+    // down -Z, positive yaw turns left, positive pitch looks up (clamped to
+    // +/-90 degrees by the caller, who owns the sensitivity curve). Distances
+    // are world units — speed * dt stays in the game layer, because only it
+    // knows whether this frame is a walk, a fly or a teleport.
+    void SetYawPitch(float yawRad, float pitchRad);
+    [[nodiscard]] glm::vec2 YawPitch() const;
+    [[nodiscard]] glm::vec3 Forward() const;
+    [[nodiscard]] glm::vec3 Right() const;
+    [[nodiscard]] glm::vec3 Up() const;
+    void MoveForward(float distance);
+    void MoveRight(float distance);
+    void MoveUp(float distance);
+    void Translate(const glm::vec3& worldDelta);
+
     [[nodiscard]] const glm::mat4& ViewMatrix()        const noexcept { return view_; }
     [[nodiscard]] const glm::mat4& ProjectionMatrix()  const noexcept { return proj_; }
     [[nodiscard]] const glm::mat4& ViewProjection()    const noexcept { return viewProj_; }
@@ -47,6 +66,9 @@ public:
     // Perspective parameters + inverse view-projection (needed by CSM splits).
     [[nodiscard]] float NearPlane() const noexcept { return near_; }
     [[nodiscard]] float FarPlane()  const noexcept { return far_; }
+    // Vertical field of view in degrees; lets callers turn a world-space size
+    // into pixels (particle point size) without duplicating the projection.
+    [[nodiscard]] float FovY()      const noexcept { return fovY_; }
     [[nodiscard]] glm::mat4 InverseViewProjection() const;
 
     [[nodiscard]] Projection projectionType() const noexcept { return projType_; }

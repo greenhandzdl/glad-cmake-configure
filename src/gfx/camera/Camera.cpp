@@ -96,6 +96,63 @@ void Camera::Dolly(float distanceDelta) {
     RecomputeView();
 }
 
+void Camera::SetYawPitch(float yawRad, float pitchRad) {
+    // Rebuild the orientation from the two angles rather than accumulating
+    // quaternion products: repeated small-angle multiplications drift off the
+    // unit sphere and (worse) let a rolled frame accumulate over a long mouse
+    // session. Yaw is applied around world Y on top of the local pitch, which
+    // is the convention that keeps horizontal looking free of roll.
+    orientation_ = glm::normalize(
+        glm::angleAxis(yawRad, glm::vec3(0.0f, 1.0f, 0.0f)) *
+        glm::angleAxis(pitchRad, glm::vec3(1.0f, 0.0f, 0.0f)));
+    RecomputeView();
+}
+
+glm::vec2 Camera::YawPitch() const {
+    // Invert the forward vector of the yaw*pitch decomposition (see the
+    // SetYawPitch comment for the derivation):
+    //   fwd = (-sin(yaw)cos(pitch), sin(pitch), -cos(yaw)cos(pitch))
+    const glm::vec3 fwd = Forward();
+    const float pitch = std::asin(glm::clamp(fwd.y, -1.0f, 1.0f));
+    // At +/-90 degrees cos(pitch) -> 0 and yaw becomes ill-defined; returning
+    // the last finite atan2 answer is fine because the caller only uses this
+    // for incremental mouse deltas.
+    const float yaw = std::atan2(-fwd.x, -fwd.z);
+    return {yaw, pitch};
+}
+
+glm::vec3 Camera::Forward() const {
+    return Rotate(orientation_, glm::vec3(0.0f, 0.0f, -1.0f));
+}
+
+glm::vec3 Camera::Right() const {
+    return Rotate(orientation_, glm::vec3(1.0f, 0.0f, 0.0f));
+}
+
+glm::vec3 Camera::Up() const {
+    return Rotate(orientation_, glm::vec3(0.0f, 1.0f, 0.0f));
+}
+
+void Camera::MoveForward(float distance) {
+    position_ += Forward() * distance;
+    RecomputeView();
+}
+
+void Camera::MoveRight(float distance) {
+    position_ += Right() * distance;
+    RecomputeView();
+}
+
+void Camera::MoveUp(float distance) {
+    position_ += Up() * distance;
+    RecomputeView();
+}
+
+void Camera::Translate(const glm::vec3& worldDelta) {
+    position_ += worldDelta;
+    RecomputeView();
+}
+
 glm::mat4 Camera::InverseViewProjection() const {
     return glm::inverse(viewProj_);
 }
