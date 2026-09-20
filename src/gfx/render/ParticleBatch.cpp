@@ -103,10 +103,16 @@ void ParticleBatch::Draw(const glm::mat4& viewProj, const glm::vec3& cameraPos,
     GLboolean hadDepthMask = GL_TRUE;
     GLboolean depthTest = GL_FALSE;
     GLboolean blend = GL_FALSE;
+    GLboolean programPointSize = GL_FALSE;
     glGetBooleanv(GL_DEPTH_WRITEMASK, &hadDepthMask);
     glGetBooleanv(GL_DEPTH_TEST, &depthTest);
     glGetBooleanv(GL_BLEND, &blend);
+    glGetBooleanv(GL_PROGRAM_POINT_SIZE, &programPointSize);
 
+    // Without this cap the driver ignores gl_PointSize and every particle lands
+    // as one framebuffer pixel - invisible on a Retina target, and the reason a
+    // screenshot diff of a live 44-particle burst looked like nothing at all.
+    glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
     glEnable(GL_BLEND);
@@ -129,6 +135,7 @@ void ParticleBatch::Draw(const glm::mat4& viewProj, const glm::vec3& cameraPos,
     glDepthMask(hadDepthMask ? GL_TRUE : GL_FALSE);
     if (!depthTest) glDisable(GL_DEPTH_TEST);
     if (!blend) glDisable(GL_BLEND);
+    if (!programPointSize) glDisable(GL_PROGRAM_POINT_SIZE);
 }
 
 } // namespace gfx

@@ -67,9 +67,11 @@ public:
 
     // Draw the live particles into the currently bound target with the given
     // view-projection. Depth test on, depth write off, alpha blend (particles
-    // never occlude each other); the state is restored on exit. `tex` may be
-    // null for square points. pixelScale = fbHeight / (2*tan(fovY/2)).
-    // Render-thread.
+    // never occlude each other), and GL_PROGRAM_POINT_SIZE enabled - the shader
+    // sizes points with gl_PointSize, which the driver ignores while that cap is
+    // off (the default on macOS), collapsing every particle to one pixel. The
+    // state is restored on exit. `tex` may be null for square points.
+    // pixelScale = fbHeight / (2*tan(fovY/2)). Render-thread.
     void Draw(const glm::mat4& viewProj, const glm::vec3& cameraPos,
               float pixelScale, const Texture2D* tex = nullptr);
 
