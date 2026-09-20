@@ -35,7 +35,7 @@ namespace gfx {
 
 // Application identity + default window geometry for the demo.
 inline constexpr const char* kAppName    = "GLFW + GLAD gfx Engine";
-inline constexpr const char* kAppVersion = "1.2.0";
+inline constexpr const char* kAppVersion = "1.3.0";
 inline constexpr const char* kWindowTitle = "gfx::Renderer - PBR / scene graph / render passes";
 inline constexpr int kWindowWidth  = 800;
 inline constexpr int kWindowHeight = 600;
