@@ -74,6 +74,7 @@ git submodule update --init --recursive
 **macOS**
 ```bash
 brew install glfw glm cmake ninja
+brew install llvm        # 必需：AppleClang 没有 clang-scan-deps，编不了 C++20 modules
 brew install uv          # 或 pip install jinja2（GLAD 子模块回退分支所需）
 ```
 
@@ -125,17 +126,49 @@ CMake 配置阶段会由 `scripts/*.sh.in` 生成三个可执行脚本：
 cmake --build build --target clean-project
 ```
 
+`build.sh` 会自动挑一个能扫模块依赖的组合：有 `ninja` 就用 `-G Ninja`；在 macOS 上若未指定
+`$CXX` 且缓存里还指向 Apple 工具链，则导出 Homebrew LLVM 的 `CC/CXX`（与 CI 一致）。
+生成器或编译器与既有 `CMakeCache.txt` 不符时自动加 `--fresh` 重配置，不必手动清理。
+想用自己指定的工具链，照旧显式导出即可（`CXX=... ./scripts/build.sh`），脚本不覆盖。
+
+### 命令行功能开关（无键盘自检）
+
+两个 demo 都接受同一组开关（`src/demo_cli.h`，`--help` 打印完整列表），用途是脚本化地
+逐项开关渲染功能并截图对比——回归验证与"某个开关静默失效"的唯一可靠查法：
+
+```bash
+./output/voxel_demo --off fog,water,sky,particles --quit-after 8
+./output/GLFW_Template --on instances,debug,ortho --off ibl --quit-after 8
+```
+
+| 开关 | 作用 |
+|------|------|
+| `--off a,b` / `--on a,b` | 关闭/打开列出的功能（PBR：`shadow,ibl,bloom,debug,instances,sky,ortho`；体素：`particles,fog,water,sky,ortho`） |
+| `--quit-after SEC` | SEC 秒后自行退出 |
+| `--freeze-at SEC` | 把动画/物理时钟停在启动后 SEC 秒：两次同参数运行逐像素相同，截图才可对比 |
+| `--yaw/--pitch/--radius` | 设定 PBR 轨道相机朝向（实例化场在 +x 方向，默认视角看不到它，也看不到地平线） |
+| `--yaw/--pitch/--rise` | 设定体素飞行相机的朝向与出生高度（默认俯角下准星射线落在交互距离之外，脚本挖掘需要更陡的俯角） |
+| `--auto-break N` / `--auto-place N` | 脚本化挖 N 块 / 放 N 块，走与点击完全相同的路径（DDA 拾取 → 编辑 → remesh → 碎屑） |
+| `--select ID` | 预选方块类型（`7` = 水，配合 `--auto-place` 造出可验证的水面） |
+
+退出时体素 demo 打印一行统计（帧数、平均/最低 fps、生成与网格化的 chunk 数、破坏方块数、
+存活/累计粒子数），流式收敛与粒子压力这类"截图看不出来"的性质靠它自证。
+
+CPU 侧原语（体素 DDA、Chunk、ChunkMesher、BlockRegistry、Noise、Frustum）另跑过一轮
+AddressSanitizer + UndefinedBehaviorSanitizer 的对抗输入自检（NaN / inf / 1e30 / `INT_MIN` 坐标、
+未注册 id、越界访问、反向包围盒），做法记在 `AGENTS.md` 的"CPU 侧原语的对抗输入自检"一节。
+
 ## 运行效果
 
 `main.cpp` 打开一个 800×600 窗口，渲染一个交互式 PBR 演示场景：带纹理的地面与球阵、金属立方体、一个旋转的子层级（carousel，演示场景层级变换传播），配合级联阴影、IBL 环境光照、HDR + Bloom + ACES 后期、天空盒，以及精灵批次文本 HUD。
 
 绘制不再是一大堆内联 `gl*` 调用，而是改为逐帧组装一个 `RenderFrame` 后一句 `renderer.Render(frame)`（依序执行 Shadow → Geometry → PostProcess → DebugHud 四个 pass）。
 
+**操作**：拖拽鼠标轨道旋转 / 滚轮缩放；`A`·`D`（或 `←`·`→`）太阳方位、`W`·`S`（或 `↑`·`↓`）太阳高度；右键拾取物体（包围球射线测试，高亮）；`1` 级联阴影、`2` IBL、`3` Bloom、`4` 调试线框、`5` 实例化场、`6` 天空盒、`Tab` 透视/正交；`Esc` 退出。
+
 **体素演示 `voxel_demo`**（`./scripts/run.sh voxel_demo`）是上述体素原语的验收场：fBm 高度场地形 + 沙滩 + 湖泊 + 树冠，worker 线程生成与网格化、渲染线程限量上传，雾随距离收掉视距边缘。世界层（chunk 网格、流式策略、地形生成、编辑规则、HUD）全部写在 `src/voxel_main.cpp`，引擎只提供原语、不含任何世界概念。
 
-**操作**：鼠标转向（指针捕获）；`W`/`A`/`S`/`D` 飞行、`Space`/`Shift` 上下、按住 `Q`+`E` 减速；左键破坏（碎屑粒子）、右键放置；`1`–`8` 选方块；`F` 切换飞行/轨道相机；`[`/`]` 太阳方位、`-`/`=` 太阳高度；`P` 开关粒子；`X` 退出。
-
-**操作**：拖拽鼠标轨道旋转 / 滚轮缩放；A·D（或←→）太阳方位、W·S（或↑↓）太阳高度；右键拾取物体（包围球射线测试，高亮）；`1` 级联阴影、`2` IBL、`3` Bloom、`4` 调试线框、`5` 实例化场（开关）；`Esc` 退出。
+**操作**：鼠标转向（指针捕获）；`W`/`A`/`S`/`D` 飞行、`Space`/`Ctrl` 上下（按住 `Shift` 减速）；左键破坏（碎屑粒子）、右键放置；`1`–`8` 选方块；`F` 切换飞行/轨道相机；`[`/`]` 太阳方位、`-`/`=` 太阳高度；`P` 开关粒子；`Tab` 透视/正交；`X` 退出。
 
 ## CI 与发布（GitHub Actions）
 

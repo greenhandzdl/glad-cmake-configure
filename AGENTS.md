@@ -49,7 +49,7 @@ cmake --build build
 cmake --preset Debug && cmake --build --preset Debug
 
 # 脚本
-./scripts/build.sh [debug|release]   # 配置+构建
+./scripts/build.sh [debug|release]   # 配置+构建（自动选 Ninja；macOS 上自动 export Homebrew LLVM CC/CXX，已显式给 $CXX 则不覆盖）
 ./scripts/run.sh [target]            # 运行（默认 GLFW_Template，例：run.sh voxel_demo）
 ./scripts/clean.sh                   # 清理（等价 cmake --build build --target clean-project）
 ```
@@ -61,6 +61,42 @@ cmake --build build 2>&1 | grep -E 'src/(main|gfx)' | grep -iE 'warning|error'  
 ./output/GLFW_Template >/tmp/o 2>/tmp/e & p=$!; sleep 6; kill $p 2>/dev/null; wc -c /tmp/e   # 期望：stderr 0 字节
 ./output/voxel_demo    >/tmp/o 2>/tmp/e & p=$!; sleep 6; kill $p 2>/dev/null; wc -c /tmp/e   # 同上（改了体素侧就跑这条）
 ```
+
+### 验证一个渲染开关是否真的还生效
+
+`kill` 只能证明"没崩"，证明不了"画面变了"。两个 demo 的每个渲染特性都能用命令行开关
+（`src/demo_cli.h`，`--help` 看全表），配合 `--freeze-at SEC` 可脚本化取证：
+
+```bash
+./output/voxel_demo --freeze-at 8 --auto-break 25 --pitch -1.5 --rise -1 --quit-after 20  # 基准帧
+./output/voxel_demo ... --off particles --quit-after 20                                   # 对照组
+# 两次同参数运行必须逐像素全等（噪声底 = 0），否则测不出开关的贡献
+```
+
+前提：`--freeze-at` 之后 demo 状态是"时钟的纯函数"，而**不是**帧率的函数——体素碎屑走固定
+120 Hz 步长、脚本节拍锁在绝对步数边界上、动画时钟用"距启动秒数"而非 `glfwGetTime()` 绝对值。
+新增任何时间驱动的东西都要遵守这条，否则截图对比失效。另外：被测特性必须在默认画面里可见，
+否则量到的只是 0（实例化场偏 +x、雾/天空需要远景视角，都得靠 `--yaw/--pitch/--rise` 把镜头转过去）。
+
+### CPU 侧原语的对抗输入自检（sanitizer）
+
+"没崩"不等于"没读越界"。`Chunk`/`ChunkMesher`/`BlockRegistry`/`Noise`/`RaycastVoxel`/`Frustum` 这些纯
+CPU 入口能用带 sanitizer 的 libgfx 单跑一遍（不必建窗、不必抢焦点）：
+
+```bash
+LLVM=$(brew --prefix llvm)   # 苹果自带的 clang 没有完整 sanitizer runtime，用 Homebrew LLVM
+cmake -S . -B cmake-build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_C_COMPILER=$LLVM/bin/clang -DCMAKE_CXX_COMPILER=$LLVM/bin/clang++ \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g -O1 -fno-sanitize-recover=undefined"
+```
+
+两个坑：① 探针必须写成 `import gfx;` 的模块消费者，文本 `#include` 同一批头文件链不上
+（定义在 module 实现单元里的实体带着模块附着，如 `__ZN3gfxW3gfx5NoiseC1Ej`），所以得临时挂一个
+`add_executable` 目标、跑完立刻 `git checkout CMakeLists.txt`；include 目录沿用 `-I src` + glad 生成头 +
+`-isystem /opt/homebrew/include`，并和 libgfx 用同一份 `-fsanitize=` flags。② 带 `-fno-sanitize-recover`
+时一次只报第一个错，修一个跑一个；`-O1` 比 `-O0` 快得多且仍能报。已踩过的真 UB 都是
+`static_cast<int>` 吃下了超出 int32 的 float（DDA 的 `(int)floor(NaN)`、Noise 的倍频坐标），
+编译器不报错、`-ftrapv` 也抓不到，只有 UBSan 看得见。
 
 ## 文件地图
 
@@ -81,6 +117,7 @@ src/gfx/render/              Renderer · RenderPass · RenderFrame · RenderPass
 src/gfx/text|assets|debug/   Font / AssetManager·ThreadPool·ModelLoader·ImageLoader / DebugDraw·Profiler
 src/gfx/third_party/         stb_image_impl.cpp（唯一第三方实现 TU，非模块接口）
 src/voxel_main.cpp           体素演示入口：chunk 流式生成/网格化（ThreadPool worker + 渲染线程上传）+ 方块编辑
+src/demo_cli.h               两个 demo 共用的命令行开关（--off/--on/--quit-after/--help + 数值选项）；header-only，不进 module gfx
 src/assets/                  运行期内容（不编译）：models/ 投放目录 · shaders/ 只读参考镜像（不加载）
 third_party/                 glad · stb · assimp（子模块）
 scripts/                     build.sh.in / run.sh.in / clean.sh.in（CMake 配置期生成 .sh）
@@ -119,6 +156,8 @@ AGENTS.md                    本文件（agent 速查，留在仓库根便于自
 | 找不到 glad/stb/assimp 头 | 子模块未初始化 | `git submodule update --init --recursive` |
 | GLAD 生成报错 | 缺 Python/jinja2 | `brew install uv` 或 `pip install jinja2` |
 | `glad/gl.h file not found`（仅 IDE 静态分析报） | include 路径在构建期由 CMake 提供 | 忽略；以真实 `cmake --build` 为准 |
+| 粒子/点精灵画成一个像素的方点 | macOS 默认不开 `GL_PROGRAM_POINT_SIZE`，着色器的 `gl_PointSize` 被驱动忽略 | 画点前 `glEnable` 该 cap 并在退出时恢复（见 `ParticleBatch::Draw`） |
+| 截图对比量到 0 差异，但开关确实改了状态 | 被测内容不在默认视野内（实例化场、天空、雾），或时间驱动内容随帧率漂移 | 用 `--yaw/--pitch/--rise` 把镜头转过去；把模拟挂到固定步长 + `--freeze-at` |
 
 ## CI / 发布
 

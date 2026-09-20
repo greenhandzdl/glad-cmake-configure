@@ -3,6 +3,80 @@
 本文件记录 `GLFW_Template`（`gfx` 引擎 + 演示应用）各版本的变更。
 版本标签遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## v1.3.1
+
+一轮“把每个开关都亲手关掉再打开、拿截图对比”的验证带出来的东西。验证方法本身也进了仓库（`src/demo_cli.h`）。
+
+### 修复
+
+- **粒子在 macOS 上实际上看不见**：`ParticleBatch::Draw` 未开 `GL_PROGRAM_POINT_SIZE`，而该 cap 在 macOS 默认就是关的，
+  驱动因此忽略着色器里的 `gl_PointSize`，每个粒子塌成一个物理像素（Retina 下几乎不可见）。
+  现在与 depth/blend 一起成对保存、开启、恢复，并在 `ParticleBatch.h` 的契约注释里写明。
+  截图取证：同一固定画面下 `--off particles` 从 0.005%（与噪声同量级）变为 3.59% 画面变化。
+- **`scripts/build.sh` 在 macOS 上根本配不起来**：生成的脚本用默认的 Unix Makefiles（不支持 C++20 modules）
+  且不挑编译器（AppleClang 没有 `clang-scan-deps`）。现在自动选 Ninja、在 macOS 上自动导出 Homebrew LLVM 的
+  `CC/CXX`（已显式给 `$CXX` 则不覆盖）、生成器/编译器与旧缓存不符时加 `--fresh` 重配，结尾提示两个可执行文件。
+  这三件事 CI 与 README 早就做对了，只有生成的脚本漏了。
+- **文档与 HUD 的键位文案对不上实际**：体素 README 写着按住 `Q`+`E` 减速，而代码里根本没有这两个键
+  （实为按住 `Shift` 减速、`Ctrl` 下降），也没提 `Tab` 切投影；PBR 的 HUD 提示串少了天空盒的 `6`，
+  README 则漏写 `6` 与 `Tab`。逐条对着 `glfwGetKey` 的调用点核过再改。
+- **天空盒没有键盘开关**：HUD 会显示 `Sky ON/OFF`，但只有命令行能改。新增 `6` 键。
+- **HUD 的 fps 读数与它所在的那一帧无关**：`EMA(1/dt)` 被最后卡顿的一帧主导，两个 demo 均改为固定窗口（≥ 0.5 s）计数。
+- **demo 的时间驱动内容不可复现**（导致截图对比本身不可信）：carousel 用 `glfwGetTime()` 绝对值做相位（随开机时间漂移，
+  且 float 化后精度损失已可比见）；体素碎屑用变步长积分（同参数两跑差 2% 画面）；脚本挖掘节拍相对上一次触发排序
+  （首帧跨多步则整体平移，最后一炮落在 `--freeze-at` 内外全看帧率）。现在动画时钟是“距启动秒数”、
+  碎屑走固定 120 Hz 步长、节拍锁在绝对步数边界上：**同参数两跑逐像素全等**（实测噪声底 0.000%）。
+
+### 加固
+
+- `Texture2D::Upload` / `Texture2DArray::Upload`：`glTexImage*` 会按 `width*height*channels` 从调用方 buffer 里读，
+  所以先证明 `pixels` 至少那么长。通道数限定在 1..4（`DataFormat` 把其他值映射成 RGBA，上传格式与长度计算会不一致），
+  边长/层数上限 16384 / 4096（使乘法不回绕），长度校验改用除法而不是可能回绕的乘积。
+- `GeometryPass` / `PostProcessPass` / `DebugHudPass` / `ShadowPass`：只使用应用真正交出的子系统，
+  入口一次判全必需指针（与 `VoxelOpaquePass` 已有契约对齐），免得一个可选特性为 null 时解空指针。
+- `BlockRegistry::Append`：达到 `kMaxTypes` 后返回 `kAir` 而不是把 id 回绕到内置方块上（否则一个自定义方块会默默变成草）。
+
+### 安全与健壮性（ASan + UBSan 对抗输入自检）
+
+把 `Chunk` / `ChunkMesher` / `BlockRegistry` / `Noise` / `RaycastVoxel` / `Frustum` 这些 CPU 侧原语，加上图片解码，喂给一份用 `-fsanitize=address,undefined` 与 `-fno-sanitize-recover=undefined` 编译的 libgfx，输入包括 NaN、±inf、1e30、`INT_MIN` 坐标、未注册 id、越界访问、反向包围盒、畸形图片文件。UBSan 在“没崩”的情况下揪出三处真未定义行为，均已修：
+
+- **`RaycastVoxel` 的 float→int 转换**：起点/方向只要有一个分量是 NaN、inf 或 1e30，`(int)std::floor(oA)`
+  就越出 int32 表示范围（UB），紧随其后的 `lo - cell` 还可能有符号溢出。现在入口拒绝非有限的射线
+  （契约已写进注释：这种射线答“未命中”而不是读出一个随机 cell），首 cell 改在 double 域算出、只在确认
+  落在 `[lo, hi]` 内后才转 int，`tMax` 用等价的闭合形式一次算出（对合法输入逐位等价，且少一次舍入）。
+- **`Noise::Perlin2/Perlin3` 的 `floorMask`**：同一个 `(int)std::floor(v)` 问题，`v` 来自 fbm 的倍频阶梯，
+  坐标一大就 UB。Perlin 只用得到 `(int)floor(v) & 255` 和小数部分，两者对“减去 256 的整数倍”都不变量，
+  所以先 `std::fmod(v, 256.0)` 折叠再取整：合法坐标逐位等价，极端坐标从 UB 变成确定的有限输出。
+- **`ChunkMesher` 的跳过条件**：原来只测 `id == 0`，于是未注册的 id（旧存档的方块表、被卸载的 mod）
+  虽然被 `BlockRegistry::Get` 当作 air 解析，却仍然生成贴图切片 0 的幽灵面。新增
+  `BlockRegistry::IsAir(id)`（id 为 0 或超出表长），生成面与邻居遮挡判定都改用它。
+
+### 新增
+
+- **`src/demo_cli.h`**：两个 demo 共用的 header-only 命令行开关（不进 `module gfx`）。
+  `--off a,b` / `--on a,b` / `--quit-after SEC` / `--help`，以及数值选项
+  `--freeze-at` / `--yaw` / `--pitch` / `--radius` / `--rise` / `--select` / `--auto-break` / `--auto-place`。
+  不传任何选项时与旧行为逐位等价（`flags.number(name, fallback)` 直接回退默认值）。
+- **`voxel_demo` 退出统计行**：帧数、平均/最低 fps、生成与网格化的 chunk 数、破坏方块数、存活/累计粒子数——
+  流式收敛与粒子压力这类“截图看不出来”的性质自此可自证。
+
+### 验证结果
+
+- **对抗输入**：35 项检查在 ASan + UBSan（不可恢复）下全通过，进程退出码 0 —— 任一 UB 都会当场 abort。
+  除上述 CPU 原语外还包括图片解码：10 个畸形文件（只有头的 PNG、空文件、随机字节、只有一半的 JPEG、
+  声称 6000×6000 却只装 8×8 数据的 PNG）× 6 个 `forceChannels`（含非法的 `7` 与 `-3`）组合，
+  20 次被接受的解码每一次都满足 `pixels.size() == width*height*channels`——正是 `Upload` 先验再交给
+  `glTexImage2D` 的那个不变式。探针本身是仓外的临时工具（`/tmp/adv/advcheck.cpp`）：它是 `import gfx;` 的
+  模块消费者，因为定义在 module 实现单元里的实体带着模块附着（`__ZN3gfxW3gfx5NoiseC1Ej`），
+  文本 include 同一份头文件链不上。
+- **性能**（60 s × 3 轮，`/usr/bin/time -l`）：PBR CPU 18.3 s / RSS 117 MB；体素空闲 20.7 s / 131.8 MB /
+  平均 116 fps（最低 81.5）/ `chunks gen 243 == meshed 243`（流式收敛）；体素压力（`--auto-break 200`）
+  25.3 s / RSS 131.5 MB（长跑不涨）/ 平均 117.3 fps / `spawned 748`、退出时 `live 0`（粒子池全部退休，无泄漏）。
+
+12 个开关全部拿到“信号 ≫ 噪声底”的截图证据（每组噪声底 0.000%，即同参数两跑逐像素全等）：
+PBR `shadow` 0.14% / `ibl` 15.4% / `bloom` 57.8% / `debug` 3.7% / `instances` 6.6% / `sky` 91.4% / `ortho` 18.7%；
+体素 `particles` 3.59% / `fog` 63.5% / `sky` 36.5% / `ortho` 77.8% / `water` 4.5%（均为画面变化像素占比）。
+
 ## v1.3.0
 
 ### 新增
