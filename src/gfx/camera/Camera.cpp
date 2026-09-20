@@ -17,16 +17,49 @@ inline glm::vec3 Rotate(const glm::quat& q, const glm::vec3& v) {
 } // namespace
 
 void Camera::SetPerspective(float fovYDegrees, float aspect, float nearZ, float farZ) {
+    projType_ = Projection::Perspective;
     fovY_ = fovYDegrees;
     aspect_ = aspect;
     near_ = nearZ;
     far_ = farZ;
-    proj_ = glm::perspective(glm::radians(fovY_), aspect_, near_, far_);
+    RecomputeProjection();
+}
+
+void Camera::SetOrthographic(float worldHeight, float aspect, float nearZ, float farZ) {
+    projType_ = Projection::Orthographic;
+    orthoHeight_ = worldHeight;
+    aspect_ = aspect;
+    near_ = nearZ;
+    far_ = farZ;
+    RecomputeProjection();
+}
+
+Camera::Projection Camera::ToggleProjection() {
+    if (projType_ == Projection::Perspective) {
+        // Match the perspective framing: the ortho box height equals the world
+        // height visible at the orbit target for the current fov + radius.
+        const float h = 2.0f * orbitRadius_ * std::tan(glm::radians(fovY_) * 0.5f);
+        SetOrthographic(h, aspect_, near_, far_);
+    } else {
+        SetPerspective(fovY_, aspect_, near_, far_);
+    }
+    return projType_;
+}
+
+void Camera::RecomputeProjection() {
+    if (projType_ == Projection::Orthographic) {
+        const float hh = orthoHeight_ * 0.5f;
+        const float hw = hh * aspect_;
+        proj_ = glm::ortho(-hw, hw, -hh, hh, near_, far_);
+    } else {
+        proj_ = glm::perspective(glm::radians(fovY_), aspect_, near_, far_);
+    }
     viewProj_ = proj_ * view_;
 }
 
 void Camera::SetViewportAspect(float aspect) {
-    SetPerspective(fovY_, aspect, near_, far_);
+    aspect_ = aspect;
+    RecomputeProjection();
 }
 
 void Camera::RecomputeView() {
@@ -65,6 +98,11 @@ void Camera::Dolly(float distanceDelta) {
 
 glm::mat4 Camera::InverseViewProjection() const {
     return glm::inverse(viewProj_);
+}
+
+glm::mat4 Camera::SkyboxViewProj() const {
+    const glm::mat4 persp = glm::perspective(glm::radians(fovY_), aspect_, near_, far_);
+    return persp * glm::mat4(glm::mat3(view_));
 }
 
 } // namespace gfx

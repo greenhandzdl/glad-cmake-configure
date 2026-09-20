@@ -72,6 +72,7 @@ struct RenderFrame {
     bool useBloom    = false;
     bool useDebug    = false;
     bool useInstances = false;
+    bool ortho       = false;   // projection mode: false=perspective, true=ortho
     SceneNode* selected = nullptr;
 
     int   fbWidth  = 0;
