@@ -11,6 +11,7 @@
  *   A/D or Left/Right : sun azimuth           W/S or Up/Down : sun elevation
  *   right click  : pick an object (bounding-sphere ray test)
  *   1 : cascaded shadows   2 : IBL   3 : bloom   4 : debug lines   5 : instanced field
+ *   Tab : toggle perspective / orthographic projection
  *   Esc : quit
  *
  * The application owns the GL resources (meshes / materials / textures / passes);
@@ -58,9 +59,13 @@ struct Input {
     bool  useBloom = true;
     bool  useDebug = false;
     bool  useInstances = false;
+    bool  ortho = false;   // current projection: false=perspective, true=ortho
     // Pending right-click pick request (consumed + cleared in the main loop).
+    // Stored normalised to the window, not raw cursor pixels: the pick ray is
+    // built in framebuffer pixels, which differ by the content scale (2 on
+    // Retina) from glfwGetCursorPos' window coordinates.
     bool  pickPending = false;
-    float pickX = 0.0f, pickY = 0.0f;
+    float pickX = 0.0f, pickY = 0.0f;   // [0..1] across the window
 };
 
 // A few well-known system fonts, tried in order; HUD text just no-ops if none
@@ -102,9 +107,13 @@ void MouseButtonCallback(GLFWwindow* win, int button, int action, int) {
     glfwGetCursorPos(win, &cx, &cy);
     if (button == GLFW_MOUSE_BUTTON_RIGHT) {
         if (action == GLFW_PRESS) {           // request a pick at this pixel
-            in->pickPending = true;
-            in->pickX = static_cast<float>(cx);
-            in->pickY = static_cast<float>(cy);
+            int ww = 0, wh = 0;
+            glfwGetWindowSize(win, &ww, &wh);
+            if (ww > 0 && wh > 0) {
+                in->pickPending = true;
+                in->pickX = static_cast<float>(cx / ww);   // window-normalised
+                in->pickY = static_cast<float>(cy / wh);
+            }
         }
         return;
     }
@@ -419,12 +428,20 @@ int main(int /*argc*/, char** /*argv*/) {
                 else if (!pressed) armed = true;
             };
             static bool shadowArmed = true, iblArmed = true, bloomArmed = true,
-                        debugArmed = true, instArmed = true;
+                        debugArmed = true, instArmed = true, projArmed = true;
             edgeToggle(glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS, shadowArmed, input.useShadow);
             edgeToggle(glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS, iblArmed,    input.useIbl);
             edgeToggle(glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS, bloomArmed,  input.useBloom);
             edgeToggle(glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS, debugArmed,  input.useDebug);
             edgeToggle(glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS, instArmed,   input.useInstances);
+            // Tab swaps perspective <-> orthographic once per press.
+            if (bool tabDown = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS; tabDown && projArmed) {
+                input.ortho = camera.ToggleProjection()
+                              == gfx::Camera::Projection::Orthographic;
+                projArmed = false;
+            } else if (!tabDown) {
+                projArmed = true;
+            }
             HandleKeys(window, input);
 
             // FPS (smoothed) for the HUD.
@@ -436,6 +453,7 @@ int main(int /*argc*/, char** /*argv*/) {
             int fbw = 0, fbh = 0;
             glfwGetFramebufferSize(window, &fbw, &fbh);
             camera.SetViewportAspect(fbh > 0 ? static_cast<float>(fbw) / fbh : 1.0f);
+            camera.SetOrbitRadius(input.radius);   // keeps the ortho box matched to the orbit
 
             const float cp = std::cos(input.pitch);
             const glm::vec3 eye(
@@ -470,8 +488,9 @@ int main(int /*argc*/, char** /*argv*/) {
                 spheres.reserve(targets.size());
                 for (const auto& t : targets) spheres.emplace_back(t.center, t.radius);
                 const gfx::Ray ray = gfx::PickRay(
-                    input.pickX, input.pickY, fbw, fbh,
-                    camera.InverseViewProjection(), camera.Position());
+                    input.pickX * static_cast<float>(fbw),
+                    input.pickY * static_cast<float>(fbh), fbw, fbh,
+                    camera.InverseViewProjection());
                 const int idx = gfx::PickNearest(ray, spheres);
                 selected = (idx >= 0) ? targets[idx].node : nullptr;
             }
@@ -503,6 +522,7 @@ int main(int /*argc*/, char** /*argv*/) {
             frame.useBloom = input.useBloom;
             frame.useDebug = input.useDebug;
             frame.useInstances = input.useInstances;
+            frame.ortho = input.ortho;
             frame.selected = selected;
             frame.fbWidth = fbw;
             frame.fbHeight = fbh;

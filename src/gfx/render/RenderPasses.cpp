@@ -78,16 +78,28 @@ void GeometryPass::Execute(RenderFrame& f) {
         f.instField->Draw();
     }
 
-    // Skybox last (LEQUAL-depth trick fills uncovered pixels).
-    f.skybox->Draw(f.viewProj, f.env->sky(), texunit::skybox);
+    // Skybox last (LEQUAL-depth trick fills uncovered pixels). SkyboxViewProj
+    // strips the view translation (cube surrounds the camera) and always uses a
+    // perspective box, so it stays correct in orthographic mode too.
+    f.skybox->Draw(f.camera->SkyboxViewProj(), f.env->sky(), texunit::skybox);
 }
 
 void PostProcessPass::Execute(RenderFrame& f) {
     RenderContext::AssertRenderThread("PostProcessPass::Execute");
     f.post->EndScene();
     if (f.useBloom) {
+        // The PBR spheres are lit to roughly 0.2-0.9 linear-HDR (their bright
+        // tops mirror the ~0.78 sky; the sun glint is a 1-2px spot that is not
+        // reliably camera-facing), so the old 1.0 cut-off keyed the bright pass
+        // on almost nothing and the materials never changed when bloom toggled.
+        // A 0.35 cut-off sits inside the objects' lit band, and the bloom buffer
+        // is half-resolution with a wide 6-iteration blur (see PostProcessChain)
+        // so each key glint spreads into a readable halo rather than a few dead
+        // pixels. The dark floor and shadow side stay below the cut-off.
+        f.post->SetBloomThreshold(0.35f);
+        f.post->SetBloomIterations(6);
         f.post->RenderBloom();
-        f.post->SetBloomStrength(0.45f);
+        f.post->SetBloomStrength(2.0f);
     } else {
         f.post->SetBloomStrength(0.0f);
     }
@@ -134,15 +146,16 @@ void DebugHudPass::Execute(RenderFrame& f) {
     TextRenderer::Draw(*f.sprite, *f.font, line, 12.0f, 34.0f, 20.0f,
                        glm::vec4(0.75f, 0.85f, 1.0f, 1.0f));
     std::snprintf(line, sizeof(line),
-                  "Shadow %s  IBL %s  Bloom %s  Debug %s  Inst %s",
+                  "Shadow %s  IBL %s  Bloom %s  Debug %s  Inst %s  %s",
                   f.useShadow ? "ON" : "OFF", f.useIbl ? "ON" : "OFF",
                   f.useBloom ? "ON" : "OFF", f.useDebug ? "ON" : "OFF",
-                  f.useInstances ? "ON" : "OFF");
+                  f.useInstances ? "ON" : "OFF",
+                  f.ortho ? "ORTHO" : "PERSP");
     TextRenderer::Draw(*f.sprite, *f.font, line, 12.0f, 60.0f, 20.0f,
                        glm::vec4(0.75f, 0.85f, 1.0f, 1.0f));
     TextRenderer::Draw(*f.sprite, *f.font,
-                       "drag=orbit scroll=zoom A/D W/S=sun  1=shd 2=ibl 3=blm 4=dbg 5=inst  rclick=pick",
-                       12.0f, 86.0f, 17.0f, glm::vec4(0.8f, 0.8f, 0.8f, 1.0f));
+                       "drag=orbit scroll=zoom A/D W/S=sun  1=shd 2=ibl 3=blm 4=dbg 5=inst Tab=proj  rclick=pick",
+                       12.0f, 86.0f, 16.0f, glm::vec4(0.8f, 0.8f, 0.8f, 1.0f));
     f.sprite->End();
 
     if (f.profiler) f.profiler->EndFrame();
