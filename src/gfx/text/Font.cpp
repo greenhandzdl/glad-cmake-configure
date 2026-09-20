@@ -66,11 +66,19 @@ std::expected<void, std::string> Font::LoadFromFile(const std::string& path, flo
     for (int i = 0; i < kNumGlyphs; ++i) {
         const stbtt_packedchar& b = baked[i];
         Glyph& g = glyphs_[i];
-        g.u0 = b.x0 / kAtlasW; g.v0 = b.y0 / kAtlasH;
-        g.u1 = b.x1 / kAtlasW; g.v1 = b.y1 / kAtlasH;
+        // b.x0/y0/x1/y1 are unsigned-short bitmap pixels in this stb version; divide
+        // in float or the result truncates to 0 and every glyph samples atlas (0,0).
+        g.u0 = static_cast<float>(b.x0) / kAtlasW; g.v0 = static_cast<float>(b.y0) / kAtlasH;
+        g.u1 = static_cast<float>(b.x1) / kAtlasW; g.v1 = static_cast<float>(b.y1) / kAtlasH;
         g.xoff = b.xoff; g.yoff = b.yoff;
-        g.w = b.x1 - b.x0;
-        g.h = b.y1 - b.y0;
+        // Quad size must be the glyph's box in BAKE pixels, not the atlas
+        // footprint. With PackSetOversampling(2,2) the atlas box (x1-x0) is
+        // twice the bake-space box; using it stretched every glyph ~2x so
+        // neighbours overlapped into an unreadable smear. xoff2-xoff is the
+        // true bake-space extent (stb already divides it back out), while the
+        // UV above still spans the full oversampled atlas cell.
+        g.w = b.xoff2 - b.xoff;
+        g.h = b.yoff2 - b.yoff;
         g.advance = b.xadvance;
         g.valid = true;
     }
