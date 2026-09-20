@@ -16,7 +16,7 @@
 - 平台：Windows / macOS / Linux。
 - 依赖：GLFW（系统包）、GLAD（系统优先/子模块回退）、GLM（header-only）、STB + Assimp（git 子模块内置）。
 - 子模块：`third_party/glad`、`third_party/stb`、`third_party/assimp`。
-- 许可证：见 `LICENSE`。当前正式版 tag：`v1.3.0`。
+- 许可证：见 `LICENSE`。当前正式版 tag：`v1.3.1`。
 
 ## 硬性前提（先检查，否则必失败）
 
