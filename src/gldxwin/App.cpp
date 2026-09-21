@@ -21,6 +21,15 @@ App& App::Get() {
 }
 
 App::App() {
+    // glfwInit first: it resets the window hints to defaults, so the GL 4.1 core
+    // hints below would be clobbered if set beforehand (the ordering the old
+    // demo_app.h relied on). Hints then apply to every window created after.
+    if (!glfwInit()) {
+        std::fprintf(stderr, "gldxwin: failed to initialize GLFW\n");
+        ok_ = false;
+        return;
+    }
+
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -34,11 +43,6 @@ App::App() {
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
-    if (!glfwInit()) {
-        std::fprintf(stderr, "gldxwin: failed to initialize GLFW\n");
-        ok_ = false;
-        return;
-    }
     ok_ = true;
 }
 
