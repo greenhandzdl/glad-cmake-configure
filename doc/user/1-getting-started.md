@@ -63,14 +63,15 @@ pip install jinja2         # 生成 GLAD 需要
 
 ## 4. 构建与运行
 
-四种方式任选其一。产物固定在 `output/GLFW_Template`（Windows 加 `.exe`）。
+四种方式任选其一。产物固定在 `output/`：`GLFW_Template`（`src/main.cpp` 的 hello-triangle 最小演示）与 `src/demo/` 下每个 feature demo 一个可执行（`pbr_showcase`、`voxel_terrain`…共 15 个）（Windows 加 `.exe`）。
 
 ### 4.1 命令行（跨平台通用）
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./output/GLFW_Template        # Windows: output\GLFW_Template.exe
+./output/GLFW_Template        # 最裸 hello-triangle（Windows: output\GLFW_Template.exe）
+./output/pbr_showcase         # 任一功能 demo：./output/<demo>
 ```
 
 配置结束会打印依赖摘要，例如 `GLAD : submodule (OpenGL 4.1 Core)`。
@@ -93,7 +94,7 @@ cmake --build --preset Debug
 
 ```bash
 ./scripts/build.sh [debug|release]   # 配置并构建
-./scripts/run.sh                     # 运行 output 下的可执行文件
+./scripts/run.sh [demo]                # 运行 output 下的可执行（默认 GLFW_Template=hello-triangle，例 run.sh pbr_showcase）
 ./scripts/clean.sh                   # 清理构建产物
 # 等价的 CMake 目标：
 cmake --build build --target clean-project
@@ -107,7 +108,9 @@ CLion 会自动导入 `CMakePresets.json`。**macOS 上唯一要做的**：在 `
 
 ## 5. 运行效果与操作
 
-`main.cpp` 打开 800×600 窗口，渲染交互式 PBR 演示：纹理地面 + 5×5 金属/粗糙球阵、纹理立方体、一个旋转的子层级（carousel，演示场景变换传播），配合级联阴影、IBL 环境光、HDR + Bloom + ACES 后期、天空盒，以及精灵批次文本 HUD。
+`src/main.cpp`（目标 `GLFW_Template`）是最小实现基线：一个 800×600 窗口里只画一个三角形——自定义 `RenderPass` + 内联 GLSL + `glDrawArrays(3)`，不建任何引擎子系统。看到它，就说明工具链、GL 4.1 上下文与 `import gfx;` 全通了。
+
+完整的交互式 PBR 演示现在在 `pbr_showcase`（`./scripts/run.sh pbr_showcase`）：纹理地面 + 5×5 金属/粗糙球阵、纹理立方体、一个旋转的子层级（carousel，演示场景变换传播），配合级联阴影、IBL 环境光、HDR + Bloom + ACES 后期、天空盒，以及精灵批次文本 HUD。下表是其键位：
 
 | 操作 | 键 |
 | --- | --- |
@@ -118,9 +121,9 @@ CLion 会自动导入 `CMakePresets.json`。**macOS 上唯一要做的**：在 `
 | 天空盒开关 / 透视↔正交 | `6` / `Tab` |
 | 退出 | `Esc` |
 
-窗口能出来、能看到球阵和阴影、按 `1..6` 与 `Tab` 有明显画面变化，就说明**整条工具链 + 运行库都通了**。
+在 `pbr_showcase` 里能看到球阵和阴影、按 `1..6` 与 `Tab` 有明显画面变化，就说明**整条工具链 + 运行库都通了**。
 
-第二个演示 `voxel_demo`（`./scripts/run.sh voxel_demo`）是可玩的体素世界，验收引擎的体素原语；操作键位与可脚本化的命令行开关（`--off/--on/--freeze-at/--quit-after`，`--help` 看全表）见 [根 README](../../README.md#命令行功能开关无键盘自检)。
+另两个成品演示：`voxel_terrain`（`./scripts/run.sh voxel_terrain`）是可玩的体素世界，验收引擎的体素原语。此外 `src/demo/` 下还有 13 个单功能入门 demo（`pbr_lighting`、`shadow_csm`、`ibl_environment`、`postprocess_bloom`、`skybox`、`instancing`、`particles`、`text_hud`、`camera_picking`、`debug_draw`、`geometry_upload`、`texture_samplers`、`model_loading`），每个只装配一个子系统。操作键位与可脚本化的命令行开关（`--off/--on/--freeze-at/--quit-after`，`--help` 看全表）见 [根 README](../../README.md#命令行功能开关无键盘自检)。
 
 ---
 

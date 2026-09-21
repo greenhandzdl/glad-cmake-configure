@@ -5,6 +5,17 @@
 
 ## Unreleased
 
+### 新增（演示重构：`src/main.cpp` 最小化 + `src/demo/{feature}` 分功能入门演示）
+
+把演示从“两个大入口”拆成“一个最小基线 + 一个功能一个 demo”，全面展示按需装配：
+
+- **`src/main.cpp` 收缩为最裸 hello-triangle**：一个自定义 `TrianglePass : gfx::RenderPass` 在内联 `#version 410 core` GLSL + 手写 VAO/VBO 上 `glClear`+`glDrawArrays(3)`，逐帧只填 `fbWidth/fbHeight` 的空 `RenderFrame`，不碰 `GeometryPass`/`LightBuffer`/PBR/scene。主可执行目标名 `GLFW_Template` **不变**，CI 制品名 `GLFW_Template-<platform>` 不受影响。
+- **成品演示迁移（内容零回退，仅换目录 + include 路径）**：`src/main.cpp` 的完整 PBR 展示 → `src/demo/pbr_showcase/main.cpp`；`src/voxel_main.cpp` → `src/demo/voxel_terrain/main.cpp`；`src/demo_cli.h` → `src/demo/demo_cli.h`。
+- **新增 13 个单功能 demo**（`src/demo/{feature}/main.cpp`）：`pbr_lighting`、`shadow_csm`、`ibl_environment`、`postprocess_bloom`、`skybox`、`instancing`、`particles`、`text_hud`、`camera_picking`、`debug_draw`、`geometry_upload`、`texture_samplers`、`model_loading`。每个只装配它演示的那一个子系统，其余留缺省。
+- **共享脚手架 `src/demo/demo_app.h`**（header-only、非模块）：`demo::Run(flags, title, app)` 拥有 `glfwInit→GL 4.1 core 建窗→makeContextCurrent→gladLoad→MarkAsRenderThread→帧循环→glfwDestroyWindow/Terminate` 生命周期与析构顺序，`demo::Ctx::Loop` 拥有逐帧循环（建空 `RenderFrame`、Esc/`--quit-after` 退出、fps 窗口平均）；内含 `import gfx;`，故 demo TU 只需 include 它。`demo_cli.h` 新增字符串选项 `Flags::string()`。
+- **CMake 嵌套与自动遍历**：根 `CMakeLists.txt` 删除重复的两段 `add_executable`，只留 `GLFW_Template`（从 `src/main.cpp`）+ `add_subdirectory(src/demo)`；`src/demo/CMakeLists.txt` 定义 `add_gfx_demo(<name>)`（`d_<name>` → `OUTPUT_NAME <name>` → link `gfx` → 落 `output/`）+ `file(GLOB CONFIGURE_DEPENDS)` 遍历含 `main.cpp` 的子目录——**新增 demo 免改任何 CMake**。`scripts/build.sh.in`/`run.sh.in` 尾提示改为指向 `./scripts/run.sh <demo>`。
+- **验证**：`GFX_ENABLE_ASSIMP=ON` 全量构建（gfx + `GLFW_Template` + 15 个 demo 全链接）、`OFF` 树配置+构建（`model_loading` 仍链接、运行降级）；16 个 demo/main TU 用 ninja 真实命令加 `-Wall -Wextra -Werror` 零告警；逐个 `--quit-after 3` 无头跑 exit 0、过滤系统噪声后 stderr 为空；`model_loading` 在 ON/OFF 两构建树各跑一次；`pbr_showcase`/`voxel_terrain` 迁移后回归 exit 0、画面零回退。
+
 ### 变更（gfx 运行时解耦：子系统按需装配）
 
 天空盒 / 阴影 / IBL / 后处理(泛光·HDR·MSAA) / 粒子 / 实例化都不再是“必须申请”的前提：

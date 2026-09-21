@@ -64,4 +64,4 @@ HDR 后期是一条固定链：主场景渲染进**线性 HDR target** → brigh
 - 出问题了（黑屏、CLion 无配置、缺 `clang-scan-deps`、模型加载不出来）→ [🧰 排错](9-troubleshooting.md)
 - 两阶段资源管线的用法与拒收规则在 [③ 贴图与模型加载](4-assets-loading.md)；macOS forward-compat 与"为什么 Platform.h 是 include"在 [① 核心骨架](2-core-setup.md)
 - 要发版本 / 触发 CI → 根 [../../README.md](../../README.md) 与 [../../AGENTS.md](../../AGENTS.md) 的 CI 段
-- 想读权威用法 → [`../../src/main.cpp`](../../src/main.cpp) 与 [`../../src/voxel_main.cpp`](../../src/voxel_main.cpp)
+- 想读权威用法 → [`../../src/main.cpp`](../../src/main.cpp)（hello-triangle）与 [`../../src/demo/`](../../src/demo/) 下的 `pbr_showcase` / `voxel_terrain` / 单功能 demo

@@ -63,7 +63,7 @@ git submodule update --init --recursive
 
 判据：`third_party/glad`、`third_party/stb`、`third_party/assimp` 下都有源文件（如 `third_party/assimp/CMakeLists.txt`）。
 
-> 若只需 `voxel_demo` 或不关心模型导入，可用 `-DGFX_ENABLE_ASSIMP=OFF` 配置：该分支不检/不构建 assimp，因此连 assimp 子模块都不必拉（glad/stb 仍必需）。
+> 若只需非模型类的 demo（如 `voxel_terrain`/`pbr_showcase`）或不关心模型导入，可用 `-DGFX_ENABLE_ASSIMP=OFF` 配置：该分支不检/不构建 assimp，因此连 assimp 子模块都不必拉（glad/stb 仍必需）。
 
 ---
 
@@ -86,11 +86,11 @@ cmake --build build
 
 **判据（全部满足才算搭好）**：
 1. 配置期摘要打印出 `GLAD : submodule (OpenGL 4.1 Core)` 或 `system package`，且无 `FATAL_ERROR`。
-2. 构建 exit 0，`grep` 自有 `src/(main|gfx)` 无 `warning`/`error`。
+2. 构建 exit 0，`grep` 自有 `src/(main|demo|gfx)` 无 `warning`/`error`（`third_party` 告警不计）。
 3. 运行出现窗口、stderr 0 字节。
 
 ```bash
-cmake --build build 2>&1 | grep -E 'src/(main|gfx)' | grep -iE 'warning|error'   # 期望空
+cmake --build build 2>&1 | grep -E 'src/(main|demo|gfx)' | grep -iE 'warning|error'   # 期望空（third_party 不计）
 ```
 
 ---

@@ -1,6 +1,6 @@
 # Agent 运行手册 · 替用户写 / 改程序
 
-面向 **AI coding agent**：环境已按 [`setup-environment.md`](setup-environment.md) 搭好后，用户要"用这个引擎写个程序 / 加个物体 / 改渲染"时照本手册做。权威示例永远是 [`../../src/main.cpp`](../../src/main.cpp)——**拿不准就照抄它的用法**。人类向教程在 [../user/](../user/README.md)：骨架见 [① 核心骨架](../user/2-core-setup.md)，各 API 主题分章（[② 几何场景](../user/3-geometry-scene.md)/[③ 资源加载](../user/4-assets-loading.md)/[④ 光照 UBO](../user/5-lighting-ubo.md)/[⑤ 相机拾取](../user/6-camera-picking.md)/[⑥ 体素世界](../user/7-voxel-basics.md)），扩展见 [🔴 进阶](../user/8-advanced.md)。
+面向 **AI coding agent**：环境已按 [`setup-environment.md`](setup-environment.md) 搭好后，用户要"用这个引擎写个程序 / 加个物体 / 改渲染"时照本手册做。权威示例永远是仓库里的 demo：最小基线 [`../../src/main.cpp`](../../src/main.cpp)（hello-triangle）、成品 [`../../src/demo/pbr_showcase/main.cpp`](../../src/demo/pbr_showcase/main.cpp)，以及 [`../../src/demo/`](../../src/demo/) 下一个功能一个入门 demo——**拿不准就照抄它们的用法**。人类向教程在 [../user/](../user/README.md)：骨架见 [① 核心骨架](../user/2-core-setup.md)，各 API 主题分章（[② 几何场景](../user/3-geometry-scene.md)/[③ 资源加载](../user/4-assets-loading.md)/[④ 光照 UBO](../user/5-lighting-ubo.md)/[⑤ 相机拾取](../user/6-camera-picking.md)/[⑥ 体素世界](../user/7-voxel-basics.md)），扩展见 [🔴 进阶](../user/8-advanced.md)。
 
 ---
 
@@ -15,6 +15,10 @@ import gfx;                      // 整个引擎的公共接口；不要再 #inc
 ```
 
 CMake（在**同一仓库**里加你自己的可执行目标；`gfx` target 已在根 [`../../CMakeLists.txt`](../../CMakeLists.txt) 定义）：
+
+**首选：放进 demo 目录，免写任何 CMake**。在 `src/demo/{feature}/` 放一个 `main.cpp`，`src/demo/CMakeLists.txt` 的 `add_subdirectory` 遍历会自动 `add_gfx_demo({feature})` 收为一个可执行（`d_{feature}` → `OUTPUT_NAME {feature}` → 落 `output/{feature}`、链接 `gfx`），重配即生效，无需改任何 CMake。demo 里直接 `#include "demo/demo_app.h"`（内含 `import gfx;` + `#include "gfx/core/Platform.h"`），用 `demo::Run(flags, title, app)` 拿到建窗 / GL 4.1 上下文 / 渲染线程断言 / 析构顺序，用 `Ctx::Loop` 拿帧循环（逐帧回调里填 `RenderFrame`），用 `demo::Flags`（`demo_cli.h`）拿 `--quit-after/--on/--off/--help`。
+
+若要在别处独立建一个目标（不想进 `src/demo/` 遍历），手写即可：
 
 ```cmake
 add_executable(my_app src/my_app.cpp)
@@ -139,7 +143,7 @@ int main() {
 | 光照 | `gfx::LightBuffer lb; lb.Init(); gfx::LightSetup s; s.sun.{direction,color,intensity}; s.ambient; lb.Update(s, camPos);` | |
 | 实例化 | `gfx::InstancedMesh im; if (!im.Create(std::move(geo), std::move(insts))) {...}` | **成员函数非静态**，返回 `bool`；`gfx::Instance{model(mat4),color(vec4)}` |
 | 拾取 | `gfx::PickRay(px,py,fbw,fbh,invViewProj)` → `gfx::Ray`；`gfx::PickNearest(ray, spheres)`→index | 像素是 framebuffer 坐标（Retina 下先从 GLFW 窗口坐标乘 scale）；`spheres: vector<pair<vec3,float>>`，取自 `scene.PickTargets()` |
-| 体素碰撞 | `gfx::VoxelMoveResult r = gfx::MoveVoxelAabb(feet, gfx::VoxelBody{radius,height}, delta, solidFn)` | 纯 CPU。`feet`=脚底中心（盒占 `x±radius × [y, y+height] × z±radius`）；逐轴解算→贴墙滑行；`r.grounded`=下落被拦。**单帧 delta 别过一格**，否则调用方子步进（见 `voxel_main.cpp` 按 ≤ 0.5 格切）；`VoxelAabbSolid(pos,body,fn)` 做纯包含测试 |
+| 体素碰撞 | `gfx::VoxelMoveResult r = gfx::MoveVoxelAabb(feet, gfx::VoxelBody{radius,height}, delta, solidFn)` | 纯 CPU。`feet`=脚底中心（盒占 `x±radius × [y, y+height] × z±radius`）；逐轴解算→贴墙滑行；`r.grounded`=下落被拦。**单帧 delta 别过一格**，否则调用方子步进（见 `src/demo/voxel_terrain/main.cpp` 按 ≤ 0.5 格切）；`VoxelAabbSolid(pos,body,fn)` 做纯包含测试 |
 | 常量 | `gfx::kWindowWidth/kWindowHeight/kWindowTitle/kAppName/kAppVersion` | 来自 `Platform.h` |
 
 ---

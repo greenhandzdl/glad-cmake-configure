@@ -10,9 +10,9 @@
 
 ## TL;DR 关键事实
 
-- 项目：跨平台 **OpenGL 4.1 Core / PBR 图形引擎**（`gfx`）+ 交互式演示 `src/main.cpp`。仓库名 `glad-cmake-configure`，可执行目标 `GLFW_Template`（PBR 演示）与 `voxel_demo`（体素演示）。
+- 项目：跨平台 **OpenGL 4.1 Core / PBR 图形引擎**（`gfx`）+ 按功能拆分的演示。仓库名 `glad-cmake-configure`：`src/main.cpp` 只留**最裸 hello-triangle**（目标 `GLFW_Template`，最小实现基线），其余一个功能一个 demo 在 `src/demo/{feature}/main.cpp`（成品演示 `pbr_showcase` PBR 场景、`voxel_terrain` 体素世界，另 ~13 个单功能 demo）。
 - 语言：**C++23**；引擎以 **C++20 named module `gfx`** 交付（静态库）。
-- 构建：**CMake ≥ 3.28 + Ninja**。产物固定 `output/GLFW_Template` 与 `output/voxel_demo`（Win 加 `.exe`）。
+- 构建：**CMake ≥ 3.28 + Ninja**。产物落 `output/`：`GLFW_Template`（hello-triangle）+ 每个 `src/demo/{feature}` 一个可执行（`pbr_showcase`、`voxel_terrain`…共 15 个）（Win 加 `.exe`）。
 - 平台：Windows / macOS / Linux。
 - 依赖：GLFW（系统包）、GLAD（系统优先/子模块回退）、GLM（header-only）、STB（git 子模块内置）、Assimp（git 子模块，可选：`GFX_ENABLE_ASSIMP` 默认 `ON`）。
 - 子模块：`third_party/glad`、`third_party/stb`、`third_party/assimp`。
@@ -42,34 +42,34 @@ cd glad-cmake-configure
 # 通用（跨平台）
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./output/GLFW_Template
-./output/voxel_demo
+./output/GLFW_Template     # 最裸 hello-triangle
+./output/pbr_showcase      # 任一 demo：./output/<demo>（src/demo/ 下一个目录一个）
 
 # macOS 预设（已钉 Homebrew clang，仅 Darwin 生效）
 cmake --preset Debug && cmake --build --preset Debug
 
 # 脚本
 ./scripts/build.sh [debug|release]   # 配置+构建（自动选 Ninja；macOS 上自动 export Homebrew LLVM CC/CXX，已显式给 $CXX 则不覆盖）
-./scripts/run.sh [target]            # 运行（默认 GLFW_Template，例：run.sh voxel_demo）
+./scripts/run.sh [target]            # 运行（默认 GLFW_Template=hello-triangle，例：run.sh pbr_showcase / run.sh shadow_csm）
 ./scripts/clean.sh                   # 清理（等价 cmake --build build --target clean-project）
 ```
 
 ## 验证一次改动是否 OK（推荐流程）
 
 ```bash
-cmake --build build 2>&1 | grep -E 'src/(main|gfx)' | grep -iE 'warning|error'   # 期望：无（自有代码零告警）
-./output/GLFW_Template >/tmp/o 2>/tmp/e & p=$!; sleep 6; kill $p 2>/dev/null; wc -c /tmp/e   # 期望：stderr 0 字节
-./output/voxel_demo    >/tmp/o 2>/tmp/e & p=$!; sleep 6; kill $p 2>/dev/null; wc -c /tmp/e   # 同上（改了体素侧就跑这条）
+cmake --build build 2>&1 | grep -E 'src/(main|demo|gfx)' | grep -iE 'warning|error'   # 期望：无（自有代码零告警；third_party 告警不计）
+./output/GLFW_Template --quit-after 3 >/tmp/o 2>/tmp/e; echo "exit=$?"; grep -v 'UNSUPPORTED (log once)' /tmp/e   # 期望：exit 0、过滤后 stderr 空
+./output/pbr_showcase  --quit-after 3 >/tmp/o 2>/tmp/e; echo "exit=$?"; grep -v 'UNSUPPORTED (log once)' /tmp/e   # 换任一个受影响 demo 同样跑（无头自检靠 --quit-after，不用 kill）
 ```
 
 ### 验证一个渲染开关是否真的还生效
 
-`kill` 只能证明"没崩"，证明不了"画面变了"。两个 demo 的每个渲染特性都能用命令行开关
-（`src/demo_cli.h`，`--help` 看全表），配合 `--freeze-at SEC` 可脚本化取证：
+`kill` 只能证明"没崩"，证明不了"画面变了"。各 demo 的每个渲染特性都能用命令行开关
+（`src/demo/demo_cli.h`，`--help` 看全表），配合 `--freeze-at SEC` 可脚本化取证：
 
 ```bash
-./output/voxel_demo --freeze-at 8 --auto-break 25 --pitch -1.5 --rise -1 --quit-after 20  # 基准帧
-./output/voxel_demo ... --off particles --quit-after 20                                   # 对照组
+./output/voxel_terrain --freeze-at 8 --auto-break 25 --pitch -1.5 --rise -1 --quit-after 20  # 基准帧
+./output/voxel_terrain ... --off particles --quit-after 20                                   # 对照组
 # 两次同参数运行必须逐像素全等（噪声底 = 0），否则测不出开关的贡献
 ```
 
@@ -103,15 +103,15 @@ cmake -S . -B cmake-build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
 
 同一把尺子也要量 demo 自己：`strtod` 接受 `inf`、`nan`、`1e300`，于是任何
 `static_cast<int>(flags.number(...))` 都是同一个 UB 形状。这条链不必改 CMakeLists——按上面的 flags 配一个
-构建目录、直接 build 两个 demo 目标，再用 `--select inf --rise nan --auto-break 1e300` 这类 argv 跑一遍即可。
+构建目录、直接 build 目标 demo，再用 `--select inf --rise nan --auto-break 1e300` 这类 argv 跑一遍即可。
 一个要记住的不对称：double→float 的越界转换 UBSan 并不报（加 `-fstrict-float-cast-overflow` 也不报），
 所以喂给 float 的角度与距离必须先在 double 域里夹好范围再转。
 畸形模型走同一条链（`ModelLoader::Load` 无 GL、线程安全，探针里直接调用即可）：判据不是"没崩"，而是"被接受
 的模型中每个索引都指向该 mesh 自己发出的顶点"——assimp 的 importer 会拒绝一部分越界文件，但那条不变式该由
 `ModelLoader` 自己守住。另外记住退化视口这条路是安全的（`PostProcessChain::Resize` 拒绝 0/负数尺寸、FBO 不完整时
 有 stderr 诊断、下一次合法尺寸自愈），所以不必在 demo 的每帧 `Resize` 前再加判空。
-数据竞争用 TSan 重配一个目录（`-fsanitize=thread`，**不能**与 address 共用一个构建），直接 build 两个 demo
-目标、照常带 `--quit-after` 跑几十秒即可（空闲 + 挖掘压力两种节奏），不必改 CMakeLists 也不必写探针。
+数据竞争用 TSan 重配一个目录（`-fsanitize=thread`，**不能**与 address 共用一个构建），直接 build 目标 demo、
+照常带 `--quit-after` 跑几十秒即可（空闲 + 挖掘压力两种节奏），不必改 CMakeLists 也不必写探针。
 
 资产文件里的路径引用有两条解析路径，防守点不一样：依赖库自己解析的（assimp 的 glTF buffer uri）已经把引用
 关在模型目录下，实测绝对路径和 `../` 都被拒；我们自己拼的（`ModelLoader` 的纹理路径）没人守，判据是
@@ -125,7 +125,7 @@ cmake -S . -B cmake-build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
 ## 文件地图
 
 ```
-src/main.cpp                 PBR 演示入口：#include "gfx/core/Platform.h" + import gfx; 建窗/组场景/每帧 renderer.Render(frame)
+src/main.cpp                 最裸 hello-triangle：自定义 RenderPass + 内联 GLSL 直渲窗口，#include "demo/demo_app.h"（内含 import gfx;）；目标 GLFW_Template，不碰任何引擎子系统
 src/gfx/gfx.cppm             模块 primary interface：export { #include } 聚合全部公共头
 src/gfx/gmf.hpp              共享 global module fragment（GLAD/GLM/std 预包含；GLuint/glm::vec3 挂 global module）
 src/gfx/core/                Platform.h(窗口/GLFW/宏/常量) · RenderContext(线程亲和) · GLBuffer · VertexArray · UniformBuffer · Sampler · Framebuffer
@@ -140,8 +140,12 @@ src/gfx/scene/               Scene · SceneNode · Transform（纯 CPU 层级）
 src/gfx/render/              Renderer · RenderPass · RenderFrame · RenderPasses(含 Voxel 两 pass) · PostProcessChain · SpriteBatch · TextRenderer · ParticleBatch
 src/gfx/text|assets|debug/   Font / AssetManager·ThreadPool·ModelLoader·ImageLoader / DebugDraw·Profiler
 src/gfx/third_party/         stb_image_impl.cpp（唯一第三方实现 TU，非模块接口）
-src/voxel_main.cpp           体素演示入口：chunk 流式生成/网格化（ThreadPool worker + 渲染线程上传）+ 方块编辑
-src/demo_cli.h               两个 demo 共用的命令行开关（--off/--on/--quit-after/--help + 数值选项）；header-only，不进 module gfx
+src/demo/pbr_showcase/       成品 PBR 场景演示（原 src/main.cpp）：HDR/PBR/CSM/IBL/Bloom/天空盒/实例化/HUD
+src/demo/voxel_terrain/      体素演示入口（原 src/voxel_main.cpp）：chunk 流式生成/网格化 + 方块编辑
+src/demo/{feature}/          单功能入门 demo：只装配它演示的那个子系统，其余留缺省（验证按需装配）；新增一个目录免改 CMake
+src/demo/CMakeLists.txt      add_gfx_demo(<name>)：d_<name>→OUTPUT_NAME=<name>→link gfx；GLOB(CONFIGURE_DEPENDS) 遍历含 main.cpp 的子目录
+src/demo/demo_app.h          共享脚手架（非模块）：demo::Run 拥有窗口/GL 4.1 context/渲染线程断言/析构顺序，demo::Ctx::Loop 拥有帧循环（每帧建空 RenderFrame、Esc/quit-after 退出、fps 窗口平均）；内含 import gfx; 故 demo TU 只需 include 它
+src/demo/demo_cli.h          各 demo 共用的命令行开关（--off/--on/--quit-after/--help + 数值/字符串选项）；header-only，不进 module gfx
 src/assets/                  运行期内容（不编译）：models/ 投放目录 · shaders/ 只读参考镜像（不加载）
 third_party/                 glad · stb · assimp（子模块）
 scripts/                     build.sh.in / run.sh.in / clean.sh.in（CMake 配置期生成 .sh）
@@ -153,11 +157,11 @@ AGENTS.md                    本文件（agent 速查，留在仓库根便于自
 
 ## 硬约束 / 不变量（改代码前必读）
 
-1. **所有 GL 调用（含创建与删除）只在渲染线程**。`RenderContext::MarkAsRenderThread()` 在 `main` 里调一次；每个拥有/驱动 GL 的类在公有入口与析构里调 `AssertRenderThread(...)`（错线程即 `abort`）。
+1. **所有 GL 调用（含创建与删除）只在渲染线程**。`RenderContext::MarkAsRenderThread()` 在 `demo::Run`（`src/demo/demo_app.h`）里调一次；每个拥有/驱动 GL 的类在公有入口与析构里调 `AssertRenderThread(...)`（错线程即 `abort`）。
 2. **两阶段资源管线**：Stage A（工作线程，仅 CPU 解码，产出 `LoadedModelData`/`Texture2DDesc`）→ Stage B（渲染线程 `AssetManager::ProcessUploads()` 才建 GL 对象）。工作线程里绝不 `gl*`。
 3. **move-only RAII**：GL 包装与 `ThreadPool`/`AssetManager`/`RenderPass` 等 delete 拷贝，只能 `std::move`/`unique_ptr`。一个 GL id 只有一个 owner。
 4. **错误用 `std::expected<T,E>`，不跨线程抛异常**。（`ThreadPool::WorkerMain` 顶层有 `try/catch` 兜底，防逃逸出 `std::thread` 触发 `std::terminate`。）
-5. **场景节点持非拥有指针**：`SceneNode` 存 `const Mesh*`/`const PbrMaterial*`，GL 对象生命周期归应用（`main.cpp`）。
+5. **场景节点持非拥有指针**：`SceneNode` 存 `const Mesh*`/`const PbrMaterial*`，GL 对象生命周期归应用（demo 的 `app` 回调，在其中构造并在 `glfwTerminate` 前析构）。
 6. **依赖只向下**：application→orchestration(render/scene)→features→core。高层可用低层，反之不行。
 7. **named module 边界**：宏与 `<GLFW/glfw3.h>` 不跨模块 → `Platform.h` 必须文本 include；global module 类型（`glm::vec3`/`GLuint`）消费者自行 include。
 

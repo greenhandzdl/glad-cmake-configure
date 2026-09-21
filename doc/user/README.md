@@ -34,4 +34,4 @@
 [../developer/design.md](../developer/design.md) 与 [../developer/thread-safety.md](../developer/thread-safety.md)。
 使用者文档只给"怎么做"和一个"为什么"的简述，深入原因请转过去。
 
-> 权威用法示例永远是仓库里的 [`../../src/main.cpp`](../../src/main.cpp) 与 [`../../src/voxel_main.cpp`](../../src/voxel_main.cpp)——它们演示了引擎的全部对外用法；文档与它们冲突时以代码为准。
+> 权威用法示例永远是仓库里的 [`../../src/main.cpp`](../../src/main.cpp)（hello-triangle 最小基线）、[`../../src/demo/pbr_showcase/main.cpp`](../../src/demo/pbr_showcase/main.cpp) 与 [`../../src/demo/voxel_terrain/main.cpp`](../../src/demo/voxel_terrain/main.cpp)，加上 `../../src/demo/{feature}/` 下的单功能 demo——它们演示了引擎的全部对外用法；文档与它们冲突时以代码为准。

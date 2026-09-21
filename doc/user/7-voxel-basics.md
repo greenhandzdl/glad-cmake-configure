@@ -1,6 +1,6 @@
 # 🟢 ⑥ 体素世界：从噪声地形到挖方块
 
-前提：已完成 [⑤ 相机与拾取](6-camera-picking.md)。这一章走一遍体素子系统的最小闭环：**方块表 → 程序化地形 → 成块网格 → 上传 → 射线交互**。完整可运行实现是 `src/voxel_main.cpp`（`./scripts/run.sh voxel_demo`）。
+前提：已完成 [⑤ 相机与拾取](6-camera-picking.md)。这一章走一遍体素子系统的最小闭环：**方块表 → 程序化地形 → 成块网格 → 上传 → 射线交互**。完整可运行实现是 `src/demo/voxel_terrain/main.cpp`（`./scripts/run.sh voxel_terrain`）。
 
 ---
 
@@ -27,7 +27,7 @@ for (int x = 0; x < 16; ++x) for (int z = 0; z < 16; ++z) {
 }
 ```
 
-`Get/Set` 用局部坐标（越界读返回 air、写被丢弃），`Sample(worldCell)` 实现 `IVoxelSource`——只回答本 chunk 内的格子，跨 chunk 查询由上层聚合（见 `voxel_main.cpp` 的 `World`）。`Set` 自动打脏标记，边界编辑还会连带标脏邻接方向。
+`Get/Set` 用局部坐标（越界读返回 air、写被丢弃），`Sample(worldCell)` 实现 `IVoxelSource`——只回答本 chunk 内的格子，跨 chunk 查询由上层聚合（见 `src/demo/voxel_terrain/main.cpp` 的 `World`）。`Set` 自动打脏标记，边界编辑还会连带标脏邻接方向。
 
 ## 3. 成块网格：`ChunkMesher`（纯 CPU，可并行）
 
@@ -37,7 +37,7 @@ gfx::VoxelChunkMesh cm = mesher.Build(chunkCellsPtr, chunkOrigin, worldSource); 
 ```
 
 - 只输出"与不透明邻居相邻"的面（面剔除），水/叶等透明与 cutout 几何分在 `cm.transparent`。
-- **Stage A 身份**：全程不碰 GL，可以扔进 `ThreadPool` 并行（`voxel_main.cpp` 就是这么干的），结果 `std::future<VoxelChunkMesh>` 回渲染线程。
+- **Stage A 身份**：全程不碰 GL，可以扔进 `ThreadPool` 并行（`src/demo/voxel_terrain/main.cpp` 就是这么干的），结果 `std::future<VoxelChunkMesh>` 回渲染线程。
 
 ## 4. 上传与绘制（渲染线程）
 
