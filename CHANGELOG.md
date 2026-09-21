@@ -119,6 +119,13 @@
   （`src/assets/models/` 只有 README，几何与纹理全是程序生成的），所以这两处改动不可能影响画面；仍复跑了一轮
   12 组开关矩阵验收（常量上提重编了纹理上传）。
 
+- **异步资产管线（两个 demo 都不跑的那条路）**：探针扩到 42 项。`AssetManager` 的 `RequestTexture` /
+  `RequestModel` / `ProcessUploads` 此前从未在运行时被驱动过，现在用隐藏窗口一次覆盖完：模型无纹理（第二阶段
+  会不会永远等下去）、纹理解码失败的模型、被拒的模型、读不到的图片、被头部拒收的超大图片、同一 key 重复请求。
+  ASan + UBSan 与 TSan 各 42/42、退出码 0、**0 条数据竞争**。一个只属于探针的坑：`ProcessUploads` 每帧一次，
+  而空转 900 次循环在 TSan 下不足一毫秒墙钟，worker 根本来不及跑完——第一版因此报“18 项仍 pending”，
+  给每帧加上 1 ms 的 sleep 后同一份代码 3 帧排空。
+
 - **对抗 argv**：两个 demo 用 UBSan 构建跑畸形命令行——`--select inf`、`--auto-break 1e300`、
   `--rise nan`、`--auto-place -inf`、`--pitch nan`、`--radius -1e300`、`--yaw 1e300`、`--off nosuch`、
   `--on bogus`、缺值的 `--auto-break`、`--freeze-at abc`、空值、`+` 与 `x`——退出码全 0，无一条 sanitizer

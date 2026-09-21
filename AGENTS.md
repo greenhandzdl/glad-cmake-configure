@@ -118,6 +118,10 @@ cmake -S . -B cmake-build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
 “返回给调用方的每条路径是否仍在模型目录下”。同理，图片尺寸的上限必须在解码前用 `stbi_info` 读头部比对，
 解码完再拒只是把“文件→显存”的放大变成“文件→内存”的放大（实测 144 KB → 643 MB 峰值 RSS）。
 
+驱动异步管线（`AssetManager` 这种“每帧 `ProcessUploads()` 一次”的接口）时，探针里的“帧”必须是真墙钟：
+一个不带 sleep 的排空循环在 sanitizer 下能跑上万次而只耗几毫秒，worker 还没开工就“超时”，看起来像管线卡死、
+其实是测法错了。每帧 `sleep_for(1ms)` 后同一份代码三帧排空。
+
 ## 文件地图
 
 ```
