@@ -39,7 +39,9 @@
  * aim and lift the fly camera: at the spawn tilt the crosshair ray lands past
  * the interaction reach, so scripted mining needs a steeper pitch, and
  * --auto-place N with --select 7 builds the water a water test cannot find on
- * its own in this part of the world.
+ * its own in this part of the world. --freeze-at also leaves the pointer alone:
+ * a captured pointer lets whoever is moving the mouse next to the window rewrite
+ * --yaw / --pitch, and the scripted edit counts with it.
  *
  * The window is created with the same 4.1-core hints as the PBR demo; see
  * main.cpp for the engine's other showcase.
@@ -445,8 +447,11 @@ glm::vec3 SunToward(const Input& in) {
                                     ce * std::cos(in.sunAzimuth)));
 }
 
-void ApplyCapture(GLFWwindow* win, Input& in) {
-    in.captured = (in.cam == Input::Cam::Fly);
+void ApplyCapture(GLFWwindow* win, Input& in, bool keepCursor = false) {
+    // `keepCursor` is the scripted-run override: with --freeze-at the view has to
+    // stay where --yaw/--pitch put it, and a captured pointer hands the last word
+    // to whoever is moving the mouse next to the window.
+    in.captured = !keepCursor && (in.cam == Input::Cam::Fly);
     glfwSetInputMode(win, GLFW_CURSOR,
                      in.captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
 }
@@ -914,7 +919,8 @@ int main(int argc, char** argv) {
             }
         };
 
-        ApplyCapture(window, input);
+        const bool scripted = flags.number("freeze-at") > 0.0;
+        ApplyCapture(window, input, scripted);
         const double startedAt = glfwGetTime();
         const double quitAfter = flags.quitAfter();
         const double freezeAt = flags.number("freeze-at");
@@ -969,7 +975,7 @@ int main(int argc, char** argv) {
                 input.cam = (input.cam == Input::Cam::Fly) ? Input::Cam::Orbit
                                                             : Input::Cam::Fly;
                 if (input.cam == Input::Cam::Orbit) input.focus = camera.Position();
-                ApplyCapture(window, input);
+                ApplyCapture(window, input, scripted);
             }
             if (edge(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS, escArmed)) {
                 if (input.cam == Input::Cam::Fly) {

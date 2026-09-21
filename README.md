@@ -145,7 +145,7 @@ cmake --build build --target clean-project
 |------|------|
 | `--off a,b` / `--on a,b` | 关闭/打开列出的功能（PBR：`shadow,ibl,bloom,debug,instances,sky,ortho`；体素：`particles,fog,water,sky,ortho`） |
 | `--quit-after SEC` | SEC 秒后自行退出 |
-| `--freeze-at SEC` | 把动画/物理时钟停在启动后 SEC 秒：两次同参数运行逐像素相同，截图才可对比 |
+| `--freeze-at SEC` | 把动画/物理时钟停在启动后 SEC 秒：两次同参数运行逐像素相同，截图才可对比（并且不捕获指针，视角停在 `--yaw/--pitch` 处） |
 | `--yaw/--pitch/--radius` | 设定 PBR 轨道相机朝向（实例化场在 +x 方向，默认视角看不到它，也看不到地平线） |
 | `--yaw/--pitch/--rise` | 设定体素飞行相机的朝向与出生高度（默认俯角下准星射线落在交互距离之外，脚本挖掘需要更陡的俯角） |
 | `--auto-break N` / `--auto-place N` | 脚本化挖 N 块 / 放 N 块，走与点击完全相同的路径（DDA 拾取 → 编辑 → remesh → 碎屑） |
