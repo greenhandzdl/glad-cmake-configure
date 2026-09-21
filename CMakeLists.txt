@@ -127,7 +127,15 @@ target_include_directories(stb INTERFACE ${CMAKE_SOURCE_DIR}/third_party/stb)
 # Assimp (3D model import library) — vendored as a git submodule and built
 # from source as a static subproject. This keeps the build self-contained
 # across all three CI platforms (no system/vcpkg assimp package needed).
+#
+# GFX_ENABLE_ASSIMP=OFF drops the entire model-import path (and this heavy
+# dependency) out of the build: the submodule is never checked or configured,
+# gfx links without assimp, and ModelLoader::Load reports unavailability at
+# runtime. The exported `gfx` module interface is unchanged either way.
 # ============================================================================
+option(GFX_ENABLE_ASSIMP "Build assimp-backed 3D model import" ON)
+
+if(GFX_ENABLE_ASSIMP)
 if(NOT EXISTS ${CMAKE_SOURCE_DIR}/third_party/assimp/CMakeLists.txt)
     message(FATAL_ERROR
         "Assimp submodule not found. Initialize it first:\n"
@@ -164,6 +172,7 @@ if(APPLE)
     endforeach()
 endif()
 message(STATUS "Assimp: submodule (static, bundled zlib)")
+set(ASSIMP_SOURCE "submodule (static, bundled zlib)")
 
 # Newer standard libraries (libc++ >= 19, recent MSVC STL) no longer transitively
 # pull <ostream>/<cstdint>/... into every header, which breaks a few legacy Assimp
@@ -179,6 +188,10 @@ if(TARGET assimp)
             $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/FI${_h}>
             $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-include${_h}>)
     endforeach()
+endif()
+else()
+    message(STATUS "Assimp: DISABLED (GFX_ENABLE_ASSIMP=OFF) - model import unavailable")
+    set(ASSIMP_SOURCE "DISABLED (GFX_ENABLE_ASSIMP=OFF)")
 endif()
 
 # ============================================================================
@@ -244,8 +257,13 @@ target_link_libraries(gfx PUBLIC
     ${GLAD_TARGET})
 
 target_link_libraries(gfx PRIVATE
-    stb
-    assimp::assimp)
+    stb)
+if(GFX_ENABLE_ASSIMP)
+    target_link_libraries(gfx PRIVATE
+        assimp::assimp)
+else()
+    target_compile_definitions(gfx PRIVATE GFX_NO_ASSIMP)
+endif()
 
 # Per-compiler module tweaks. CMake >= 3.28 drives named-module compilation and
 # the import-graph scan for all three vendors, so this only patches up details:
@@ -320,5 +338,6 @@ message(STATUS "  GLFW        : glfw")
 message(STATUS "  GLAD        : ${GLAD_SOURCE}")
 message(STATUS "  GLM         : ${GLM_INCLUDE_DIR}")
 message(STATUS "  STB         : submodule")
+message(STATUS "  Assimp      : ${ASSIMP_SOURCE}")
 message(STATUS "  Output      : ${CMAKE_SOURCE_DIR}/output")
 message(STATUS "")

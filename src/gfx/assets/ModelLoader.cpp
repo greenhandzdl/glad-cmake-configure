@@ -6,9 +6,11 @@ module;
 // first so any transitive <GL/gl.h> pulled by Assimp is shadowed by our loader
 // (project convention). These stay out of ModelLoader.h to keep them off the
 // exported module interface.
+#ifndef GFX_NO_ASSIMP
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
+#endif
 
 #include <cmath>
 #include <cstdio>
@@ -17,6 +19,19 @@ module;
 module gfx;
 
 namespace gfx {
+
+#ifdef GFX_NO_ASSIMP
+// Model import is compiled out (GFX_ENABLE_ASSIMP=OFF). The header API stays
+// identical so the `gfx` module interface does not change; a Load() call reports
+// clearly that this build carries no assimp importer, so an app does not mistake
+// the empty result for a malformed file.
+std::expected<LoadedModelData, std::string>
+ModelLoader::Load(const std::string& path) {
+    std::fprintf(stderr, "[ModelLoader] %s: model import is unavailable in a build "
+                         "configured with GFX_ENABLE_ASSIMP=OFF\n", path.c_str());
+    return std::unexpected("gfx built without Assimp: model import unavailable");
+}
+#else
 
 namespace {
 // True when a reference written inside a model file would land outside the
@@ -159,4 +174,5 @@ ModelLoader::Load(const std::string& path) {
     return out;
 }
 
+#endif // GFX_NO_ASSIMP
 } // namespace gfx
