@@ -11,6 +11,7 @@
 - **安全测试**：ASan+UBSan 构建下 11 组无头跑全净（含体素流式生成/网格化、脚本挖掘+放水、占位纹理修复路径、两条截图回读）；17 组畸形 argv 对抗输入（`inf`/`nan`/`1e300`/负数/空串/`--`/吞值/拼错功能名）全部正常退出、零 sanitizer 报错；TSan 下体素 demo 空闲 30s + 挖掘压力 25s 零数据竞争。
 - **发布制品**：确认 CI 三平台均为全量 `cmake --build` + 整 `output/` 目录打包，zip 内含主可执行与全部 15 个 demo；清理了本地遗留的 pre-refactor `voxel_demo` 产物。
 - **验证**：精简后全量重建干净，`pbr_showcase`/`instancing`/`voxel_terrain` 截图复验无回退（nonclear 像素 93.0% / 30.4% / 96.7%；instancing 正是被删声明所属类的使用者）。
+- **CI 发布修复**：`voxel_terrain/World.h` 补 `#include <mutex>`（Linux libstdc++ 的 `<shared_mutex>` 不透出 `std::unique_lock`，macOS 构建掩盖了此缺失）；release 工作流 Windows job 钉到 `windows-2022`（`windows-latest` 镜像升到 VS 18 / MSVC 14.51 后，C++20 named modules 在 import 侧 TU 触发 STL 头 C2572/C7571 重定义风暴，v1.3.x 系列均在 VS2022 镜像上验证通过）。
 
 ### 修复（PBR 空场景根因）+ 截图验证钩子 + 两个成品 demo 的小项目化拆分
 

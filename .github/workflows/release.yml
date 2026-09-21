@@ -57,7 +57,10 @@ jobs:
             artifact: GLFW_Template-macos-arm64
           - os: windows
             display: Windows-x64
-            runs-on: windows-latest
+            # 钉死 windows-2022：windows-latest 镜像近期升到 VS 18（MSVC 14.51），
+            # 其 C++20 named modules 在 import 侧 TU 触发 STL 头 C2572/C7571 重定义风暴；
+            # v1.3.x 系列一直在 VS2022 镜像上验证通过。
+            runs-on: windows-2022
             artifact: GLFW_Template-windows-x64
 
     steps:
