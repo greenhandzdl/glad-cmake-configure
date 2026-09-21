@@ -14,7 +14,7 @@
 # prefix so the on-disk binary is just `output/{feature}`.
 # ============================================================================
 
-function(add_gfx_demo name)
+function(add_gldx_demo name)
     add_executable(d_${name} ${CMAKE_CURRENT_SOURCE_DIR}/${name}/main.cpp)
     target_link_libraries(d_${name} PRIVATE gldx gldxwin gldxcli)
     set_target_properties(d_${name} PROPERTIES
@@ -29,6 +29,6 @@ file(GLOB demo_children RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
 
 foreach(child ${demo_children})
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${child}/main.cpp)
-        add_gfx_demo(${child})
+        add_gldx_demo(${child})
     endif()
 endforeach()
