@@ -54,7 +54,7 @@ auto opaquePass = std::make_unique<gfx::VoxelOpaquePass>();
 opaquePass->SetPipeline(vx);                        // VoxelTransparentPass 同款，多按视距从远到近排序
 ```
 
-两个 pass 挂进 `Renderer` 链（顺序：`... → VoxelOpaque → VoxelTransparent → PostProcess → HUD`），`waterAlpha`/`leafCutoff`/`time`（水面 uv 流动）也在 `VoxelPipeline` 上调。`doubleSided`（默认 `false`）关掉不透明 pass 的背面剔除：站在挖开的腔体里从下往上看时，被剔掉的底面会“看穿”，打开它就能看到腔壁。HUD 字体是 demo 侧同步 `Font::LoadFromFile` 加载的系统 TTF，找不到只禁用文字叠加。
+体素 demo 不用 `BuildPbrPipeline()`，而是手工 `AddPass` 拼链（顺序：`... → VoxelOpaque → Skybox → VoxelTransparent → PostProcess → HUD`）：`VoxelOpaquePass` 像 `GeometryPass` 一样开启场景目标，独立的 `SkyboxPass` 排在 opaque 与 transparent 之间（即天空盒原先内联的位置），因此不想要天空盒直接从链里去掉它即可。`waterAlpha`/`leafCutoff`/`time`（水面 uv 流动）也在 `VoxelPipeline` 上调。`doubleSided`（默认 `false`）关掉不透明 pass 的背面剔除：站在挖开的腔体里从下往上看时，被剔掉的底面会“看穿”，打开它就能看到腔壁。HUD 字体是 demo 侧同步 `Font::LoadFromFile` 加载的系统 TTF，找不到只禁用文字叠加。
 
 ## 5. 交互：`RaycastVoxel`（DDA，纯 CPU）
 

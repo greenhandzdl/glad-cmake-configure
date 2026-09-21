@@ -25,21 +25,41 @@ target_link_libraries(my_app PRIVATE gfx)   # gfx 以 PUBLIC 传递 glfw/glad/gl
 
 ---
 
-## 2. ⚠️ 先纠正一个高频错误：默认管线是"全家桶"，不是 hello-triangle
+## 2. 管线是"按需装配"，不是必须全家桶
 
-`renderer.BuildDefaultPipeline()` 装上 `Shadow → Geometry → PostProcess → DebugHud` 四个 pass。其中 **`GeometryPass::Execute` 会无条件解引用**这些 `RenderFrame` 字段：
+`Renderer` 给两个预设：`BuildPbrPipeline()` 装演示用的全量链 `Shadow → Geometry → Skybox → PostProcess → DebugHud`；`BuildMinimalPipeline()` 只装 `Geometry → DebugHud`。二者都只是 `AddPass()` 之上的一行预设，你完全可以自己拼。
+
+**`GeometryPass::Execute` 只在渲染前无条件要求这四项**（缺一即 `return`，不崩）：
 
 ```
-f.post  f.lights  f.shadow  f.env  f.skybox  f.pbr  f.camera  f.scene  f.frustum  f.viewProj  f.fbWidth/fbHeight
+f.camera  f.lights  f.pbr  f.scene
 ```
 
-留空（`nullptr`）任意一个 → 解引用崩溃。**没有"少填几个字段的极简 RenderFrame"这条路**（PBR/CSM/IBL/HDR 是一体的）。所以写新程序有两种正道：
+其余子系统都是**可选**，各自停在守卫后面，应用没带就不参与：
 
-### 路线 A（推荐给"基于引擎做应用"）：以 `src/main.cpp` 为骨架，换内容
+- `f.post`（`PostProcessChain*`）：**可空**。为空时几何 / 体素 pass 直接绑定默认帧缓冲、自行 `glClear` 后渲到窗口——不必为了出图去构造整条 HDR/MSAA/泛光链。
+- `f.shadow`（`{map,depth,sunToward,enabled}`）、`f.sky`（`{box,env}`）、`f.ibl.enabled`、`f.instances`、`f.overlay`、`f.particles`：整块缺省构造 = 该效果本帧不存在。着色器开关取的是 `f.shadow.enabled && f.shadow.map` 这类"数据与开关都在"的组合，所以光置空指针不会误采样。
 
-直接复制 [`../../src/main.cpp`](../../src/main.cpp) 的**生命周期骨架**（见 §3），只改"造物体"的部分。必须保留的子系统（缺一即崩）：`Renderer` + `PostProcessChain` + `LightBuffer` + `CascadedShadowMap` + `EnvironmentMap` + `SkyboxRenderer` + `pbr`/`depth` 着色器 + `Camera` + `Scene` + 每帧 `Frustum`。用不到的效果用开关关掉即可（`frame.useShadow=false` 等），**不要删对象**。
+因此写新程序有三条正道，按投入从轻到重：
 
-### 路线 B（真要极简 / 加后处理叠加）：自定义 `RenderPass`，不调 `BuildDefaultPipeline`
+### 路线 A（推荐：要 PBR/阴影/泛光）：以 `src/main.cpp` 为骨架，换内容
+
+直接复制 [`../../src/main.cpp`](../../src/main.cpp) 的**生命周期骨架**（见 §3），只改"造物体"的部分。用到的子系统才建对象并填进 `RenderFrame` 对应记录，用不到的效果把该记录的 `enabled` 留 `false`（或指针留空）即可，**不必为"怕缺字段崩"而构造你根本不用的链**。
+
+### 路线 B（只要出图 / 自定义效果）：`BuildMinimalPipeline()` + 空 `post`
+
+```cpp
+gfx::Renderer renderer; renderer.Init(); renderer.BuildMinimalPipeline();
+// 每帧 frame 只需 camera/lights/pbr/scene + fbWidth/fbHeight；frame.post = nullptr。
+gfx::RenderFrame frame;
+frame.camera = &camera; frame.lights = &lightBuffer; frame.pbr = &*pbr; frame.scene = &scene;
+frame.viewProj = viewProj; frame.fbWidth = w; frame.fbHeight = h;   // post 与各可选记录全缺省
+renderer.Render(frame);   // 几何 pass 直渲窗口，无需 shadow/sky/post
+```
+
+注意：这条路径不经 ACES/伽马合成，出图色彩空间即着色器输出。PBR 着色器要正确出图仍需 `LightingBlock` UBO 已 `SetBlockBinding`（见 §4）；若想更纯粹，配一个自带简单着色器的自定义 pass（路线 C）。
+
+### 路线 C（真正 hello-triangle / 加后处理叠加）：自定义 `RenderPass`，两个 builder 都不调
 
 `RenderPass` 基类只有一个纯虚函数（`src/gfx/render/RenderPass.h`）：
 
@@ -48,17 +68,16 @@ class MyPass : public gfx::RenderPass {
 public:
     MyPass() : gfx::RenderPass("MyPass") {}
     void Execute(gfx::RenderFrame& f) override {   // 只在渲染线程被调用（Renderer::Render 保证）
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glClearColor(0.02f, 0.02f, 0.03f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         // 用你自己的 ShaderProgram + Mesh 画东西；此处 GL 全部合法（渲染线程）
     }
 };
 gfx::Renderer renderer; renderer.Init();
-renderer.AddPass(std::make_unique<MyPass>());      // 只跑你的 pass，绕开 GeometryPass 的字段要求
-renderer.Render(frame);                             // frame 可极简（但你的 pass 用啥填啥）
+renderer.AddPass(std::make_unique<MyPass>());      // 只跑你的 pass，连 GeometryPass 都不需要
+renderer.Render(frame);                            // frame 可极简（你的 pass 用啥填啥）
 ```
-
-注意：PBR 着色器要出图仍需 `LightingBlock` UBO 与 IBL 采样器（见 §6），所以纯极简路线一般配**自带简单着色器**，或仍复用路线 A 的子系统。
 
 ---
 
@@ -85,7 +104,7 @@ int main() {
     // 关键：把所有 GL 资源 owner 放进一个 lambda，让它在本函数返回、
     // glfwDestroyWindow/Terminate 之前析构（此时 context 仍 current）。
     auto run = [&]() -> int {
-        gfx::Renderer renderer; renderer.Init(); renderer.BuildDefaultPipeline();
+        gfx::Renderer renderer; renderer.Init(); renderer.BuildPbrPipeline();
         // ... 建着色器/子系统/场景，组 RenderFrame，while 循环 renderer.Render(frame) ...
         return 0;   // 所有 owner 在此、在渲染线程上析构
     };
@@ -139,6 +158,8 @@ while (running) {
 ```
 
 投放目录是 [`../../src/assets/models/`](../../src/assets/models/)（FBX/OBJ/glTF）。两条已验证的拒收规则：材质里的纹理引用必须解析在模型自己目录内（绝对路径/`..` 被 `ModelLoader` 拒，stderr 一行诊断）；图片边长超 `kMaxTextureSide`（16384）在解码前读头部即拒（防解压炸弹），错误走 `std::expected` 串。线程与阶段不变量见 [../developer/thread-safety.md](../developer/thread-safety.md)。
+
+> 模型导入背后只有一个重依赖 assimp，由 CMake 选项 `GFX_ENABLE_ASSIMP`（默认 `ON`）控制。`OFF` 时 `gfx` 不带 assimp 构建，`RequestModel`/`GetModel` 签名不变但永远拿不到模型（`Load` 返回 `std::unexpected` 并一行 stderr 提示），纹理/体素/几何/PBR 不受影响。
 
 ---
 

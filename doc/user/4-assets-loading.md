@@ -41,6 +41,14 @@ while (running) {
 
 投放目录约定见 [`src/assets/models/README.md`](../../src/assets/models/README.md)；对应症状的速查在 [🧰 排错 §6](9-troubleshooting.md#6-报错--修复速查表)。
 
+## 4. 模型导入是可选依赖（`GFX_ENABLE_ASSIMP`）
+
+整条模型导入路径背后只有一个重依赖：assimp。它由 CMake 选项 `GFX_ENABLE_ASSIMP`（默认 `ON`）控制。用 `-DGFX_ENABLE_ASSIMP=OFF` 配置时，assimp 子模块根本不拉取/不构建，`gfx` 链接时不带 assimp：
+
+- 导出的 `gfx` 模块接口不变，`ModelLoader::Load` / `AssetManager::RequestModel` 签名照旧，故你的代码无需改一行就能在两种构建下编译。
+- 但 `RequestModel` 拿到的会是空结果：`ModelLoader::Load` 返回一个 `std::unexpected("gfx built without Assimp: model import unavailable")` 并在 stderr 打一行 `[ModelLoader] <path>: model import is unavailable ...`，`GetModel(key)` 永远返回空。**纹理/图片加载（stb）不受影响**，体素、程序化几何、PBR 也完全照常。
+- 换句话说：不要模型的纯体素/程序化产品可以关掉这个选项省掉一次重型子模块构建；要导 FBX/OBJ/glTF 就保持默认 `ON`。
+
 ---
 
 ## 下一步

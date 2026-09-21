@@ -6,7 +6,7 @@
 
 ## 1. 自定义渲染 pass
 
-引擎的默认管线是四个 `RenderPass` 的线性链：`Shadow → Geometry → PostProcess → DebugHud`。你可以插入自己的 pass，或干脆不调 `BuildDefaultPipeline()` 完全自定义顺序。
+引擎提供两个现成的 stage 顺序：`BuildPbrPipeline()` 装全套演示链 `Shadow → Geometry → Skybox → PostProcess → DebugHud`；`BuildMinimalPipeline()` 只装 `Geometry → DebugHud`——不申请后处理链时 `RenderFrame.post` 置空，几何 pass 会直接绑定默认帧缓冲、自行 clear 后渲到窗口，证明阴影/天空盒/泛光都不是出图的前提。你可以 `AddPass()` 插入自己的 pass，或干脆不调任一个 builder 完全自定义顺序。
 
 ```cpp
 class MyPass : public gfx::RenderPass {
@@ -26,16 +26,16 @@ renderer.AddPass(std::make_unique<MyPass>());      // 追加
 
 ## 2. 后期链与运行期开关
 
-HDR 后期是一条固定链：主场景渲染进**线性 HDR target** → bright-pass → 可分离高斯模糊 → **ACES tonemap + gamma 合成**（统一在 composite 一步完成色彩空间转换）。运行期可由 `RenderFrame` 上的一组布尔驱动：
+HDR 后期是一条固定链：主场景渲染进**线性 HDR target** → bright-pass → 可分离高斯模糊 → **ACES tonemap + gamma 合成**（统一在 composite 一步完成色彩空间转换）。它是可选的：不想要就把 `frame.post` 置空、并不装 `PostProcessPass`，几何 pass 会直渲窗口（代价是不经 ACES/伽马合成，颜色空间即着色器输出）。要想要，则运行期由 `RenderFrame` 上分属各可选记录的开关驱动：
 
 | 开关字段 | 演示里对应键 | 作用 |
 | --- | --- | --- |
-| `useShadow` | `1` | 级联阴影 |
-| `useIbl` | `2` | IBL 环境光 |
-| `useBloom` | `3` | Bloom |
-| `useDebug` | `4` | 调试线框 |
-| `useInstances` | `5` | 实例化场 |
-| `frame.skybox = nullptr` | `6` | 天空盒（不是布尔字段：置空指针即不画，背景回到 clear color） |
+| `shadow.enabled` | `1` | 级联阴影 |
+| `ibl.enabled` | `2` | IBL 环境光（数据在 `sky.env`，开关独立） |
+| `useBloom` | `3` | Bloom（挂在 `post` 上，无独立记录） |
+| `overlay.useDebug` | `4` | 调试线框 |
+| `instances.enabled` | `5` | 实例化场 |
+| `sky.box = nullptr` | `6` | 天空盒（不是布尔字段：置空指针即不画，背景回到 clear color） |
 | `ortho` | `Tab` | 透视 ↔ 正交投影（相机侧还要 `ToggleProjection()` 换投影矩阵，见 `Camera`） |
 
 把它们接你自己的 UI/配置即可。曝光用 `post.SetExposure(...)` 调。投影互切的相机侧细节见 [⑤ 相机与拾取](6-camera-picking.md)。

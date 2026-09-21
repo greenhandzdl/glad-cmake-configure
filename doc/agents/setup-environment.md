@@ -63,6 +63,8 @@ git submodule update --init --recursive
 
 判据：`third_party/glad`、`third_party/stb`、`third_party/assimp` 下都有源文件（如 `third_party/assimp/CMakeLists.txt`）。
 
+> 若只需 `voxel_demo` 或不关心模型导入，可用 `-DGFX_ENABLE_ASSIMP=OFF` 配置：该分支不检/不构建 assimp，因此连 assimp 子模块都不必拉（glad/stb 仍必需）。
+
 ---
 
 ## 步骤 3 · 首次配置 + 构建 + 运行，并验证

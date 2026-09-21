@@ -5,16 +5,29 @@
 
 ## Unreleased
 
-体素 demo 三个体验问题的根因修复：碰撞缺失、水不流、从下往上看丢面。
+### 变更（gfx 运行时解耦：子系统按需装配）
 
-### 新增
+天空盒 / 阴影 / IBL / 后处理(泛光·HDR·MSAA) / 粒子 / 实例化都不再是“必须申请”的前提：
+**最小出图路径只需 相机 + 光照 UBO + PBR 或体素程序 + 一个目标**，其余子系统不装配也能跑。解耦只落在
+运行时组合层（延续“pass 内 null 守卫 + RenderFrame 聚合 + 线性 pass 列表”），不引入 render graph、不拆分区/多库。
+
+- **渲染目标与后处理解耦**：`GeometryPass`/`VoxelOpaquePass` 不再在 `!f.post` 时 `return`。新增内部接缝 `BeginSceneTarget(f)`：`f.post` 非空时 `Resize`+`BeginScene`（原路），为空时直接绑默认帧缓冲、自行 `glClear` 渲到窗口。`PostProcessPass` 自此为可选 pass。注：直渲窗口路径不经 ACES/伽马合成，颜色空间即着色器输出（现有 demo 仍走完整链，无回退）。
+- **天空盒剥离为独立 `SkyboxPass`**：原先硬编进两个几何 pass 末尾的 `skybox->Draw(...)` 抽为一个 `RenderPass`（排在开场的场景目标仍开着、`PostProcess` 之前）。不装配 = 完全不触碰 `SkyboxRenderer`/`EnvironmentMap`。
+- **`RenderFrame` 按可选子系统分段**：核心只留 `camera/frustum/scene/viewProj/post(现可选)/lights/pbr/lightSetup/selected/useBloom/ortho/fbWidth/fbHeight/smoothedFps/visibleCount/totalNodes` 与裸指针 `particles`；其余归嵌套记录 `sky{box,env}`、`shadow{map,depth,sunToward,enabled}`、`ibl{enabled}`、`instances{field,prog,enabled}`、`overlay{debug,sprite,font,white,profiler,useDebug}`。默认构造 = 全空/全关。字段改名（旧→新）：`useShadow→shadow.enabled`、`shadow→shadow.map`、`depth→shadow.depth`、`sunToward→shadow.sunToward`、`skybox→sky.box`、`env→sky.env`、`useIbl→ibl.enabled`、`instField/instProg/useInstances→instances.*`、`debug/sprite/font/white/profiler/useDebug→overlay.*`。
+- **`Renderer` 组合式 builder**：`BuildDefaultPipeline()` 拆为 `BuildPbrPipeline()`（等价原默认全量档，内部含 `SkyboxPass`）与新增 `BuildMinimalPipeline()`（Geometry→DebugHud，什么都不申请也能出图）。`AddPass()` 仍是唯一装配原语，builder 只是预设。
+- **assimp 改为可选依赖（`GFX_ENABLE_ASSIMP`，默认 `ON`）**：`OFF` 时不检/不 `add_subdirectory` assimp 子模块、不 `link assimp::assimp`，给 `gfx` 加 `GFX_NO_ASSIMP` 宏；`ModelLoader::Load` 降级为返回 `std::unexpected("gfx built without Assimp: model import unavailable")` + 一行 stderr 提示。导出接口与签名不变，仅能力在 `OFF` 构建下降为“模型导入不可用”；体素/程序化几何/PBR 不受影响。配置摘要新增 `Assimp` 行。
+- **验证**：`GFX_ENABLE_ASSIMP=ON` 下两 demo 全量构建；5 个改动 TU（`RenderPasses.cpp`/`Renderer.cpp`/`RenderFrame.h` 宿主/`ModelLoader.cpp`/两 demo main）用 ninja 真实命令加 `-Wall -Wextra -Werror` 零告警；`-DGFX_NO_ASSIMP` stub 单独编译零告警；`-DGFX_ENABLE_ASSIMP=OFF` 配 `build-noassimp` 树并构 `voxel_demo`，不拉 assimp 子模块、编译链接通过；两 demo 无头回归与逐开关 toggle（全关/全开）exit 0 且过滤系统噪声后 stderr 无报错；临时将 `main.cpp` 切 `BuildMinimalPipeline()`+`frame.post=nullptr` 无头跑几帧，确认直渲窗口出图、无 GL error（验后已还原）。
+
+### 新增（体素 demo）
+
+体素 demo 三个体验问题的根因修复：碰撞缺失、水不流、从下往上看丢面。
 
 - **`Collision.h`（`src/gfx/voxel/`）**：纯 CPU 的 AABB 体素碰撞求解 `gfx::MoveVoxelAabb` / `gfx::VoxelAabbSolid`。把玩家/刚体建模成以脚底中心为锚的轴对齐盒
   （`VoxelBody{radius, height}`），逐轴移动并吸附到被穿过的格面，天然产生“贴墙滑行”；返回 `VoxelMoveResult{hitX,hitY,hitZ,grounded}`。按 solidity
   谓词模板化，无 GL、无全局状态、可任意线程调用；已随 `gfx` 模块导出。单帧位移超过一格需调用方子步进（快速移动/传送时）。
 - **`VoxelPipeline.doubleSided`**（默认 `false`，行为不变）：打开后体素不透明 pass 跳过背面剔除，从下方/腔体内看地形不再丢面。
 
-### 变更（demo）
+### 变更（体素 demo）
 
 - **飞行相机改为真实碰撞**：去掉“低于海平面且脚下非空就把相机弹回 `kSeaLevel+2`”的启发式（正是“y 到某个高度下不去”的元凶），改用
   `gfx::MoveVoxelAabb` 逐帧解算脚底 AABB（眼睛在脚上方 `kEyeHeight`）：能沿墙滑行、能下到刚挖开的竖井底部；每帧位移按 ≤ 0.5 格子步进防穿透。

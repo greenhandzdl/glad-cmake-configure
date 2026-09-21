@@ -6,7 +6,7 @@
 
 需要完整、可照做的步骤时读这两篇（本文件是它们的浓缩索引）：
 - **替用户搭环境** → [`doc/agents/setup-environment.md`](doc/agents/setup-environment.md)：幂等的 检测→安装→配置构建→验证 流程，每步带成功判据与失败分支。
-- **替用户写/改程序** → [`doc/agents/author-program.md`](doc/agents/author-program.md)：消费 `gfx` 的 CMake/代码接线、**默认管线是全家桶（GeometryPass 硬依赖多个字段，别写极简 RenderFrame）**、已验证 API 速查、异步加载、交付自检。
+- **替用户写/改程序** → [`doc/agents/author-program.md`](doc/agents/author-program.md)：消费 `gfx` 的 CMake/代码接线、**子系统按需装配（`GeometryPass` 只硬依赖 camera/lights/pbr/scene；天空盒/阴影/IBL/泛光均为可选记录，`post` 可空、`BuildMinimalPipeline()` 可只 Geometry→DebugHud 直渲出图）**、已验证 API 速查、异步加载、交付自检。
 
 ## TL;DR 关键事实
 
@@ -14,7 +14,7 @@
 - 语言：**C++23**；引擎以 **C++20 named module `gfx`** 交付（静态库）。
 - 构建：**CMake ≥ 3.28 + Ninja**。产物固定 `output/GLFW_Template` 与 `output/voxel_demo`（Win 加 `.exe`）。
 - 平台：Windows / macOS / Linux。
-- 依赖：GLFW（系统包）、GLAD（系统优先/子模块回退）、GLM（header-only）、STB + Assimp（git 子模块内置）。
+- 依赖：GLFW（系统包）、GLAD（系统优先/子模块回退）、GLM（header-only）、STB（git 子模块内置）、Assimp（git 子模块，可选：`GFX_ENABLE_ASSIMP` 默认 `ON`）。
 - 子模块：`third_party/glad`、`third_party/stb`、`third_party/assimp`。
 - 许可证：见 `LICENSE`。当前正式版 tag：`v1.3.1`。
 
@@ -22,7 +22,7 @@
 
 - **编译器必须支持 named modules 且带依赖扫描器**：Clang ≥ 19 / GCC ≥ 14 / 新 MSVC。
 - **macOS 不能用 AppleClang**：`/usr/bin/clang` 无 `clang-scan-deps`，配置 `gfx` 模块会失败。必须用 **Homebrew LLVM**：`brew install llvm`，编译器 `/opt/homebrew/opt/llvm/bin/clang{,++}`。
-- **必须先拉子模块**（`--recursive` 或 `git submodule update --init --recursive`），否则 glad/stb/assimp 缺失。
+- **必须先拉子模块**（`--recursive` 或 `git submodule update --init --recursive`），否则 glad/stb/assimp 缺失（用 `-DGFX_ENABLE_ASSIMP=OFF` 时 assimp 可不拉）。
 
 ## 安装
 

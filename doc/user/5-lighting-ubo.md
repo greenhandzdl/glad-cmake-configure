@@ -37,7 +37,7 @@ lights.Bind();                                                           // 每�
 // 阴影同理：SetBlockBinding("ShadowBlock", gfx::CascadedShadowMap::kShadowBinding)
 ```
 
-`LightBuffer` 只暴露 `Init/Update/Bind/valid`——没有也不需要 `handle()`，别拿裸句柄自己 `glBindBufferBase`。当然，走 `BuildDefaultPipeline()` 的默认链时引擎已把这两步都做了。
+`LightBuffer` 只暴露 `Init/Update/Bind/valid`——没有也不需要 `handle()`，别拿裸句柄自己 `glBindBufferBase`。当然，走 `BuildPbrPipeline()` 或 `BuildMinimalPipeline()` 时，只要几何 pass 在链里，引擎已把这两步都做了。
 
 **遇到"全黑且无报错"，先查这一步。** 同类"忘了一步就静默无输出"的坑记在 [排错 §3](9-troubleshooting.md#3-黑屏且无任何报错忘了给-ubouniform-block-绑定)。
 
@@ -60,10 +60,10 @@ albedo.Apply(0);      // 绑到 texture unit 0
 gfx::EnvironmentMap env;
 env.Generate(sunDir);       // 渲染线程烘焙 4 张贴图：HDR 天空 cube / 漫反射 irradiance /
                             // GGX prefilter 镜面（粗糙度存进 mip）/ BRDF 积分 LUT
-frame.env = &env;           // 之后每帧随 RenderFrame 交给引擎
+frame.sky.env = &env;       // 之后每帧随 RenderFrame 交给引擎（同一份 env 既喂 IBL 也喂天空盒）
 ```
 
-返回 `false` 表示有 shader 编译失败（会打日志）；`env.valid()` 为真后 `frame.skybox`（`SkyboxRenderer`）也能拿它当背景。
+返回 `false` 表示有 shader 编译失败（会打日志）；`env.valid()` 为真后把 `frame.sky.box`（`SkyboxRenderer`）一并接上、并装一个 `SkyboxPass`，它就兼作背景（IBL 与天空盒两个用途共享 `frame.sky.env`，但由 `frame.ibl.enabled` 与是否装 `SkyboxPass` 各自独立开关）。
 
 ---
 

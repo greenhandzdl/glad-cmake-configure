@@ -57,31 +57,37 @@
 
 一条**线性 pass 链**，不是完整的 render graph。
 
-- `RenderFrame` 是逐帧的值类型结构，用指针/引用打包各 pass 所需的一切
-  （相机、视锥、场景、后期链、光照 buffer、阴影图、环境贴图、PBR/depth/skybox/
-  instanced 着色器程序、各开关、被拾取的节点、HUD 资源、性能分析器，以及若干
-  输出计数如 `visibleCount`）。它不拥有任何 GL 资源——只是"这一帧的输入"。
+- `RenderFrame` 是逐帧的值类型结构，拆成一个小的**核心**（足以出图：相机 + 视锥 +
+  场景 + 一个光照 UBO + 一个着色器程序 + 一个目标）和若干**可选子系统记录**
+  （`sky`/`shadow`/`ibl`/`instances`/`overlay`，外加裸指针 `particles`）。每个记录
+  把某项功能的指针与启用开关归在一起；缺省构造即"应用没带那个子系统"，消费方都
+  停在各自的 null/开关守卫后——这就是天空盒/阴影/IBL/泛光/实例化从"必须"降为"按需
+  装配"的机制。`post` 如今也是可选：置空则几何/体素 pass 直渲默认帧缓冲。它不拥有
+  任何 GL 资源——只是"这一帧的输入"。
 - `RenderPass` 是抽象基类：`virtual void Execute(RenderFrame&) = 0;` 外加一个
   `name`。它不可拷贝。
 - 具体 pass（在 `RenderPasses.h/.cpp`），按序执行：
   1. `ShadowPass` —— 更新 CSM，逐层联级把投影者渲进深度数组。
-  2. `GeometryPass` —— 把 HDR 场景渲进 MSAA target：绑定 UBO/阴影/环境，绘制
-     经视锥剔除的可渲染物（对被拾取节点套一层高亮材质），可选的实例化场，最后
-     画天空盒。
-  3. `PostProcessPass` —— resolve MSAA，可选的 bright/blur bloom，然后把 ACES
-     合成输出到默认帧缓冲。
-  4. `DebugHudPass` —— `DebugDraw` 线框 + `SpriteBatch`/`Font` 的 HUD 文字，并
+  2. `GeometryPass` —— 把 HDR 场景渲进 MSAA target（无 post 链时直渲窗口）：绑定
+     UBO/阴影/环境，绘制经视锥剔除的可渲染物（对被拾取节点套一层高亮材质），可选
+     的实例化场。打开的场景目标一直留到 `PostProcessPass` 才关，故天空盒能接在其后。
+  3. `SkyboxPass`（可选） —— 用 LEQUAL 深度技巧以 HDR 环境立方填上没被不透明几何
+     覆盖的像素；不装配它就完全不触碰 `SkyboxRenderer`/`EnvironmentMap`。
+  4. `PostProcessPass` —— resolve MSAA，可选的 bright/blur bloom，然后把 ACES
+     合成输出到默认帧缓冲（可选：无 post 链时 3D pass 直接渲到窗口，本 pass 不入链）。
+  5. `DebugHudPass` —— `DebugDraw` 线框 + `SpriteBatch`/`Font` 的 HUD 文字，并
      收束 `Profiler` 的这一帧。
 - `Renderer` 持有有序的 `std::vector<std::unique_ptr<RenderPass>>`；
-  `BuildDefaultPipeline()` 装上上面四个 pass，`AddPass()` 让应用自定义，
-  `Render(frame)` 只是按序跑一遍。`Init()` 设置一次性全局 GL 状态（深度测试、
-  面剔除）。
+  `BuildPbrPipeline()` 装上面那套全量演示链（含 `SkyboxPass`），`BuildMinimalPipeline()`
+  只装 `Geometry → DebugHud` 以演示"什么都不申请也能出图"；`AddPass()` 是唯一的装配
+  原语（builder 只是预设），`Render(frame)` 只是按序跑一遍。`Init()` 设置一次性全局
+  GL 状态（深度测试、面剔除）。
 
 ### 为什么是线性链，而不是 render graph？
 
 通用的 render graph（瞬态资源、自动 barrier/资源状态管理、sub-pass 合并）只在
 你有大量 pass、且在异步 compute 或基于 tile 的 GPU 上有不平凡的读/写依赖时，才
-对得起它的复杂度。本管线只是把手上几个长寿命 render target 过四遍固定顺序的
+对得起它的复杂度。本管线只是把手上几个长寿命 render target 过几遍固定顺序的
 pass。手写这个顺序更短、更好调，也契合 GL 状态的实际用法。`RenderFrame` +
 `RenderPass` 已经预留了将来要长成 graph 所需的接缝（每个 pass 在 `Execute` 里
 声明自己的活，`Renderer` 负责编排顺序），所以我们在抽象"值回票价"之前先不做它。

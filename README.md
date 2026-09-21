@@ -57,7 +57,7 @@
 | **GLAD** | 系统优先，子模块回退 | 先 `find_package(glad CONFIG)`；未找到时用 `third_party/glad` 生成 OpenGL **4.1 Core** 绑定并编译为静态库 `glad_gl_core_41` |
 | **GLM** | 系统包管理器 | `find_path(GLM_INCLUDE_DIR glm/glm.hpp)`，header-only |
 | **STB** | git 子模块 | header-only，提供 `stb` INTERFACE 目标；由 `src/gfx/third_party/stb_image_impl.cpp` 实例化图像/字体解码 |
-| **Assimp** | git 子模块 | `add_subdirectory` 源码内置构建（导入器 only），链接 `assimp::assimp`；三平台无需系统包 |
+| **Assimp** | git 子模块（可选） | 由 `GFX_ENABLE_ASSIMP`（默认 `ON`）控制：`ON` 时 `add_subdirectory` 源码内置构建（导入器 only）、链接 `assimp::assimp`；`OFF` 时整个 assimp 依赖不构建、`ModelLoader::Load` 降级为“模型导入不可用”，体素/程序化几何/PBR 不受影响 |
 
 > GLAD 采用「系统优先、仓库回退」：系统装有 GLAD 时直接链接 `glad::glad`；否则现场调用子模块内的 glad2 生成器（需 Python 3 + jinja2，缺失时回退到隔离的 `uv` venv）生成绑定。无论走哪条路径，最终可执行文件只依赖 GLFW（共享库）与 GLAD（静态库，运行期动态加载 GL），因此无需再手动链接 OpenGL / X11 / Cocoa 等系统库。
 
@@ -110,6 +110,13 @@ cmake --build build
 ```
 -- GLFW_Template 1.3.1 configuration:
 --   GLAD        : submodule (OpenGL 4.1 Core)   # 或 system
+--   Assimp      : submodule (static, bundled zlib)   # 或 DISABLED (GFX_ENABLE_ASSIMP=OFF)
+```
+
+不需要模型导入时，可用 `-DGFX_ENABLE_ASSIMP=OFF` 去掉这个重依赖（连子模块都不必拉）：
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGFX_ENABLE_ASSIMP=OFF
 ```
 
 ### 使用生成脚本
@@ -162,7 +169,7 @@ AddressSanitizer + UndefinedBehaviorSanitizer 的对抗输入自检（NaN / inf 
 
 `main.cpp` 打开一个 800×600 窗口，渲染一个交互式 PBR 演示场景：带纹理的地面与球阵、金属立方体、一个旋转的子层级（carousel，演示场景层级变换传播），配合级联阴影、IBL 环境光照、HDR + Bloom + ACES 后期、天空盒，以及精灵批次文本 HUD。
 
-绘制不再是一大堆内联 `gl*` 调用，而是改为逐帧组装一个 `RenderFrame` 后一句 `renderer.Render(frame)`（依序执行 Shadow → Geometry → PostProcess → DebugHud 四个 pass）。
+绘制不再是一大堆内联 `gl*` 调用，而是改为逐帧组装一个 `RenderFrame` 后一句 `renderer.Render(frame)`。演示用的 `BuildPbrPipeline()` 依序跑 Shadow → Geometry → Skybox → PostProcess → DebugHud；这些都是**按需装配**的可选 pass——天空盒、阴影、IBL、泛光、粒子、实例化都不再是必须申请的前提（`BuildMinimalPipeline()` 仅 Geometry → DebugHud，不建后处理链也能直渲出图）。
 
 **操作**：拖拽鼠标轨道旋转 / 滚轮缩放；`A`·`D`（或 `←`·`→`）太阳方位、`W`·`S`（或 `↑`·`↓`）太阳高度；右键拾取物体（包围球射线测试，高亮）；`1` 级联阴影、`2` IBL、`3` Bloom、`4` 调试线框、`5` 实例化场、`6` 天空盒、`Tab` 透视/正交；`Esc` 退出。
 

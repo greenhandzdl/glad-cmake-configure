@@ -34,7 +34,7 @@
 ### 3. 面向 Agent — [`../AGENTS.md`](../AGENTS.md) + [`agents/`](agents/setup-environment.md)
 - 仓库根 [`../AGENTS.md`](../AGENTS.md)（**自动发现入口**）：面向检索的速查——关键事实、逐平台命令、文件地图、硬约束、常见报错→修复。
 - [`agents/setup-environment.md`](agents/setup-environment.md)：agent **替用户搭环境**的幂等流程（检测→安装→配置构建→验证，带成功判据）。
-- [`agents/author-program.md`](agents/author-program.md)：agent **替用户写/改程序**的运行手册（消费 `gfx` 的接线、默认管线约束、已验证 API 速查、异步加载、交付自检）。
+- [`agents/author-program.md`](agents/author-program.md)：agent **替用户写/改程序**的运行手册（消费 `gfx` 的接线、子系统按需装配与极简管线、已验证 API 速查、异步加载、交付自检）。
 
 命令与标识符保持原文，便于精确匹配。**入口 `AGENTS.md` 刻意留在仓库根**——那是 agent 自动发现的标准位置。
 

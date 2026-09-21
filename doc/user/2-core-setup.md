@@ -24,7 +24,8 @@ int main() {
 
     gfx::Renderer renderer;
     renderer.Init();
-    renderer.BuildDefaultPipeline();            // 安装 Shadow→Geometry→PostProcess→DebugHud 四个 pass
+    renderer.BuildPbrPipeline();                // 装全套演示链 Shadow→Geometry→Skybox→PostProcess→DebugHud
+    // renderer.BuildMinimalPipeline();         // 或极简 Geometry→DebugHud：不申请后处理/阴影/天空盒也能出图
     // ... 建资源（②③④章）、每帧组装 RenderFrame、renderer.Render(frame) ...
 }
 ```
@@ -47,7 +48,7 @@ glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
 ## 4. 每帧的形状：RenderFrame + Render
 
-绘制不是一堆内联 `gl*` 调用，而是逐帧组装一个 `RenderFrame`（"这一帧的输入打包"：相机、场景、光照、各开关字段，按指针/引用持子系统、**不拥有**任何 GL 资源），然后一句 `renderer.Render(frame)` 按 pass 顺序执行。开关字段怎么用见 [④ 光照与 UBO](5-lighting-ubo.md)，怎么加自己的 pass 见 [🔴 进阶](8-advanced.md)。
+绘制不是一堆内联 `gl*` 调用，而是逐帧组装一个 `RenderFrame`（"这一帧的输入打包"：核心是相机、视锥、场景、光照 UBO 与一个着色器程序，其余子系统——阴影 / 天空盒 / IBL / 泛光 / 实例化 / 覆盖层——各归一个可选记录，按指针/引用持用、**不拥有**任何 GL 资源），然后一句 `renderer.Render(frame)` 按 pass 顺序执行。子系统只填你带来的那些即可，缺省记录 = 该效果不参与本帧。开关字段怎么用见 [④ 光照与 UBO](5-lighting-ubo.md)，极简/自定义 pass 见 [🔴 进阶](8-advanced.md)。
 
 ---
 
