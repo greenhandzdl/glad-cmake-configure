@@ -261,7 +261,7 @@ int main(int argc, char** argv) {
     auto runDemo = [&]() -> int {
         gfx::Renderer renderer;
         renderer.Init();
-        renderer.BuildDefaultPipeline();
+        renderer.BuildPbrPipeline();
 
         auto pbr = gfx::ShaderProgram::CreateFromSource(gfx::shaders::kPbrVertex, gfx::shaders::kPbrFragment);
         if (!pbr) {
@@ -563,25 +563,26 @@ int main(int argc, char** argv) {
             frame.viewProj = viewProj;
             frame.post = &post;
             frame.lights = &lightBuffer;
-            frame.shadow = &csm;
-            frame.env = &env;
-            frame.skybox = input.useSky ? &skybox : nullptr;
             frame.pbr = &*pbr;
-            frame.depth = &*depth;
             frame.lightSetup = setup;
-            frame.sunToward = towardSun;
-            frame.debug = &debug;
-            frame.sprite = &sprite;
-            frame.font = &font;
-            frame.white = &white;
-            frame.profiler = &profiler;
-            frame.instField = &instField;
-            frame.instProg = instProg ? &*instProg : nullptr;
-            frame.useShadow = input.useShadow;
-            frame.useIbl = input.useIbl;
+            // Optional subsystems, each attached only because this demo brings it.
+            frame.sky.box = input.useSky ? &skybox : nullptr;
+            frame.sky.env = &env;
+            frame.shadow.map = &csm;
+            frame.shadow.depth = &*depth;
+            frame.shadow.sunToward = towardSun;
+            frame.shadow.enabled = input.useShadow;
+            frame.ibl.enabled = input.useIbl;
+            frame.instances.field = &instField;
+            frame.instances.prog = instProg ? &*instProg : nullptr;
+            frame.instances.enabled = input.useInstances;
+            frame.overlay.debug = &debug;
+            frame.overlay.sprite = &sprite;
+            frame.overlay.font = &font;
+            frame.overlay.white = &white;
+            frame.overlay.profiler = &profiler;
+            frame.overlay.useDebug = input.useDebug;
             frame.useBloom = input.useBloom;
-            frame.useDebug = input.useDebug;
-            frame.useInstances = input.useInstances;
             frame.ortho = input.ortho;
             frame.selected = selected;
             frame.fbWidth = fbw;

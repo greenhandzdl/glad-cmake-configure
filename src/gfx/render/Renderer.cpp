@@ -19,11 +19,18 @@ void Renderer::AddPass(std::unique_ptr<RenderPass> pass) {
     passes_.push_back(std::move(pass));
 }
 
-void Renderer::BuildDefaultPipeline() {
+void Renderer::BuildPbrPipeline() {
     passes_.clear();
     passes_.push_back(std::make_unique<ShadowPass>());
     passes_.push_back(std::make_unique<GeometryPass>());
+    passes_.push_back(std::make_unique<SkyboxPass>());
     passes_.push_back(std::make_unique<PostProcessPass>());
+    passes_.push_back(std::make_unique<DebugHudPass>());
+}
+
+void Renderer::BuildMinimalPipeline() {
+    passes_.clear();
+    passes_.push_back(std::make_unique<GeometryPass>());
     passes_.push_back(std::make_unique<DebugHudPass>());
 }
 

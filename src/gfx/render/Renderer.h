@@ -31,8 +31,14 @@ public:
     // Append a custom pass (advanced use). Render-thread only.
     void AddPass(std::unique_ptr<RenderPass> pass);
 
-    // Install the standard stage order: Shadow -> Geometry -> PostProcess -> DebugHud.
-    void BuildDefaultPipeline();
+    // Compose the standard PBR showcase stage order:
+    //   Shadow -> Geometry -> Skybox -> PostProcess -> DebugHud
+    void BuildPbrPipeline();
+
+    // Smallest useful stage order: Geometry -> DebugHud, with no shadow / sky /
+    // post. The geometry pass then renders straight to the default framebuffer,
+    // demonstrating that none of those subsystems is mandatory to draw a scene.
+    void BuildMinimalPipeline();
 
     // Execute every pass in order against the shared frame. Render-thread only.
     void Render(RenderFrame& frame);

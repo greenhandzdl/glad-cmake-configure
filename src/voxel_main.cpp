@@ -597,22 +597,22 @@ public:
 
 void VoxelHudPass::Execute(gfx::RenderFrame& f) {
     gfx::RenderContext::AssertRenderThread("VoxelHudPass::Execute");
-    if (f.sprite && f.font && f.white) {
-        f.sprite->Begin(*f.white, f.fbWidth, f.fbHeight);
-        f.sprite->Draw(*f.white, 0.0f, 0.0f, 560.0f, 116.0f, 0.0f, 0.0f, 1.0f, 1.0f,
+    if (f.overlay.sprite && f.overlay.font && f.overlay.white) {
+        f.overlay.sprite->Begin(*f.overlay.white, f.fbWidth, f.fbHeight);
+        f.overlay.sprite->Draw(*f.overlay.white, 0.0f, 0.0f, 560.0f, 116.0f, 0.0f, 0.0f, 1.0f, 1.0f,
                        glm::vec4(0.0f, 0.0f, 0.0f, 0.35f));
-        gfx::TextRenderer::Draw(*f.sprite, *f.font, text, 12.0f, 8.0f, 20.0f,
+        gfx::TextRenderer::Draw(*f.overlay.sprite, *f.overlay.font, text, 12.0f, 8.0f, 20.0f,
                                 glm::vec4(1.0f));
         if (crosshair) {
             const float cx = f.fbWidth * 0.5f, cy = f.fbHeight * 0.5f;
-            f.sprite->Draw(*f.white, cx - 8.0f, cy - 1.0f, 16.0f, 2.0f, 0.0f, 0.0f, 1.0f, 1.0f,
+            f.overlay.sprite->Draw(*f.overlay.white, cx - 8.0f, cy - 1.0f, 16.0f, 2.0f, 0.0f, 0.0f, 1.0f, 1.0f,
                            glm::vec4(1.0f, 1.0f, 1.0f, 0.75f));
-            f.sprite->Draw(*f.white, cx - 1.0f, cy - 8.0f, 2.0f, 16.0f, 0.0f, 0.0f, 1.0f, 1.0f,
+            f.overlay.sprite->Draw(*f.overlay.white, cx - 1.0f, cy - 8.0f, 2.0f, 16.0f, 0.0f, 0.0f, 1.0f, 1.0f,
                            glm::vec4(1.0f, 1.0f, 1.0f, 0.75f));
         }
-        f.sprite->End();
+        f.overlay.sprite->End();
     }
-    if (f.profiler) f.profiler->EndFrame();
+    if (f.overlay.profiler) f.overlay.profiler->EndFrame();
 }
 
 } // namespace
@@ -686,8 +686,9 @@ int main(int argc, char** argv) {
         // ---- engine objects -------------------------------------------------
         gfx::Renderer renderer;
         renderer.Init();
-        // No BuildDefaultPipeline(): the voxel demo swaps GeometryPass for the
-        // voxel pair and brings its own HUD pass.
+        // No BuildPbrPipeline(): the voxel demo swaps GeometryPass for the
+        // voxel pair, adds the standalone sky stage between opaque and
+        // transparent (where the inline sky used to sit), and brings its own HUD.
         auto opaquePass = std::make_unique<gfx::VoxelOpaquePass>();
         auto transpPass = std::make_unique<gfx::VoxelTransparentPass>();
         auto hudPass = std::make_unique<VoxelHudPass>();
@@ -696,6 +697,7 @@ int main(int argc, char** argv) {
         VoxelHudPass* hudRaw = hudPass.get();
 
         renderer.AddPass(std::move(opaquePass));
+        renderer.AddPass(std::make_unique<gfx::SkyboxPass>());
         renderer.AddPass(std::move(transpPass));
         renderer.AddPass(std::make_unique<gfx::PostProcessPass>());
         renderer.AddPass(std::move(hudPass));
@@ -1352,14 +1354,14 @@ int main(int argc, char** argv) {
             frame.viewProj = viewProj;
             frame.post = &post;
             frame.lights = &lightBuffer;
-            frame.env = &env;
-            frame.skybox = input.showSky ? &skybox : nullptr;
             frame.lightSetup = setup;
-            frame.sunToward = towardSun;
-            frame.sprite = &sprite;
-            frame.font = &font;
-            frame.white = &white;
-            frame.profiler = &profiler;
+            frame.shadow.sunToward = towardSun;
+            frame.sky.env = &env;
+            frame.sky.box = input.showSky ? &skybox : nullptr;
+            frame.overlay.sprite = &sprite;
+            frame.overlay.font = &font;
+            frame.overlay.white = &white;
+            frame.overlay.profiler = &profiler;
             frame.particles = input.showParticles ? &particles : nullptr;
             frame.useBloom = false;
             frame.fbWidth = fbw;

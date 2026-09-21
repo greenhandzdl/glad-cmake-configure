@@ -6,10 +6,12 @@
  * @brief The concrete frame stages, in execution order (plan "RenderPass").
  *
  *   ShadowPass      - depth-only render of casters into the cascade array
- *   GeometryPass    - linear HDR PBR scene (+ optional instanced field) + skybox
- *   VoxelOpaquePass - linear HDR chunked voxel terrain (open pass) + skybox
+ *   GeometryPass    - linear HDR PBR scene (+ optional instanced field)
+ *   SkyboxPass      - optional: HDR env cube fills uncovered pixels (LEQUAL depth)
+ *   VoxelOpaquePass - linear HDR chunked voxel terrain (opens the scene target)
  *   VoxelTransparentPass - back-to-front water, then world particles
  *   PostProcessPass - MSAA resolve -> bloom -> ACES composite to the default FBO
+ *                     (optional: with no post chain the 3D passes render to the window)
  *   DebugHudPass    - world line overlay + sprite/text HUD, closes the profiler
  *
  * Each is a thin object whose Execute() contains the same GL sequence that used
@@ -42,6 +44,18 @@ public:
 class GeometryPass : public RenderPass {
 public:
     GeometryPass() : RenderPass("Geometry") {}
+    void Execute(RenderFrame& frame) override;
+};
+
+// Standalone sky stage. The opaque geometry / voxel pass opens the scene target
+// and leaves it bound; SkyboxPass draws the HDR environment cube with the
+// LEQUAL-depth trick to fill the pixels nothing covered, then PostProcessPass
+// closes the target. Keeping the sky its own pass means a pipeline that never
+// adds it does not touch SkyboxRenderer / EnvironmentMap at all - the sky is no
+// longer welded into the geometry pass's responsibilities.
+class SkyboxPass : public RenderPass {
+public:
+    SkyboxPass() : RenderPass("Skybox") {}
     void Execute(RenderFrame& frame) override;
 };
 
