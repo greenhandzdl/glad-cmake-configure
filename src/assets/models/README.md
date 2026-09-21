@@ -1,38 +1,46 @@
-# Model drop-in directory
+# 模型投放目录
 
-Place mesh assets here — **FBX / OBJ / glTF / GLB** (anything [Assimp][assimp]
-v5.4.x can import). This folder is intentionally kept empty in the repository
-via `.gitkeep`; add real files through your normal workflow (they are large, so
-consider Git LFS or the ignore rules noted below).
+把网格资产放在这里——**FBX / OBJ / glTF / GLB**（[Assimp][assimp] v5.4.x
+能导入的任意格式均可）。本目录在仓库中通过 `.gitkeep` 刻意保持为空；真实文件按你的常规工作流
+加入（体积大，建议 Git LFS，或参考文末的仓库卫生约定）。
 
 [assimp]: https://assimp.org
 
-## How models reach the GPU
+## 模型如何到达 GPU
 
-Models are loaded through `gfx::AssetManager::RequestModel()` (see
-[`src/gfx/assets`](../../src/gfx/assets)), which runs a **two-stage pipeline** so
-no GL call ever happens off the render thread:
+模型经 `gfx::AssetManager::RequestModel(key, path)` 加载（见
+[`src/gfx/assets`](../../../src/gfx/assets)），走**两阶段管线**，保证任何 GL 调用都不发生在渲染线程之外：
 
-1. **Stage A (background thread, no GL):** Assimp parses the file and the
-   importer builds CPU-side `MeshData` (positions, normals, UVs, tangents) and
-   material descriptions. Results are returned as immutable, shared data.
-2. **Stage B (render thread):** the uploaded `MeshData` is turned into GL
-   buffers / vertex arrays inside `Mesh::Upload(...)`.
+1. **Stage A（后台线程，不碰 GL）：** Assimp 解析文件，importer 在 CPU 侧构建
+   `MeshData`（位置、法线、UV、切线）与材质描述，结果以不可变共享数据返回。
+2. **Stage B（渲染线程）：** 在 `Mesh::Upload(...)` 里把已上传的 `MeshData` 变成
+   GL 缓冲 / 顶点数组。
 
-`AssetManager` is safe to call from any thread: it owns a worker queue
-(`std::mutex` + `std::condition_variable`) and a result cache guarded by a
-`std::shared_mutex`; callers get handles / `shared_ptr<const …>`, never mutable
-GL objects. See [`doc/developer/thread-safety.md`](../../../doc/developer/thread-safety.md) for the full
-invariant list.
+`AssetManager` 从任意线程调用都安全：内部有 worker 队列（`std::mutex` +
+`std::condition_variable`）和 `std::shared_mutex` 保护的结果缓存；调用方拿到的是
+句柄 / `shared_ptr<const …>`，绝不是可变的 GL 对象。完整不变量清单见
+[`doc/developer/thread-safety.md`](../../../doc/developer/thread-safety.md)。
 
-## Textures / materials
+## 纹理 / 材质（两条硬性拒收规则）
 
-Model-embedded and standalone textures are referenced by path and decoded with
-STB (`src/utils/stb.cpp`). Keep texture files alongside models here (e.g. a
-`models/<name>/` subfolder) so relative material paths resolve.
+模型内嵌与独立贴图都按路径引用，用 STB 解码（实现单元在
+`src/gfx/third_party/stb_image_impl.cpp`）。加载器对资产文件本身有两道已验证的防线：
 
-## Repo hygiene
+- **纹理引用不许走出模型所在目录。** 材质（如 `.mtl` 的 `map_Kd`）里的引用只接受
+  模型目录内的相对路径（子目录可以）；绝对路径、盘符或含 `..` 的引用会被
+  `ModelLoader` 拒绝并留一行 stderr 诊断（`names a path outside the model's own
+  directory`）——此时模型照常加载，只是那块贴图不生效。**所以请把贴图与模型放在同一
+  目录（例如 `models/<name>/` 子文件夹），材质里用相对引用。**
+- **图片尺寸在解码前就用头部校验。** 边长超过 `kMaxTextureSide`（16384）的图片在
+  分配像素之前就被拒（防"小文件解出巨量内存"的解压炸弹），错误以 `std::expected`
+  错误串返回，带真实尺寸与上限。
 
-Large binaries are not committed by default. If you add heavy assets, extend
-`.gitignore` (or enable Git LFS) rather than checking them in — the engine and
-`main.cpp` must stay clone-and-build for CI.
+另外：面索引越出本 mesh 顶点数的三角形会被**整面丢弃**（保住"索引只指向自己顶点"的
+不变式，不打诊断）；位置含 NaN/inf 时会有 `[ModelLoader] ... positions are not finite`
+的 stderr 行——NaN 顶点合法上传但永不光栅化，症状是"模型不见了"，看到该行请修模型本身。
+排错速查见 [`doc/user/4-troubleshooting.md`](../../../doc/user/4-troubleshooting.md) §6。
+
+## 仓库卫生
+
+大型二进制默认不入库。若要加入重量级资产，请扩展 `.gitignore`（或启用 Git LFS），
+不要直接提交——引擎与 `main.cpp` 必须保持三平台 CI "克隆即可构建"。

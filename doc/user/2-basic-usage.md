@@ -72,16 +72,19 @@ node.SetRenderable(&mesh, &mat);             // 节点持"非拥有"指针：mes
 
 ```cpp
 gfx::AssetManager assets;                          // 内含线程池
-assets.RequestTexture("src/assets/models/albedo.png");
-assets.RequestModel  ("src/assets/models/robot.fbx");
+// Request* 是 (key, path) 两个参数：key 由调用方命名，重复的 key 会被忽略
+assets.RequestTexture("robot.albedo", "src/assets/models/robot/albedo.png");
+assets.RequestModel  ("robot",       "src/assets/models/robot.fbx");
 
 while (running) {
     assets.ProcessUploads();                       // 每帧一次，在渲染线程把已完成的解码结果上传为 GL 对象
-    if (auto tex = assets.FindTexture("src/assets/models/albedo.png")) {
-        // 就绪前 Find* 返回 nullptr；拿到后才可用 *tex
+    if (auto tex = assets.GetTexture("robot.albedo")) {
+        // 就绪前 Get* 返回 nullptr（shared_ptr）；拿到后才可用 *tex
     }
 }
 ```
+
+模型文件里的贴图引用受两条硬规则约束：纹理路径必须解析在模型自己所在目录内（绝对路径与 `..` 越界会被拒，stderr 留一行诊断），图片边长不得超过 `kMaxTextureSide`（16384，解码前读头部即校验，超限走 `std::expected` 错误串）。投放目录的完整约定见 [`src/assets/models/README.md`](../../src/assets/models/README.md)。
 
 **不要在后台线程里自己 `glGenTextures`**——异步加载的两阶段模型细节见 [🔴 进阶 §2](3-advanced.md#2-两阶段资源管线进阶)。
 

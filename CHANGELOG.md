@@ -146,6 +146,18 @@
 PBR `shadow` 0.14% / `ibl` 15.4% / `bloom` 57.8% / `debug` 3.7% / `instances` 6.6% / `sky` 91.4% / `ortho` 18.7%；
 体素 `particles` 3.59% / `fog` 63.5% / `sky` 36.5% / `ortho` 77.8% / `water` 4.5%（均为画面变化像素占比）。改完 CLI 的数字访问器后整轮复跑，12 项数值与改前逐项相同——默认命令行下的画面一字未动。`ModelLoader` 收尾与指针捕获两处修复之后又复跑一轮，结果文件逐字段与上一轮完全相同（含每组的绝对 `changed_px`）。
 
+### 文档一致性
+
+- **示例 API 与代码对不上**：`doc/user/`、`doc/agents/` 与 `AGENTS.md` 里的异步加载示例写的是
+  `RequestTexture(path)` + `Find*`，而真签名是 `RequestTexture/RequestModel(key, path)`，查找方法是
+  `GetTexture/GetModel`（返回 `shared_ptr`，就绪前为空）——`Find*` 从未存在过。全部示例改正，并补上
+  "重复 key 被忽略"与返回类型。入门/进阶的操作与开关表补上 v1.3.1 新增的 `6`（天空盒）与 `Tab`（投影切换），
+  排错速查表新增模型无贴图/模型"不见了"/图片超限三行（措辞照抄 stderr/错误串的真实前缀）。
+- **`src/assets/` 三份 README 中文化**（仓库文档规范要求全中文），顺带修两处陈旧内容：模型目录的 README
+  引用了不存在的 `src/utils/stb.cpp`（实现在 `src/gfx/third_party/stb_image_impl.cpp`）并据实补上本轮新增的
+  两条拒收规则；`assets/README.md` 里"模型是唯一从磁盘读的东西"不属实（HUD 字体也走 `Font::LoadFromFile`），
+  改为"模型/贴图与字体两类"并说明后者是可选同步加载。
+
 ## v1.3.0
 
 ### 新增

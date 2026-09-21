@@ -1,46 +1,40 @@
 # assets/
 
-Runtime data and content for the engine, kept separate from code. Two kinds of
-content live here, each with its own conventions:
+引擎的运行期数据与内容，与代码分开存放。这里有两类内容，各有各的约定：
 
-| Folder                         | Contents                                                                 |
-| ------------------------------ | ------------------------------------------------------------------------ |
-| [`shaders/`](shaders/README.md) | Read-only **reference mirrors** of the embedded GLSL (not loaded).        |
-| [`models/`](models/README.md)   | Drop-in mesh assets (FBX / OBJ / glTF) loaded asynchronously at runtime.  |
+| 目录 | 内容 |
+| ---- | ---- |
+| [`shaders/`](shaders/README.md) | 内嵌 GLSL 的只读**参考镜像**（不被加载）。 |
+| [`models/`](models/README.md)   | 模型投放目录（FBX / OBJ / glTF），运行期经 `AssetManager` 异步加载。 |
 
-## Source-isolation convention
+## 源码隔离约定
 
-The whole tree is deliberately split so that *engine code*, *application code*,
-*third-party implementation*, and *content* never blur:
+整棵树的划分刻意让*引擎代码*、*应用代码*、*第三方实现*与*内容*互不混淆：
 
 ```
 src/
-  gfx/**            engine subsystems (core, geometry, texture, material,
-                    shader, camera, light, shadow, scene, render, text,
-                    assets, debug) — no application logic; the whole set is
-                    delivered as the C++20 named module `gfx` (gfx.cppm)
-  gfx/core/Platform.h  the demo's plain-text include (GLFW + window constants);
-                       deliberately NOT part of the module
-  main.cpp          the demo application entry point — `import gfx;` wires it up
-  gfx/third_party/stb_image_impl.cpp  single third-party implementation TU
-                       (STB image / truetype); never leaks onto the module interface
-  gfx/shader/*Shaders.h   GLSL lives here as embedded raw strings — the ONLY
-                          source of truth for shader code
-  assets/          content kept beside the engine code, inside src/ (no separate
-                   top-level tree):
-    shaders/       browsable copies of that GLSL (never compiled/loaded)
-    models/        content loaded through gfx::AssetManager
+  gfx/**            引擎子系统（core、geometry、texture、material、shader、
+                    camera、light、shadow、scene、render、text、assets、debug）
+                    —— 不含应用逻辑；整体以 C++20 named module `gfx`（gfx.cppm）交付
+  gfx/core/Platform.h  demo 文本 include 的头（GLFW + 窗口常量）；
+                       刻意不属于 module
+  main.cpp          PBR 演示入口 —— 靠 `import gfx;` 接线
+  voxel_main.cpp    体素演示入口（同理，世界层写在 demo 侧）
+  gfx/third_party/stb_image_impl.cpp  唯一的第三方实现 TU
+                       （STB image / truetype）；不泄漏到 module 接口
+  gfx/shader/*Shaders.h   GLSL 以嵌入的 raw string 住在这里 —— 着色器代码的唯一真源
+  assets/          内容资源，放在 src/ 内、与引擎代码同级（不另设顶层目录）：
+    shaders/       上述 GLSL 的可浏览副本（永不编译、永不加载）
+    models/        经 gfx::AssetManager 加载的内容
 ```
 
-Key rules:
+关键规则：
 
-1. **GLSL is embedded, not loaded.** The engine compiles shader source from the
-   `gfx::shaders::k*` string constants; `src/assets/shaders/` is documentation only.
-   This keeps runs free of working-directory / path assumptions, which matters
-   for the three-platform CI.
-2. **Models are the only thing loaded from disk at runtime**, and always through
-   `gfx::AssetManager` (background decode + render-thread upload). Large binaries
-   are kept out of the repo by default — see the note in
-   [`models/README.md`](models/README.md).
-3. **`src/main.cpp` is an application, not part of the engine.** It may reach
-   into `gfx/**`, but nothing in `gfx/**` may reach back into `main.cpp`.
+1. **GLSL 是嵌入的，不是加载的。** 引擎从 `gfx::shaders::k*` 字符串常量编译着色器；
+   `src/assets/shaders/` 只是文档。这让运行不依赖工作目录/路径假设——三平台 CI 尤其需要。
+2. **从磁盘读的内容只有两类：模型/贴图与 HUD 字体。**模型/贴图永远经 `gfx::AssetManager`
+   异步加载（后台解码 + 渲染线程上传）；字体是 demo 侧同步的 `Font::LoadFromFile`
+   （找系统 TTF，找不到则禁用文字叠加，不阻断运行）。大型二进制默认不入库——见
+   [`models/README.md`](models/README.md) 的说明。
+3. **`src/main.cpp` 是应用，不是引擎的一部分。** 它可以伸进 `gfx/**`，
+   但 `gfx/**` 任何东西不许反向伸进 `main.cpp`。

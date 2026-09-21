@@ -35,7 +35,7 @@ renderer.AddPass(std::make_unique<MyPass>());      // 追加
 
 含义与约束：
 
-- 请求后**就绪前** `Find*` 返回 `nullptr`/空句柄，绝不暴露半成品——按"可能还没好"写代码（`if (auto t = assets.FindTexture(...))`）。
+- 请求后**就绪前** `Get*` 返回 `nullptr`/空句柄，绝不暴露半成品——按"可能还没好"写代码（`if (auto t = assets.GetTexture(key))`）。
 - 解码是异步的，但**上传永远排在渲染线程**，所以你在 `Request*` 之后不能立刻假设资源可用，要跨帧轮询。
 - 错误用 `std::expected<T,E>` 传回，**不跨线程抛异常**。线程池顶层另有 `try/catch` 兜底，防止任务抛异常逃逸出 `std::thread` 触发 `std::terminate`——但这是安全网，你的代码不应依赖"抛异常跨线程"。详见 [../developer/thread-safety.md](../developer/thread-safety.md)。
 
@@ -52,6 +52,8 @@ HDR 后期是一条固定链：主场景渲染进**线性 HDR target** → brigh
 | `useBloom` | `3` | Bloom |
 | `useDebug` | `4` | 调试线框 |
 | `useInstances` | `5` | 实例化场 |
+| `frame.skybox = nullptr` | `6` | 天空盒（不是布尔字段：置空指针即不画，背景回到 clear color） |
+| `ortho` | `Tab` | 透视 ↔ 正交投影（相机侧还要 `ToggleProjection()` 换投影矩阵，见 `Camera`） |
 
 把它们接你自己的 UI/配置即可。曝光用 `post.SetExposure(...)` 调。
 
@@ -82,7 +84,7 @@ glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
 ## 6. 资源投放与产物目录约定
 
-- **运行期内容**放 [`../../src/assets/`](../../src/assets/)（与 `src/gfx` 代码同级）：`src/assets/models/` 是 FBX/OBJ/glTF 投放目录，经 `AssetManager` 异步加载。
+- **运行期内容**放 [`../../src/assets/`](../../src/assets/)（与 `src/gfx` 代码同级）：`src/assets/models/` 是 FBX/OBJ/glTF 投放目录，经 `AssetManager` 异步加载；材质里的纹理引用必须落在模型自己目录内，图片边长上限 `kMaxTextureSide`（16384）在解码前校验，约定细则见 [`../../src/assets/models/README.md`](../../src/assets/models/README.md)。
 - **可执行文件**固定输出到 `output/`（被 gitignore）。
 - **构建目录** `build/`、`cmake-build-*/`（CLion/预设用）均已 gitignore，可放心删。
 

@@ -165,7 +165,7 @@ AGENTS.md                    本文件（agent 速查，留在仓库根便于自
 
 - **加一个渲染 pass**：继承 `gfx::RenderPass`，`void Execute(gfx::RenderFrame&) override`，`renderer.AddPass(std::make_unique<...>())`。GL 工作在渲染线程执行（`Renderer::Render` 保证）。
 - **加几何**：`gfx::GeometryFactory::Cube/Sphere/Plane` 或自填 `gfx::MeshData` → `Mesh::Upload(std::move(data))`（渲染线程）。
-- **加载模型/贴图**：`AssetManager::RequestModel/RequestTexture(path)`，每帧 `ProcessUploads()`，就绪前 `Find*` 返回 `nullptr`。
+- **加载模型/贴图**：`AssetManager::RequestModel/RequestTexture(key, path)`（key 由调用方命名，重复 key 被忽略），每帧 `ProcessUploads()`，就绪前 `Get*` 返回 `nullptr`。纹理引用必须落在模型目录内、图片边长≤`kMaxTextureSide`（16384，解码前校验），两条越界都会被拒。
 - **改 GLSL**：改 `src/gfx/shader/*Shaders.h`（单一真源），**不要**改 `src/assets/shaders/`（那只是镜像）。
 - **UBO 绑定**：`ShaderProgram::SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding)` 等，链接后设一次。
 

@@ -128,16 +128,16 @@ int main() {
 
 ```cpp
 gfx::AssetManager assets;                 // 内含线程池
-assets.RequestTexture("src/assets/models/albedo.png");
-assets.RequestModel  ("src/assets/models/robot.fbx");
+assets.RequestTexture("albedo", "src/assets/models/robot/albedo.png");   // 签名是 (key, path)
+assets.RequestModel  ("robot",  "src/assets/models/robot.fbx");          // 重复 key 会被忽略
 while (running) {
     assets.ProcessUploads();              // 每帧一次，在渲染线程把后台解码结果上传
-    if (auto* t = assets.FindTexture("src/assets/models/albedo.png")) { /* 用 *t */ }
-    // 就绪前 Find* 返回 nullptr：解在后台线程，上传在渲染线程 —— 绝不能在工作线程发 gl*
+    if (auto t = assets.GetTexture("albedo")) { /* shared_ptr<Texture2D>，用它 */ }
+    // 就绪前 Get* 返回 nullptr：解在后台线程，上传在渲染线程 —— 绝不能在工作线程发 gl*
 }
 ```
 
-投放目录是 [`../../src/assets/models/`](../../src/assets/models/)（FBX/OBJ/glTF）。线程与阶段不变量见 [../developer/thread-safety.md](../developer/thread-safety.md)。
+投放目录是 [`../../src/assets/models/`](../../src/assets/models/)（FBX/OBJ/glTF）。两条已验证的拒收规则：材质里的纹理引用必须解析在模型自己目录内（绝对路径/`..` 被 `ModelLoader` 拒，stderr 一行诊断）；图片边长超 `kMaxTextureSide`（16384）在解码前读头部即拒（防解压炸弹），错误走 `std::expected` 串。线程与阶段不变量见 [../developer/thread-safety.md](../developer/thread-safety.md)。
 
 ---
 

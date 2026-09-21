@@ -1,30 +1,28 @@
-# Shader reference mirrors
+# 着色器参考镜像
 
-These `.glsl` files are **browsable mirrors** of the GLSL that the engine
-actually compiles. They are **not** read at build or run time — nothing here is
-loaded.
+这些 `.glsl` 文件是引擎**实际编译的 GLSL 的可浏览镜像**。它们在构建期和运行期
+都**不被读取**——这里没有任何东西会被加载。
 
-The single source of truth is the embedded raw strings in
-[`src/gfx/shader/*Shaders.h`](../../src/gfx/shader) (`gfx::shaders::k*`).
-Keeping GLSL in headers gives us:
+单一真源是 [`src/gfx/shader/*Shaders.h`](../../../src/gfx/shader) 里嵌入的
+raw string（`gfx::shaders::k*`）。把 GLSL 放在头文件里换来三件事：
 
-- zero runtime file-path / working-directory dependence (CI-safe on all three
-  platforms),
-- the shader source shipped inside the compiled binary,
-- no async asset plumbing for something that is fixed at compile time.
+- 运行期零路径/工作目录依赖（三平台 CI 因此安全），
+- 着色器源码随编译产物一起交付，
+- 编译期就固定的东西不需要任何异步加载管线。
 
-Each file below maps to the header constant(s) noted. If you change one, change
-its header twin too (the header wins at runtime).
+下表每个镜像对应注出的头文件常量。**改镜像就要同步改它的头文件孪生**——
+运行时以头文件为准。（`VoxelShaders.h` 与 `ParticleShaders.h` 没有镜像文件；
+体素/粒子 GLSL 只住在这两个头里。）
 
-| Mirror               | Source of truth (`src/gfx/shader/…`)                          |
+| 镜像文件               | 唯一真源（`src/gfx/shader/…`）                          |
 | -------------------- | ------------------------------------------------------------- |
-| `pbr.glsl`           | `ShaderLib.h` — `kPbrVertex`, `kPbrFragment`                  |
-| `depth.glsl`         | `ShaderLib.h` — `kDepthVertex`, `kDepthFragment`              |
-| `skybox.glsl`        | `ShaderLib.h` — `kSkyboxVertex`, `kSkyboxFragment`            |
-| `instanced.glsl`     | `ShaderLib.h` — `kInstancedVertex`, `kInstancedFragment`      |
-| `postprocess.glsl`   | `PostProcessShaders.h` — `kPostVertex`, `kBrightPassFragment`, `kBlurFragment`, `kCompositeFragment` |
-| `ibl.glsl`           | `IblShaders.h` — `kIblVertex`, `kSkyGenFragment`, `kIrradianceFragment`, `kPrefilterFragment`, `kBrdfFragment` |
-| `sprite.glsl`        | `SpriteShaders.h` — `kSpriteVertex`, `kSpriteFragment`        |
-| `debug.glsl`         | `DebugShaders.h` — `kDebugVertex`, `kDebugFragment`           |
+| `pbr.glsl`           | `ShaderLib.h` — `kPbrVertex`、`kPbrFragment`                  |
+| `depth.glsl`         | `ShaderLib.h` — `kDepthVertex`、`kDepthFragment`              |
+| `skybox.glsl`        | `ShaderLib.h` — `kSkyboxVertex`、`kSkyboxFragment`            |
+| `instanced.glsl`     | `ShaderLib.h` — `kInstancedVertex`、`kInstancedFragment`      |
+| `postprocess.glsl`   | `PostProcessShaders.h` — `kPostVertex`、`kBrightPassFragment`、`kBlurFragment`、`kCompositeFragment` |
+| `ibl.glsl`           | `IblShaders.h` — `kIblVertex`、`kSkyGenFragment`、`kIrradianceFragment`、`kPrefilterFragment`、`kBrdfFragment` |
+| `sprite.glsl`        | `SpriteShaders.h` — `kSpriteVertex`、`kSpriteFragment`        |
+| `debug.glsl`         | `DebugShaders.h` — `kDebugVertex`、`kDebugFragment`           |
 
-All programs target **GLSL `#version 410 core`** (OpenGL 4.1 Core baseline).
+所有程序都面向 **GLSL `#version 410 core`**（OpenGL 4.1 Core 基线）。
