@@ -99,5 +99,6 @@ cmake --build . --config "$BUILD_TYPE"
 
 echo "========================================="
 echo "Build complete!"
-echo "Executables: $OUTPUT_DIR/@TARGET_NAME@ and $OUTPUT_DIR/voxel_demo"
+echo "Run any demo with: ./scripts/run.sh <demo>   (e.g. pbr_showcase, voxel_terrain, pbr_lighting)"
+echo "Artifacts land in $OUTPUT_DIR/ (hello-triangle = @TARGET_NAME@)."
 echo "========================================="

@@ -281,9 +281,14 @@ endif()
 # dependencies are carried transitively by the GLFW and GLAD targets, which the
 # gfx library now links PUBLIC. Each demo is a sole consumer of `import gfx;`.
 #
-#   GLFW_Template  the PBR showcase (model + scene graph + post-process HUD)
-#   voxel_demo     the voxel playground (chunked terrain, water, mining/fill)
-# Both share one gfx build; pick one with ./scripts/run.sh <target>.
+#   GLFW_Template  the minimum-pipeline hello-triangle (src/main.cpp, this file)
+#   src/demo/*     the feature demos, one executable each, collected by the
+#                  nested add_subdirectory below (see src/demo/CMakeLists.txt).
+#
+# The primary target keeps its historic name so the CI artifact
+# GLFW_Template-<platform> is unaffected. It is defined here rather than under
+# src/demo/ so the "what does the engine need to draw anything at all" answer
+# stays at the top of the tree.
 add_executable(${TARGET_NAME} src/main.cpp)
 
 target_link_libraries(${TARGET_NAME} PRIVATE gfx)
@@ -292,13 +297,9 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     OUTPUT_NAME ${TARGET_NAME}
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/output)
 
-add_executable(voxel_demo src/voxel_main.cpp)
-
-target_link_libraries(voxel_demo PRIVATE gfx)
-
-set_target_properties(voxel_demo PROPERTIES
-    OUTPUT_NAME voxel_demo
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/output)
+# Every feature demo under src/demo/ is built automatically: add a
+# src/demo/{feature}/main.cpp and it becomes a target, no CMake edit needed.
+add_subdirectory(src/demo)
 
 # ============================================================================
 # Generate helper scripts from templates

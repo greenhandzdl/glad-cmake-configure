@@ -1,6 +1,7 @@
 # Build output
 /output/
 /build/
+/build-noassimp/
 /cmake-build-*/
 
 # Generated scripts

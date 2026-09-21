@@ -1,7 +1,11 @@
 #!/bin/bash
-# run.sh - Run a GLFW_Template demo executable
+# run.sh - Run a demo executable produced by this project
 # Usage: ./scripts/run.sh [target]      target defaults to @TARGET_NAME@
-#        e.g. ./scripts/run.sh voxel_demo
+#        e.g. ./scripts/run.sh pbr_showcase
+#             ./scripts/run.sh voxel_terrain
+#             ./scripts/run.sh pbr_lighting --quit-after 3
+# Each demo under src/demo/<name>/ is built to output/<name>; the bare
+# hello-triangle lives in @TARGET_NAME@ (from src/main.cpp).
 
 set -e
 
