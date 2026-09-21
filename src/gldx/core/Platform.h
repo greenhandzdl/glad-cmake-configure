@@ -3,13 +3,13 @@
 
 /**
  * @file Platform.h
- * @brief Platform detection + the GLAD-before-GLFW include ordering, plus the
- *        demo application's window/title constants.
+ * @brief Platform detection + the GLAD-before-GLFW include ordering.
  *
- * This was formerly the template's global `src/headers/common.h`; it now lives
- * inside the engine (namespace gldx). It is the single place that guarantees
- * <glad/gl.h> is seen before <GLFW/glfw3.h> (GLFW otherwise pulls the system
- * <GL/gl.h> and clashes with our loader).
+ * This was formerly the template's global `src/headers/common.h`. It is the
+ * single place that guarantees <glad/gl.h> is seen before <GLFW/glfw3.h> (GLFW
+ * otherwise pulls the system <GL/gl.h> and clashes with our loader). App/window
+ * identity constants now live with the individual demos, so this header carries
+ * nothing beyond the platform macros and the include ordering.
  */
 
 // Platform detection (kept as macros so callers can use them in #if).
@@ -30,16 +30,5 @@
 // GLAD must be included before GLFW to avoid gl.h conflicts.
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
-
-namespace gldx {
-
-// Application identity + default window geometry for the demo.
-inline constexpr const char* kAppName    = "GLFW + GLAD gldx Engine";
-inline constexpr const char* kAppVersion = "1.3.1";
-inline constexpr const char* kWindowTitle = "gldx::Renderer - PBR / scene graph / render passes";
-inline constexpr int kWindowWidth  = 800;
-inline constexpr int kWindowHeight = 600;
-
-} // namespace gldx
 
 #endif // GLDX_CORE_PLATFORM_H

@@ -5,21 +5,29 @@
  * This is the engine's "minimum implementation" demo, kept in src/ root on
  * purpose so the primary `GLFW_Template` target (and the CI artifact name that
  * hangs off it) stays stable. Its whole point is subtraction: unlike the
- * feature demos under src/demo/, it brings *none* of the render subsystems -
- * no GeometryPass, no LightBuffer, no PBR program, no scene graph, no shadow /
- * IBL / bloom / skybox. It defines one custom gldx::RenderPass holding an inline
- * GLSL program and a hand-built VAO, and hands the renderer an otherwise-empty
- * RenderFrame (Run only fills fbWidth/fbHeight). If this builds and draws, then
- * "import gldx + one pass + one window" really is the floor of the whole engine.
+ * feature demos, it brings *none* of the render subsystems - no GeometryPass,
+ * no LightBuffer, no PBR program, no scene graph, no shadow / IBL / bloom /
+ * skybox. It defines one custom gldx::RenderPass holding an inline GLSL program
+ * and a hand-built VAO, and hands the renderer an otherwise-empty RenderFrame.
+ * If this builds and draws, then "import gldx + one pass + one window" really
+ * is the floor of the whole engine - and it is reached purely by importing the
+ * three libraries (gldx / gldxwin / gldxcli), no demo scaffolding header.
  *
- * The window / context / frame-loop lifecycle is demo::Run from demo_app.h; the
- * only per-frame callback does nothing, because the triangle pass needs no data
- * from the frame beyond what Run already provides.
+ * The window / context / frame-loop lifecycle is gldxwin's App + Window; the
+ * only per-frame callback just fills fbWidth/fbHeight and renders, because the
+ * triangle pass needs no data from the frame.
  *
  * Controls: Esc quits. --quit-after SECONDS ends a scripted/headless run.
  */
 
-#include "demo/demo_app.h"
+// Plain text include first: it orders <glad/gl.h> before <GLFW/glfw3.h> and
+// carries the GLFW/GLAD declarations this TU calls directly (glGenVertexArrays,
+// glfwSwapBuffers via gldxwin, ...). The three libraries are then imported.
+#include "gldx/core/Platform.h"
+
+import gldx;
+import gldxwin;
+import gldxcli;
 
 #include <cstdio>
 #include <memory>
@@ -108,16 +116,37 @@ private:
 } // namespace
 
 int main(int argc, char** argv) {
-    const demo::Flags flags(argc, argv, {}, {}, "GLFW_Template");
+    const gldx::cli::Flags flags(argc, argv, {}, {}, "GLFW_Template");
     if (flags.wantsHelp()) {
         flags.printUsage();
         return 0;
     }
 
-    return demo::Run(flags, "gldx - hello triangle (minimum pipeline)", [&](demo::Ctx& ctx) {
-        ctx.renderer.AddPass(std::make_unique<TrianglePass>());
-        // Nothing to attach: the pass reads only fb size off the frame, which
-        // demo::Run already fills. An empty body is the demonstration.
-        return ctx.Loop([](gldx::RenderFrame&, const demo::FrameInfo&) {});
+    // gldxwin brings the window up (glfwInit via the App singleton, GL 4.1 core
+    // hints, makeContextCurrent, gladLoadGL). Nothing on the engine side exists
+    // until this returns true.
+    gldx::win::WindowDesc desc;
+    desc.title = "gldx - hello triangle (minimum pipeline)";
+    gldx::win::Window window(desc);
+    if (!window.Ok()) return 1;
+
+    // The engine's single-render-thread guard: claimed here, at the top of the
+    // render-thread work, because gldxwin is deliberately engine-agnostic.
+    gldx::RenderContext::MarkAsRenderThread();
+
+    gldx::Renderer renderer;
+    renderer.Init();
+    renderer.AddPass(std::make_unique<TrianglePass>());
+
+    // The triangle pass reads only fb size off the frame, so the per-frame
+    // callback just forwards it and renders - the whole "attach nothing" point.
+    window.OnFrame([&](const gldx::win::FrameInfo& info) {
+        gldx::RenderFrame frame;
+        frame.fbWidth     = info.fbWidth;
+        frame.fbHeight    = info.fbHeight;
+        frame.smoothedFps = info.smoothedFps;
+        renderer.Render(frame);
     });
+
+    return gldx::win::App::Get().Run({flags.quitAfter()});
 }

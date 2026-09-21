@@ -21,7 +21,11 @@
  * --quit-after SECONDS for headless.
  */
 
-#include "demo/demo_app.h"
+#include "gldx/core/Platform.h"
+
+import gldx;
+import gldxwin;
+import gldxcli;
 
 #include <algorithm>
 #include <cmath>
@@ -142,34 +146,51 @@ void OnButton(GLFWwindow* w, int b, int a, int) {
 } // namespace
 
 int main(int argc, char** argv) {
-    const demo::Flags flags(argc, argv, {}, {"yaw", "pitch", "radius"}, "geometry_upload");
+    const gldx::cli::Flags flags(argc, argv, {}, {"yaw", "pitch", "radius"}, "geometry_upload");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
-    return demo::Run(flags, "gldx demo - geometry_upload (MeshData -> Mesh -> draw)",
-                     [&](demo::Ctx& ctx) -> int {
-        View view;
-        view.yaw = flags.real("yaw", view.yaw);
-        view.pitch = flags.real("pitch", view.pitch);
-        view.radius = flags.real("radius", view.radius, 2.0f, 40.0f);
-        glfwSetWindowUserPointer(ctx.window, &view);
-        glfwSetCursorPosCallback(ctx.window, OnMouse);
-        glfwSetMouseButtonCallback(ctx.window, OnButton);
+    gldx::win::WindowDesc desc;
+    desc.title = "gldx demo - geometry_upload (MeshData -> Mesh -> draw)";
+    gldx::win::Window window(desc);
+    if (!window.Ok()) return 1;
 
-        ctx.renderer.AddPass(std::make_unique<UploadPass>());
+    gldx::RenderContext::MarkAsRenderThread();
 
-        gldx::Camera camera; camera.SetPerspective(50.0f, 1.0f, 0.1f, 100.0f);
+    GLFWwindow* const native = window.Handle();
+    gldx::Renderer renderer;
+    renderer.Init();
 
-        return ctx.Loop([&](gldx::RenderFrame& f, const demo::FrameInfo& info) {
-            const glm::vec3 target(0.0f, 0.6f, 0.0f);
-            const float cp = std::cos(view.pitch);
-            const glm::vec3 eye(target.x + view.radius * cp * std::sin(view.yaw),
-                                target.y + view.radius * std::sin(view.pitch),
-                                target.z + view.radius * cp * std::cos(view.yaw));
-            camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
-            camera.LookAt(eye, target, glm::vec3(0, 1, 0));
+    View view;
+    view.yaw = flags.real("yaw", view.yaw);
+    view.pitch = flags.real("pitch", view.pitch);
+    view.radius = flags.real("radius", view.radius, 2.0f, 40.0f);
+    glfwSetWindowUserPointer(native, &view);
+    glfwSetCursorPosCallback(native, OnMouse);
+    glfwSetMouseButtonCallback(native, OnButton);
 
-            f.camera = &camera;
-            f.viewProj = camera.ViewProjection();
-        });
+    renderer.AddPass(std::make_unique<UploadPass>());
+
+    gldx::Camera camera; camera.SetPerspective(50.0f, 1.0f, 0.1f, 100.0f);
+
+    window.OnFrame([&](const gldx::win::FrameInfo& info) {
+        gldx::RenderFrame f;
+        f.fbWidth     = info.fbWidth;
+        f.fbHeight    = info.fbHeight;
+        f.smoothedFps = info.smoothedFps;
+
+        const glm::vec3 target(0.0f, 0.6f, 0.0f);
+        const float cp = std::cos(view.pitch);
+        const glm::vec3 eye(target.x + view.radius * cp * std::sin(view.yaw),
+                            target.y + view.radius * std::sin(view.pitch),
+                            target.z + view.radius * cp * std::cos(view.yaw));
+        camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
+        camera.LookAt(eye, target, glm::vec3(0, 1, 0));
+
+        f.camera = &camera;
+        f.viewProj = camera.ViewProjection();
+
+        renderer.Render(f);
     });
+
+    return gldx::win::App::Get().Run({flags.quitAfter()});
 }

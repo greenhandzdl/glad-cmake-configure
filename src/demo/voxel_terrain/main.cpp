@@ -36,7 +36,7 @@
  *
  * Every renderer feature can also be switched from the command line, which is
  * what lets a script diff one feature at a time without a keyboard: see
- * demo_cli.h and `--help` for the list (--off fog,water,sky,particles,
+ * the gldxcli module and `--help` for the list (--off fog,water,sky,particles,
  * --on ortho, --auto-break N, --quit-after SECONDS). --yaw / --pitch / --rise
  * aim and lift the fly camera: at the spawn tilt the crosshair ray lands past
  * the interaction reach, so scripted mining needs a steeper pitch, and
@@ -53,7 +53,7 @@
  */
 
 // Platform.h stays a plain text include (not part of module gldx): it orders
-// <glad/gl.h> before <GLFW/glfw3.h> and carries the window constants.
+// <glad/gl.h> before <GLFW/glfw3.h> and defines the GLFW_PLATFORM_* macros.
 #include "gldx/core/Platform.h"
 
 #include <algorithm>
@@ -76,10 +76,10 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#include "demo/demo_cli.h"
-
-// The whole engine as a single C++20 named module.
+// The whole engine as a single C++20 named module, plus the window and CLI libs.
 import gldx;
+import gldxwin;
+import gldxcli;
 
 namespace {
 
@@ -617,8 +617,15 @@ void VoxelHudPass::Execute(gldx::RenderFrame& f) {
 
 } // namespace
 
+// Application identity + default window geometry now live with the demo, not
+// the engine header (Platform.h no longer carries app-level constants).
+constexpr const char* kAppVersion   = "1.3.1";
+constexpr const char* kWindowTitle  = "gldx::Renderer - voxel playground";
+constexpr int kWindowWidth  = 800;
+constexpr int kWindowHeight = 600;
+
 int main(int argc, char** argv) {
-    const demo::Flags flags(argc, argv,
+    const gldx::cli::Flags flags(argc, argv,
                             {"particles", "fog", "water", "sky", "ortho", "double-sided"},
                             {"auto-break", "auto-place", "freeze-at", "yaw", "pitch", "rise",
                              "select"}, "voxel_terrain");
@@ -627,38 +634,22 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    if (!glfwInit()) {
-        std::cerr << "Failed to initialize GLFW\n";
-        return 1;
-    }
-
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-#if GLFW_PLATFORM_MACOS
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-#endif
-
-    GLFWwindow* window = glfwCreateWindow(gldx::kWindowWidth, gldx::kWindowHeight,
-                                          "gldx::Renderer - voxel playground",
-                                          nullptr, nullptr);
-    if (!window) {
+    gldx::win::WindowDesc desc;
+    desc.width  = kWindowWidth;
+    desc.height = kWindowHeight;
+    desc.title  = kWindowTitle;
+    gldx::win::Window window(desc);
+    if (!window.Ok()) {
         std::cerr << "Failed to create GLFW window (OpenGL 4.1 core?)\n";
-        glfwTerminate();
         return 1;
     }
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);
-
-    if (!gladLoadGL(reinterpret_cast<GLADloadfunc>(glfwGetProcAddress))) {
-        std::cerr << "Failed to initialize GLAD\n";
-        glfwDestroyWindow(window);
-        glfwTerminate();
-        return 1;
-    }
+    GLFWwindow* const win = window.Handle();
+    // Voxel drives ESC itself: in fly mode it releases/takes the pointer grab, and
+    // only quits while orbiting. So gldxwin's default Esc-to-close must stay off.
+    window.SetCloseOnEsc(false);
 
     gldx::RenderContext::MarkAsRenderThread();
-    std::printf("voxel_demo %s\n", gldx::kAppVersion);
+    std::printf("voxel_demo %s\n", kAppVersion);
     std::printf("OpenGL %s\n", reinterpret_cast<const char*>(glGetString(GL_VERSION)));
 
     Input input;
@@ -675,10 +666,10 @@ int main(int argc, char** argv) {
     // transparent sheet in the frame without needing a lake to be nearby.
     input.selected = std::clamp(flags.integer("select", input.selected),
                                 1, static_cast<int>(Block::kBuiltinCount) - 1);
-    glfwSetWindowUserPointer(window, &input);
-    glfwSetCursorPosCallback(window, MouseCallback);
-    glfwSetMouseButtonCallback(window, MouseButtonCallback);
-    glfwSetScrollCallback(window, ScrollCallback);
+    glfwSetWindowUserPointer(win, &input);
+    glfwSetCursorPosCallback(win, MouseCallback);
+    glfwSetMouseButtonCallback(win, MouseButtonCallback);
+    glfwSetScrollCallback(win, ScrollCallback);
 
     // Same teardown contract as main.cpp: everything owning GL lives in this
     // lambda so destructors run while the context is current.
@@ -1012,7 +1003,7 @@ int main(int argc, char** argv) {
         };
 
         const bool scripted = flags.number("freeze-at") > 0.0;
-        ApplyCapture(window, input, scripted);
+        ApplyCapture(win, input, scripted);
         const double startedAt = glfwGetTime();
         const double quitAfter = flags.quitAfter();
         const double freezeAt = flags.number("freeze-at");
@@ -1055,7 +1046,8 @@ int main(int argc, char** argv) {
         int spawnedTotal = 0, frames = 0, breaks = 0;
         double minFps = 1e9;
 
-        while (!glfwWindowShouldClose(window)) {
+        window.OnFrame([&](gldx::win::FrameInfo& info) {
+            GLFWwindow* const window = info.window->Handle();
             // ---- edge-detected toggles + keys -------------------------------
             auto edge = [](bool down, bool& armed) {
                 if (down && armed) { armed = false; return true; }
@@ -1077,13 +1069,13 @@ int main(int argc, char** argv) {
                                                           ? GLFW_CURSOR_DISABLED
                                                           : GLFW_CURSOR_NORMAL);
                 } else {
-                    glfwSetWindowShouldClose(window, true);
+                    info.window->Close();
                 }
             }
             if (edge(glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS, partArmed))
                 input.showParticles = !input.showParticles;
             if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS)
-                glfwSetWindowShouldClose(window, true);
+                info.window->Close();
             for (int k = 0; k < 8; ++k) {
                 if (glfwGetKey(window, GLFW_KEY_1 + k) == GLFW_PRESS)
                     input.selected = k + 1;
@@ -1138,8 +1130,6 @@ int main(int argc, char** argv) {
                 fpsFrames = 0;
                 fpsWindowStart = now;
             }
-            if (quitAfter > 0.0 && now - startedAt >= quitAfter)
-                glfwSetWindowShouldClose(window, true);
             ++frames;
 
             // ---- sun direction ([ ] azimuth, - = elevation) ------------------
@@ -1332,7 +1322,7 @@ int main(int argc, char** argv) {
                           "streaming gen %zu mesh %zu   particles %zu   visible %d/%d\n"
                           "picked: %s   (WASD fly, space/ctrl up/down, shift slow, LMB break, RMB place)\n"
                           "F camera %s   ESC pointer %s   P particles %s   B 2-sided %s   [ ] - = sun   X quit",
-                          gldx::kAppVersion,
+                          kAppVersion,
                           input.cam == Input::Cam::Fly ? "FLY" : "ORBIT",
                           smoothedFps,
                           profiler.CpuMs(), profiler.GpuMs(),
@@ -1374,9 +1364,9 @@ int main(int argc, char** argv) {
             prevVisible = frame.visibleCount;
             prevTotal   = frame.totalNodes;
 
-            glfwSwapBuffers(window);
-            glfwPollEvents();
-        }
+        });
+
+        const int rc = gldx::win::App::Get().Run({quitAfter});
 
         // One summary line per run: the counters a scripted sweep or a CI smoke
         // cannot read back out of a screenshot (streaming convergence in
@@ -1390,11 +1380,8 @@ int main(int argc, char** argv) {
                     genCount, meshCount, breaks, particles.count(), spawnedTotal);
 
         pool.shutdown();
-        return 0;   // GPU owners destruct here, on the render thread
+        return rc;   // GPU owners destruct here, on the render thread
     };
 
-    const int rc = runDemo();
-    glfwDestroyWindow(window);
-    glfwTerminate();
-    return rc;
+    return runDemo();
 }

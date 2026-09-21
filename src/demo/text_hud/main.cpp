@@ -20,7 +20,11 @@
  * Controls: Esc quits, --quit-after SECONDS for headless.
  */
 
-#include "demo/demo_app.h"
+#include "gldx/core/Platform.h"
+
+import gldx;
+import gldxwin;
+import gldxcli;
 
 #include <algorithm>
 #include <cmath>
@@ -108,29 +112,45 @@ public:
         sprite_.End();
     }
 
-    void setFrameInfo(demo::FrameInfo info) noexcept { info_ = info; }
+    void setFrameInfo(gldx::win::FrameInfo info) noexcept { info_ = info; }
 
 private:
     gldx::SpriteBatch sprite_;
     gldx::Font        font_;
     gldx::Texture2D   white_;
-    demo::FrameInfo  info_;
+    gldx::win::FrameInfo info_;
 };
 
 } // namespace
 
 int main(int argc, char** argv) {
-    const demo::Flags flags(argc, argv, {}, {}, "text_hud");
+    const gldx::cli::Flags flags(argc, argv, {}, {}, "text_hud");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
-    return demo::Run(flags, "gldx demo - text_hud (Font + SpriteBatch + TextRenderer)",
-                     [&](demo::Ctx& ctx) -> int {
-        auto pass = std::make_unique<HudPass>();
-        HudPass* raw = pass.get();
-        ctx.renderer.AddPass(std::move(pass));
+    gldx::win::WindowDesc desc;
+    desc.title = "gldx demo - text_hud (Font + SpriteBatch + TextRenderer)";
+    gldx::win::Window window(desc);
+    if (!window.Ok()) return 1;
 
-        return ctx.Loop([&](gldx::RenderFrame& /*f*/, const demo::FrameInfo& info) {
-            raw->setFrameInfo(info);   // pass reads elapsed time from the frame info
-        });
+    gldx::RenderContext::MarkAsRenderThread();
+
+    gldx::Renderer renderer;
+    renderer.Init();
+
+    auto pass = std::make_unique<HudPass>();
+    HudPass* raw = pass.get();
+    renderer.AddPass(std::move(pass));
+
+    window.OnFrame([&](const gldx::win::FrameInfo& info) {
+        gldx::RenderFrame f;
+        f.fbWidth     = info.fbWidth;
+        f.fbHeight    = info.fbHeight;
+        f.smoothedFps = info.smoothedFps;
+
+        raw->setFrameInfo(info);   // pass reads elapsed time from the frame info
+
+        renderer.Render(f);
     });
+
+    return gldx::win::App::Get().Run({flags.quitAfter()});
 }

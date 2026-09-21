@@ -334,7 +334,7 @@ endif()
 # stays at the top of the tree.
 add_executable(${TARGET_NAME} src/main.cpp)
 
-target_link_libraries(${TARGET_NAME} PRIVATE gldx)
+target_link_libraries(${TARGET_NAME} PRIVATE gldx gldxwin gldxcli)
 
 set_target_properties(${TARGET_NAME} PROPERTIES
     OUTPUT_NAME ${TARGET_NAME}

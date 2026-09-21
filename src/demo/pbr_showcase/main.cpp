@@ -17,7 +17,7 @@
  *
  * The same features answer to the command line (--off shadow,ibl, --help for
  * the list, --quit-after SECONDS to end a scripted run), so a regression sweep
- * can switch each one without a keyboard: see demo_cli.h. --yaw / --pitch /
+ * can switch each one without a keyboard: see the gldxcli module. --yaw / --pitch /
  * --radius aim the orbit camera, which a sweep needs to bring the instanced
  * field and the sky into the frame at all; --freeze-at SECONDS parks the
  * animation clock, which is what makes two runs of one setting pixel-identical.
@@ -29,8 +29,8 @@
  */
 
 // Platform.h is deliberately a plain text include (not part of module gldx):
-// it pulls <glad/gl.h> before <GLFW/glfw3.h> and defines the app/window
-// constants + GLFW_PLATFORM_* macros this executable's #if checks rely on.
+// it pulls <glad/gl.h> before <GLFW/glfw3.h> and defines the GLFW_PLATFORM_*
+// macros this executable's #if checks rely on.
 #include "gldx/core/Platform.h"
 
 #include <cstddef>
@@ -47,10 +47,10 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 
-#include "demo/demo_cli.h"
-
 // The whole engine as a single C++20 named module: no per-header includes.
 import gldx;
+import gldxwin;
+import gldxcli;
 
 namespace {
 
@@ -192,8 +192,16 @@ gldx::Texture2DDesc MakeSolidDesc() {
 
 } // namespace
 
+// Application identity + default window geometry now live with the demo, not
+// the engine header (Platform.h no longer carries app-level constants).
+constexpr const char* kAppName      = "GLFW + GLAD gldx Engine";
+constexpr const char* kAppVersion   = "1.3.1";
+constexpr const char* kWindowTitle  = "gldx::Renderer - PBR / scene graph / render passes";
+constexpr int kWindowWidth  = 800;
+constexpr int kWindowHeight = 600;
+
 int main(int argc, char** argv) {
-    const demo::Flags flags(argc, argv,
+    const gldx::cli::Flags flags(argc, argv,
                             {"shadow", "ibl", "bloom", "debug", "instances", "sky", "ortho"},
                             {"freeze-at", "yaw", "pitch", "radius"}, "pbr_showcase");
     if (flags.wantsHelp()) {
@@ -201,37 +209,20 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    if (!glfwInit()) {
-        std::cerr << "Failed to initialize GLFW\n";
-        return 1;
-    }
-
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-#if GLFW_PLATFORM_MACOS
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-#endif
-
-    GLFWwindow* window = glfwCreateWindow(gldx::kWindowWidth, gldx::kWindowHeight, gldx::kWindowTitle, nullptr, nullptr);
-    if (!window) {
+    gldx::win::WindowDesc desc;
+    desc.width  = kWindowWidth;
+    desc.height = kWindowHeight;
+    desc.title  = kWindowTitle;
+    gldx::win::Window window(desc);
+    if (!window.Ok()) {
         std::cerr << "Failed to create GLFW window (OpenGL 4.1 core?)\n";
-        glfwTerminate();
         return 1;
     }
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);
-
-    if (!gladLoadGL(reinterpret_cast<GLADloadfunc>(glfwGetProcAddress))) {
-        std::cerr << "Failed to initialize GLAD\n";
-        glfwDestroyWindow(window);
-        glfwTerminate();
-        return 1;
-    }
+    GLFWwindow* const win = window.Handle();
 
     gldx::RenderContext::MarkAsRenderThread();
 
-    std::printf("%s %s\n", gldx::kAppName, gldx::kAppVersion);
+    std::printf("%s %s\n", kAppName, kAppVersion);
     std::printf("OpenGL %s\n", reinterpret_cast<const char*>(glGetString(GL_VERSION)));
 
     Input input;
@@ -249,10 +240,10 @@ int main(int argc, char** argv) {
     input.useInstances = flags.on("instances", false);
     input.useSky = flags.on("sky");
     input.ortho = flags.on("ortho", false);
-    glfwSetWindowUserPointer(window, &input);
-    glfwSetCursorPosCallback(window, MouseCallback);
-    glfwSetMouseButtonCallback(window, MouseButtonCallback);
-    glfwSetScrollCallback(window, ScrollCallback);
+    glfwSetWindowUserPointer(win, &input);
+    glfwSetCursorPosCallback(win, MouseCallback);
+    glfwSetMouseButtonCallback(win, MouseButtonCallback);
+    glfwSetScrollCallback(win, ScrollCallback);
 
     // All GPU-resource owners live inside this lambda so their destructors run
     // when it returns — while the GL context is still current, before the window
@@ -453,16 +444,11 @@ int main(int argc, char** argv) {
         pbr->SetBlockBinding("ShadowBlock", gldx::CascadedShadowMap::kShadowBinding);
 
         gldx::SceneNode* selected = nullptr;
-        const double startedAt = glfwGetTime();
         const double quitAfter = flags.quitAfter();
         const double freezeAt = flags.number("freeze-at");
-        double smoothedFps = 60.0;
-        int fpsFrames = 0;
-        double fpsWindowStart = startedAt;
 
-        while (!glfwWindowShouldClose(window)) {
-            if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-                glfwSetWindowShouldClose(window, true);
+        window.OnFrame([&](gldx::win::FrameInfo& info) {
+            GLFWwindow* const window = info.window->Handle();
             // Edge-detect the 1..6 toggles: flip once per press, rearm on release.
             auto edgeToggle = [](bool pressed, bool& armed, bool& flag) {
                 if (pressed && armed) { flag = !flag; armed = false; }
@@ -486,21 +472,8 @@ int main(int argc, char** argv) {
             }
             HandleKeys(window, input);
 
-            // FPS for the HUD, averaged over a fixed wall-clock window rather
-            // than an EMA of 1/dt: the EMA only echoed whichever frame last
-            // stalled, so the readout never matched the frame it was drawn on.
-            const double now = glfwGetTime();
-            ++fpsFrames;
-            if (const double span = now - fpsWindowStart; span >= 0.5) {
-                smoothedFps = static_cast<double>(fpsFrames) / span;
-                fpsFrames = 0;
-                fpsWindowStart = now;
-            }
-            if (quitAfter > 0.0 && now - startedAt >= quitAfter)
-                glfwSetWindowShouldClose(window, true);
-
-            int fbw = 0, fbh = 0;
-            glfwGetFramebufferSize(window, &fbw, &fbh);
+            const int fbw = info.fbWidth;
+            const int fbh = info.fbHeight;
             camera.SetViewportAspect(fbh > 0 ? static_cast<float>(fbw) / fbh : 1.0f);
             camera.SetOrbitRadius(input.radius);   // keeps the ortho box matched to the orbit
 
@@ -530,10 +503,10 @@ int main(int argc, char** argv) {
             // left the parked phase different on every run (and lost precision on
             // a long-lived desktop, where the float cast alone moved the angle by
             // thousandths of a radian per frame).
-            const double animTime =
-                freezeAt > 0.0 ? startedAt + std::min(now - startedAt, freezeAt) : now;
+            const double animElapsed =
+                freezeAt > 0.0 ? std::min(info.time, freezeAt) : info.time;
             carousel->local().SetAxisAngle(glm::vec3(0, 1, 0),
-                                           static_cast<float>(animTime - startedAt) * 0.6f);
+                                           static_cast<float>(animElapsed) * 0.6f);
             scene.Update();
 
             const glm::mat4 viewProj = camera.ViewProjection();
@@ -587,19 +560,17 @@ int main(int argc, char** argv) {
             frame.selected = selected;
             frame.fbWidth = fbw;
             frame.fbHeight = fbh;
-            frame.smoothedFps = smoothedFps;
+            frame.smoothedFps = info.smoothedFps;
 
             profiler.BeginFrame();
             renderer.Render(frame);
+        });
 
-            glfwSwapBuffers(window);
-            glfwPollEvents();
-        }
-        return 0;   // every GPU-resource owner destructs here, on the render thread.
+        return gldx::win::App::Get().Run({quitAfter});
+        // Every GPU-resource owner destructs as runDemo returns, on the render
+        // thread and while the window's context is still current (the Window
+        // object outlives this lambda, so glfwDestroyWindow has not run yet).
     };
 
-    const int rc = runDemo();   // destructors run while the context is still current
-    glfwDestroyWindow(window);
-    glfwTerminate();
-    return rc;
+    return runDemo();
 }

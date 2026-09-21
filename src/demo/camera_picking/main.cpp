@@ -27,7 +27,11 @@
  * --quit-after SECONDS for headless.
  */
 
-#include "demo/demo_app.h"
+#include "gldx/core/Platform.h"
+
+import gldx;
+import gldxwin;
+import gldxcli;
 
 #include <algorithm>
 #include <cmath>
@@ -125,94 +129,111 @@ private:
 } // namespace
 
 int main(int argc, char** argv) {
-    const demo::Flags flags(argc, argv, {}, {"yaw", "pitch", "radius"}, "camera_picking");
+    const gldx::cli::Flags flags(argc, argv, {}, {"yaw", "pitch", "radius"}, "camera_picking");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
-    return demo::Run(flags, "gldx demo - camera_picking (frustum cull + mouse pick)",
-                     [&](demo::Ctx& ctx) -> int {
-        View view;
-        view.yaw = flags.real("yaw", view.yaw);
-        view.pitch = flags.real("pitch", view.pitch);
-        view.radius = flags.real("radius", view.radius, 2.0f, 40.0f);
-        glfwSetWindowUserPointer(ctx.window, &view);
-        glfwSetCursorPosCallback(ctx.window, OnMouse);
-        glfwSetMouseButtonCallback(ctx.window, OnButton);
+    gldx::win::WindowDesc desc;
+    desc.title = "gldx demo - camera_picking (frustum cull + mouse pick)";
+    gldx::win::Window window(desc);
+    if (!window.Ok()) return 1;
 
-        ctx.renderer.AddPass(std::make_unique<gldx::GeometryPass>());
-        ctx.renderer.AddPass(std::make_unique<PickHudPass>());
+    gldx::RenderContext::MarkAsRenderThread();
 
-        auto pbr = gldx::ShaderProgram::CreateFromSource(gldx::shaders::kPbrVertex, gldx::shaders::kPbrFragment);
-        if (!pbr) { std::fprintf(stderr, "PBR shader: %s\n", pbr.error().c_str()); return 1; }
-        pbr->Use();
-        pbr->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);
+    GLFWwindow* const native = window.Handle();
+    gldx::Renderer renderer;
+    renderer.Init();
 
-        gldx::LightBuffer lights; lights.Init();
-        gldx::Camera camera; camera.SetPerspective(55.0f, 1.0f, 0.1f, 100.0f);
+    View view;
+    view.yaw = flags.real("yaw", view.yaw);
+    view.pitch = flags.real("pitch", view.pitch);
+    view.radius = flags.real("radius", view.radius, 2.0f, 40.0f);
+    glfwSetWindowUserPointer(native, &view);
+    glfwSetCursorPosCallback(native, OnMouse);
+    glfwSetMouseButtonCallback(native, OnButton);
 
-        std::vector<std::unique_ptr<Item>> items;
-        gldx::Scene scene;
-        int nextId = 0;
-        auto add = [&](gldx::MeshData data, const gldx::PbrMaterial& m, const gldx::Transform& t) {
-            auto it = std::make_unique<Item>(); it->material = m;
-            glm::vec3 c; float r; gldx::SceneNode::BoundsFromMeshData(data, c, r);
-            it->mesh.Upload(std::move(data));
-            gldx::SceneNode& n = scene.CreateRoot(t);
-            n.SetRenderable(&it->mesh, &it->material); n.SetLocalBounds(c, r);
-            n.id = nextId++;
-            items.push_back(std::move(it));
-        };
-        { gldx::Transform t; t.scale = glm::vec3(20.0f, 1.0f, 20.0f);
-          gldx::PbrMaterial m; m.baseColor = glm::vec4(0.4f, 0.42f, 0.46f, 1.0f); m.roughness = 0.95f;
-          add(gldx::GeometryFactory::Plane(1.0f), m, t); }
-        for (int i = 0; i < 16; ++i) {   // a full ring: half is behind the eye at rest
-            const float a = static_cast<float>(i) / 16.0f * 2.0f * 3.14159265f;
-            gldx::Transform t; t.translation = glm::vec3(std::cos(a) * 6.0f, 0.55f, std::sin(a) * 6.0f);
-            gldx::PbrMaterial m; m.metallic = 0.3f; m.roughness = 0.5f;
-            m.baseColor = glm::vec4(0.3f + 0.5f * std::cos(a) * std::cos(a),
-                                    0.5f, 0.4f + 0.5f * std::sin(a) * std::sin(a), 1.0f);
-            add(gldx::GeometryFactory::Sphere(0.55f, 32, 24), m, t);
+    renderer.AddPass(std::make_unique<gldx::GeometryPass>());
+    renderer.AddPass(std::make_unique<PickHudPass>());
+
+    auto pbr = gldx::ShaderProgram::CreateFromSource(gldx::shaders::kPbrVertex, gldx::shaders::kPbrFragment);
+    if (!pbr) { std::fprintf(stderr, "PBR shader: %s\n", pbr.error().c_str()); return 1; }
+    pbr->Use();
+    pbr->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);
+
+    gldx::LightBuffer lights; lights.Init();
+    gldx::Camera camera; camera.SetPerspective(55.0f, 1.0f, 0.1f, 100.0f);
+
+    std::vector<std::unique_ptr<Item>> items;
+    gldx::Scene scene;
+    int nextId = 0;
+    auto add = [&](gldx::MeshData data, const gldx::PbrMaterial& m, const gldx::Transform& t) {
+        auto it = std::make_unique<Item>(); it->material = m;
+        glm::vec3 c; float r; gldx::SceneNode::BoundsFromMeshData(data, c, r);
+        it->mesh.Upload(std::move(data));
+        gldx::SceneNode& n = scene.CreateRoot(t);
+        n.SetRenderable(&it->mesh, &it->material); n.SetLocalBounds(c, r);
+        n.id = nextId++;
+        items.push_back(std::move(it));
+    };
+    { gldx::Transform t; t.scale = glm::vec3(20.0f, 1.0f, 20.0f);
+      gldx::PbrMaterial m; m.baseColor = glm::vec4(0.4f, 0.42f, 0.46f, 1.0f); m.roughness = 0.95f;
+      add(gldx::GeometryFactory::Plane(1.0f), m, t); }
+    for (int i = 0; i < 16; ++i) {   // a full ring: half is behind the eye at rest
+        const float a = static_cast<float>(i) / 16.0f * 2.0f * 3.14159265f;
+        gldx::Transform t; t.translation = glm::vec3(std::cos(a) * 6.0f, 0.55f, std::sin(a) * 6.0f);
+        gldx::PbrMaterial m; m.metallic = 0.3f; m.roughness = 0.5f;
+        m.baseColor = glm::vec4(0.3f + 0.5f * std::cos(a) * std::cos(a),
+                                0.5f, 0.4f + 0.5f * std::sin(a) * std::sin(a), 1.0f);
+        add(gldx::GeometryFactory::Sphere(0.55f, 32, 24), m, t);
+    }
+
+    gldx::SceneNode* selected = nullptr;
+    window.OnFrame([&](const gldx::win::FrameInfo& info) {
+        gldx::RenderFrame f;
+        f.fbWidth     = info.fbWidth;
+        f.fbHeight    = info.fbHeight;
+        f.smoothedFps = info.smoothedFps;
+
+        const glm::vec3 target(0.0f, 0.5f, 0.0f);
+        const float cp = std::cos(view.pitch);
+        const glm::vec3 eye(target.x + view.radius * cp * std::sin(view.yaw),
+                            target.y + view.radius * std::sin(view.pitch),
+                            target.z + view.radius * cp * std::cos(view.yaw));
+        camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
+        camera.LookAt(eye, target, glm::vec3(0, 1, 0));
+
+        gldx::LightSetup setup;
+        setup.sun.direction = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
+        setup.sun.color = glm::vec3(1.0f);
+        setup.sun.intensity = 3.0f;
+        setup.ambient = glm::vec3(0.08f);
+        lights.Update(setup, camera.Position());
+        scene.Update();
+
+        const glm::mat4 viewProj = camera.ViewProjection();
+        gldx::Frustum frustum;
+        frustum.Extract(viewProj);
+
+        if (view.pickPending) {
+            view.pickPending = false;
+            const auto& targets = scene.PickTargets();
+            std::vector<std::pair<glm::vec3, float>> spheres;
+            spheres.reserve(targets.size());
+            for (const auto& t : targets) spheres.emplace_back(t.center, t.radius);
+            const gldx::Ray ray = gldx::PickRay(
+                view.pickX * static_cast<float>(info.fbWidth),
+                view.pickY * static_cast<float>(info.fbHeight),
+                info.fbWidth, info.fbHeight, camera.InverseViewProjection());
+            const int idx = gldx::PickNearest(ray, spheres);
+            selected = (idx >= 0) ? targets[idx].node : nullptr;
         }
 
-        gldx::SceneNode* selected = nullptr;
-        return ctx.Loop([&](gldx::RenderFrame& f, const demo::FrameInfo& info) {
-            const glm::vec3 target(0.0f, 0.5f, 0.0f);
-            const float cp = std::cos(view.pitch);
-            const glm::vec3 eye(target.x + view.radius * cp * std::sin(view.yaw),
-                                target.y + view.radius * std::sin(view.pitch),
-                                target.z + view.radius * cp * std::cos(view.yaw));
-            camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
-            camera.LookAt(eye, target, glm::vec3(0, 1, 0));
+        f.camera = &camera; f.frustum = &frustum; f.scene = &scene;
+        f.lights = &lights; f.pbr = &*pbr;
+        f.viewProj = viewProj; f.lightSetup = setup;
+        f.selected = selected;
 
-            gldx::LightSetup setup;
-            setup.sun.direction = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
-            setup.sun.color = glm::vec3(1.0f);
-            setup.sun.intensity = 3.0f;
-            setup.ambient = glm::vec3(0.08f);
-            lights.Update(setup, camera.Position());
-            scene.Update();
-
-            const glm::mat4 viewProj = camera.ViewProjection();
-            gldx::Frustum frustum;
-            frustum.Extract(viewProj);
-
-            if (view.pickPending) {
-                view.pickPending = false;
-                const auto& targets = scene.PickTargets();
-                std::vector<std::pair<glm::vec3, float>> spheres;
-                spheres.reserve(targets.size());
-                for (const auto& t : targets) spheres.emplace_back(t.center, t.radius);
-                const gldx::Ray ray = gldx::PickRay(
-                    view.pickX * static_cast<float>(info.fbWidth),
-                    view.pickY * static_cast<float>(info.fbHeight),
-                    info.fbWidth, info.fbHeight, camera.InverseViewProjection());
-                const int idx = gldx::PickNearest(ray, spheres);
-                selected = (idx >= 0) ? targets[idx].node : nullptr;
-            }
-
-            f.camera = &camera; f.frustum = &frustum; f.scene = &scene;
-            f.lights = &lights; f.pbr = &*pbr;
-            f.viewProj = viewProj; f.lightSetup = setup;
-            f.selected = selected;
-        });
+        renderer.Render(f);
     });
+
+    return gldx::win::App::Get().Run({flags.quitAfter()});
 }

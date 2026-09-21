@@ -19,7 +19,11 @@
  * Controls: Esc quits, --quit-after SECONDS for headless.
  */
 
-#include "demo/demo_app.h"
+#include "gldx/core/Platform.h"
+
+import gldx;
+import gldxwin;
+import gldxcli;
 
 #include <cstdint>
 #include <cstdio>
@@ -189,12 +193,29 @@ private:
 } // namespace
 
 int main(int argc, char** argv) {
-    const demo::Flags flags(argc, argv, {}, {}, "texture_samplers");
+    const gldx::cli::Flags flags(argc, argv, {}, {}, "texture_samplers");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
-    return demo::Run(flags, "gldx demo - texture_samplers (Texture2D + Sampler)",
-                     [&](demo::Ctx& ctx) -> int {
-        ctx.renderer.AddPass(std::make_unique<SamplerPass>());
-        return ctx.Loop([](gldx::RenderFrame&, const demo::FrameInfo&) {});
+    gldx::win::WindowDesc desc;
+    desc.title = "gldx demo - texture_samplers (Texture2D + Sampler)";
+    gldx::win::Window window(desc);
+    if (!window.Ok()) return 1;
+
+    gldx::RenderContext::MarkAsRenderThread();
+
+    gldx::Renderer renderer;
+    renderer.Init();
+
+    renderer.AddPass(std::make_unique<SamplerPass>());
+
+    window.OnFrame([&](const gldx::win::FrameInfo& info) {
+        gldx::RenderFrame f;
+        f.fbWidth     = info.fbWidth;
+        f.fbHeight    = info.fbHeight;
+        f.smoothedFps = info.smoothedFps;
+
+        renderer.Render(f);
     });
+
+    return gldx::win::App::Get().Run({flags.quitAfter()});
 }

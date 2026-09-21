@@ -25,7 +25,11 @@
  * Controls: Esc quits, drag orbits, --model PATH, --quit-after SECONDS headless.
  */
 
-#include "demo/demo_app.h"
+#include "gldx/core/Platform.h"
+
+import gldx;
+import gldxwin;
+import gldxcli;
 
 #include <algorithm>
 #include <cmath>
@@ -101,92 +105,109 @@ struct Item { gldx::PbrMaterial material; };
 } // namespace
 
 int main(int argc, char** argv) {
-    const demo::Flags flags(argc, argv, {}, {"yaw", "pitch", "radius", "model"}, "model_loading");
+    const gldx::cli::Flags flags(argc, argv, {}, {"yaw", "pitch", "radius", "model"}, "model_loading");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
     const std::string modelPath = flags.string("model");
 
-    return demo::Run(flags, "gldx demo - model_loading (async AssetManager + graceful OFF)",
-                     [&](demo::Ctx& ctx) -> int {
-        View view;
-        view.yaw = flags.real("yaw", view.yaw);
-        view.pitch = flags.real("pitch", view.pitch);
-        view.radius = flags.real("radius", view.radius, 0.5f, 200.0f);
-        glfwSetWindowUserPointer(ctx.window, &view);
-        glfwSetCursorPosCallback(ctx.window, OnMouse);
-        glfwSetMouseButtonCallback(ctx.window, OnButton);
+    gldx::win::WindowDesc desc;
+    desc.title = "gldx demo - model_loading (async AssetManager + graceful OFF)";
+    gldx::win::Window window(desc);
+    if (!window.Ok()) return 1;
 
-        auto hud = std::make_unique<StatusHudPass>();
-        StatusHudPass* hudRaw = hud.get();
-        ctx.renderer.AddPass(std::make_unique<gldx::GeometryPass>());
-        ctx.renderer.AddPass(std::move(hud));
+    gldx::RenderContext::MarkAsRenderThread();
 
-        auto pbr = gldx::ShaderProgram::CreateFromSource(gldx::shaders::kPbrVertex, gldx::shaders::kPbrFragment);
-        if (!pbr) { std::fprintf(stderr, "PBR shader: %s\n", pbr.error().c_str()); return 1; }
-        pbr->Use();
-        pbr->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);
+    GLFWwindow* const native = window.Handle();
+    gldx::Renderer renderer;
+    renderer.Init();
 
-        gldx::LightBuffer lights; lights.Init();
-        gldx::Camera camera; camera.SetPerspective(45.0f, 1.0f, 0.1f, 500.0f);
+    View view;
+    view.yaw = flags.real("yaw", view.yaw);
+    view.pitch = flags.real("pitch", view.pitch);
+    view.radius = flags.real("radius", view.radius, 0.5f, 200.0f);
+    glfwSetWindowUserPointer(native, &view);
+    glfwSetCursorPosCallback(native, OnMouse);
+    glfwSetMouseButtonCallback(native, OnButton);
 
-        std::vector<std::unique_ptr<Item>> mats;
-        gldx::Scene scene;
+    auto hud = std::make_unique<StatusHudPass>();
+    StatusHudPass* hudRaw = hud.get();
+    renderer.AddPass(std::make_unique<gldx::GeometryPass>());
+    renderer.AddPass(std::move(hud));
 
-        // Kick the async load (or decide the status up front) with a single CPU
-        // probe for a readable reason; the real geometry still arrives via AssetManager.
-        gldx::AssetManager assets(2);
-        bool requested = false;
-        if (modelPath.empty()) {
-            hudRaw->setStatus("no model: pass --model PATH (e.g. a .obj/.gltf)");
-        } else if (auto probe = gldx::ModelLoader::Load(modelPath); !probe) {
-            hudRaw->setStatus("model unavailable: " + probe.error());
-        } else {
-            assets.RequestModel("m", modelPath);
-            requested = true;
-            hudRaw->setStatus("async loading: " + modelPath);
+    auto pbr = gldx::ShaderProgram::CreateFromSource(gldx::shaders::kPbrVertex, gldx::shaders::kPbrFragment);
+    if (!pbr) { std::fprintf(stderr, "PBR shader: %s\n", pbr.error().c_str()); return 1; }
+    pbr->Use();
+    pbr->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);
+
+    gldx::LightBuffer lights; lights.Init();
+    gldx::Camera camera; camera.SetPerspective(45.0f, 1.0f, 0.1f, 500.0f);
+
+    std::vector<std::unique_ptr<Item>> mats;
+    gldx::Scene scene;
+
+    // Kick the async load (or decide the status up front) with a single CPU
+    // probe for a readable reason; the real geometry still arrives via AssetManager.
+    gldx::AssetManager assets(2);
+    bool requested = false;
+    if (modelPath.empty()) {
+        hudRaw->setStatus("no model: pass --model PATH (e.g. a .obj/.gltf)");
+    } else if (auto probe = gldx::ModelLoader::Load(modelPath); !probe) {
+        hudRaw->setStatus("model unavailable: " + probe.error());
+    } else {
+        assets.RequestModel("m", modelPath);
+        requested = true;
+        hudRaw->setStatus("async loading: " + modelPath);
+    }
+
+    std::shared_ptr<gldx::Model> heldModel;   // keep meshes alive once uploaded
+
+    window.OnFrame([&](const gldx::win::FrameInfo& info) {
+        gldx::RenderFrame f;
+        f.fbWidth     = info.fbWidth;
+        f.fbHeight    = info.fbHeight;
+        f.smoothedFps = info.smoothedFps;
+
+        if (requested && !heldModel) {
+            assets.ProcessUploads();
+            if (auto m = assets.GetModel("m")) {
+                heldModel = m;
+                for (const auto& mesh : m->meshes) {
+                    if (!mesh || !mesh->valid()) continue;
+                    auto it = std::make_unique<Item>();
+                    it->material.baseColor = glm::vec4(0.85f, 0.82f, 0.78f, 1.0f);
+                    it->material.roughness = 0.55f;
+                    it->material.metallic = 0.0f;
+                    gldx::SceneNode& n = scene.CreateRoot();
+                    n.SetRenderable(mesh.get(), &it->material);
+                    mats.push_back(std::move(it));
+                }
+                hudRaw->setStatus("loaded: " + std::to_string(m->meshes.size()) + " mesh(es), drag to orbit");
+            } else if (assets.PendingCount() == 0) {
+                hudRaw->setStatus("load finished with no model (see stderr)");
+            }
         }
 
-        std::shared_ptr<gldx::Model> heldModel;   // keep meshes alive once uploaded
+        const glm::vec3 target(0.0f, 0.5f, 0.0f);
+        const float cp = std::cos(view.pitch);
+        const glm::vec3 eye(target.x + view.radius * cp * std::sin(view.yaw),
+                            target.y + view.radius * std::sin(view.pitch),
+                            target.z + view.radius * cp * std::cos(view.yaw));
+        camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
+        camera.LookAt(eye, target, glm::vec3(0, 1, 0));
 
-        return ctx.Loop([&](gldx::RenderFrame& f, const demo::FrameInfo& info) {
-            if (requested && !heldModel) {
-                assets.ProcessUploads();
-                if (auto m = assets.GetModel("m")) {
-                    heldModel = m;
-                    for (const auto& mesh : m->meshes) {
-                        if (!mesh || !mesh->valid()) continue;
-                        auto it = std::make_unique<Item>();
-                        it->material.baseColor = glm::vec4(0.85f, 0.82f, 0.78f, 1.0f);
-                        it->material.roughness = 0.55f;
-                        it->material.metallic = 0.0f;
-                        gldx::SceneNode& n = scene.CreateRoot();
-                        n.SetRenderable(mesh.get(), &it->material);
-                        mats.push_back(std::move(it));
-                    }
-                    hudRaw->setStatus("loaded: " + std::to_string(m->meshes.size()) + " mesh(es), drag to orbit");
-                } else if (assets.PendingCount() == 0) {
-                    hudRaw->setStatus("load finished with no model (see stderr)");
-                }
-            }
+        gldx::LightSetup setup;
+        setup.sun.direction = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
+        setup.sun.color = glm::vec3(1.0f);
+        setup.sun.intensity = 3.2f;
+        setup.ambient = glm::vec3(0.12f);
+        lights.Update(setup, camera.Position());
+        scene.Update();
 
-            const glm::vec3 target(0.0f, 0.5f, 0.0f);
-            const float cp = std::cos(view.pitch);
-            const glm::vec3 eye(target.x + view.radius * cp * std::sin(view.yaw),
-                                target.y + view.radius * std::sin(view.pitch),
-                                target.z + view.radius * cp * std::cos(view.yaw));
-            camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
-            camera.LookAt(eye, target, glm::vec3(0, 1, 0));
+        f.camera = &camera; f.scene = &scene; f.lights = &lights; f.pbr = &*pbr;
+        f.viewProj = camera.ViewProjection(); f.lightSetup = setup;
 
-            gldx::LightSetup setup;
-            setup.sun.direction = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
-            setup.sun.color = glm::vec3(1.0f);
-            setup.sun.intensity = 3.2f;
-            setup.ambient = glm::vec3(0.12f);
-            lights.Update(setup, camera.Position());
-            scene.Update();
-
-            f.camera = &camera; f.scene = &scene; f.lights = &lights; f.pbr = &*pbr;
-            f.viewProj = camera.ViewProjection(); f.lightSetup = setup;
-        });
+        renderer.Render(f);
     });
+
+    return gldx::win::App::Get().Run({flags.quitAfter()});
 }

@@ -23,7 +23,11 @@
  * Controls: Esc quits, --quit-after SECONDS for headless.
  */
 
-#include "demo/demo_app.h"
+#include "gldx/core/Platform.h"
+
+import gldx;
+import gldxwin;
+import gldxcli;
 
 #include <cmath>
 #include <cstdio>
@@ -110,7 +114,7 @@ public:
         profiler_.EndFrame();
     }
 
-    void setFrameInfo(demo::FrameInfo info) noexcept { info_ = info; }
+    void setFrameInfo(gldx::win::FrameInfo info) noexcept { info_ = info; }
 
 private:
     gldx::DebugDraw   debug_;
@@ -118,32 +122,48 @@ private:
     gldx::SpriteBatch sprite_;
     gldx::Font        font_;
     gldx::Texture2D   white_;
-    demo::FrameInfo  info_;
+    gldx::win::FrameInfo info_;
 };
 
 } // namespace
 
 int main(int argc, char** argv) {
-    const demo::Flags flags(argc, argv, {}, {}, "debug_draw");
+    const gldx::cli::Flags flags(argc, argv, {}, {}, "debug_draw");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
-    return demo::Run(flags, "gldx demo - debug_draw (line overlay + profiler)",
-                     [&](demo::Ctx& ctx) -> int {
-        auto pass = std::make_unique<DebugPass>();
-        DebugPass* raw = pass.get();
-        ctx.renderer.AddPass(std::move(pass));
+    gldx::win::WindowDesc desc;
+    desc.title = "gldx demo - debug_draw (line overlay + profiler)";
+    gldx::win::Window window(desc);
+    if (!window.Ok()) return 1;
 
-        gldx::Camera camera; camera.SetPerspective(50.0f, 1.0f, 0.1f, 100.0f);
+    gldx::RenderContext::MarkAsRenderThread();
 
-        return ctx.Loop([&](gldx::RenderFrame& f, const demo::FrameInfo& info) {
-            const float yaw = static_cast<float>(info.time) * 0.3f;
-            const glm::vec3 eye(8.0f * std::cos(yaw), 6.0f, 8.0f * std::sin(yaw));
-            camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
-            camera.LookAt(eye, glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0, 1, 0));
+    gldx::Renderer renderer;
+    renderer.Init();
 
-            raw->setFrameInfo(info);
-            f.camera = &camera;
-            f.viewProj = camera.ViewProjection();
-        });
+    auto pass = std::make_unique<DebugPass>();
+    DebugPass* raw = pass.get();
+    renderer.AddPass(std::move(pass));
+
+    gldx::Camera camera; camera.SetPerspective(50.0f, 1.0f, 0.1f, 100.0f);
+
+    window.OnFrame([&](const gldx::win::FrameInfo& info) {
+        gldx::RenderFrame f;
+        f.fbWidth     = info.fbWidth;
+        f.fbHeight    = info.fbHeight;
+        f.smoothedFps = info.smoothedFps;
+
+        const float yaw = static_cast<float>(info.time) * 0.3f;
+        const glm::vec3 eye(8.0f * std::cos(yaw), 6.0f, 8.0f * std::sin(yaw));
+        camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
+        camera.LookAt(eye, glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0, 1, 0));
+
+        raw->setFrameInfo(info);
+        f.camera = &camera;
+        f.viewProj = camera.ViewProjection();
+
+        renderer.Render(f);
     });
+
+    return gldx::win::App::Get().Run({flags.quitAfter()});
 }

@@ -14,9 +14,14 @@
  * quits, drag orbits, --on/--off sky, --quit-after SECONDS for headless.
  */
 
-#include "demo/demo_app.h"
+#include "gldx/core/Platform.h"
+
+import gldx;
+import gldxwin;
+import gldxcli;
 
 #include <cmath>
+#include <cstdio>
 #include <memory>
 #include <vector>
 
@@ -49,90 +54,107 @@ struct Item { gldx::Mesh mesh; gldx::PbrMaterial material; };
 } // namespace
 
 int main(int argc, char** argv) {
-    const demo::Flags flags(argc, argv, {"sky"}, {"yaw", "pitch", "radius"}, "skybox");
+    const gldx::cli::Flags flags(argc, argv, {"sky"}, {"yaw", "pitch", "radius"}, "skybox");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
-    return demo::Run(flags, "gldx demo - skybox (environment cube as background)",
-                     [&](demo::Ctx& ctx) -> int {
-        View view;
-        view.yaw = flags.real("yaw", view.yaw);
-        view.pitch = flags.real("pitch", view.pitch);
-        view.radius = flags.real("radius", view.radius, 2.0f, 40.0f);
-        view.sky = flags.on("sky");
-        glfwSetWindowUserPointer(ctx.window, &view);
-        glfwSetCursorPosCallback(ctx.window, OnMouse);
-        glfwSetMouseButtonCallback(ctx.window, OnButton);
+    gldx::win::WindowDesc desc;
+    desc.title = "gldx demo - skybox (environment cube as background)";
+    gldx::win::Window window(desc);
+    if (!window.Ok()) return 1;
 
-        // Geometry opens the target -> Skybox fills uncovered pixels -> Post closes.
-        ctx.renderer.AddPass(std::make_unique<gldx::GeometryPass>());
-        ctx.renderer.AddPass(std::make_unique<gldx::SkyboxPass>());
-        ctx.renderer.AddPass(std::make_unique<gldx::PostProcessPass>());
+    gldx::RenderContext::MarkAsRenderThread();
 
-        auto pbr = gldx::ShaderProgram::CreateFromSource(gldx::shaders::kPbrVertex, gldx::shaders::kPbrFragment);
-        if (!pbr) { std::fprintf(stderr, "PBR shader: %s\n", pbr.error().c_str()); return 1; }
-        pbr->Use();
-        pbr->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);
+    GLFWwindow* const native = window.Handle();
+    gldx::Renderer renderer;
+    renderer.Init();
 
-        gldx::SkyboxRenderer skybox;
-        if (!skybox.Init()) { std::fprintf(stderr, "Skybox init failed\n"); return 1; }
-        const glm::vec3 towardSun = glm::normalize(glm::vec3(0.5f, 0.35f, 0.4f));
-        gldx::EnvironmentMap env;
-        if (!env.Generate(-towardSun, 256, 32, 256)) { std::fprintf(stderr, "Env gen failed\n"); return 1; }
+    View view;
+    view.yaw = flags.real("yaw", view.yaw);
+    view.pitch = flags.real("pitch", view.pitch);
+    view.radius = flags.real("radius", view.radius, 2.0f, 40.0f);
+    view.sky = flags.on("sky");
+    glfwSetWindowUserPointer(native, &view);
+    glfwSetCursorPosCallback(native, OnMouse);
+    glfwSetMouseButtonCallback(native, OnButton);
 
-        gldx::PostProcessChain post;
-        if (!post.Init()) { std::fprintf(stderr, "Post init failed\n"); return 1; }
-        post.SetExposure(1.0f);
+    // Geometry opens the target -> Skybox fills uncovered pixels -> Post closes.
+    renderer.AddPass(std::make_unique<gldx::GeometryPass>());
+    renderer.AddPass(std::make_unique<gldx::SkyboxPass>());
+    renderer.AddPass(std::make_unique<gldx::PostProcessPass>());
 
-        gldx::LightBuffer lights; lights.Init();
-        gldx::Camera camera; camera.SetPerspective(55.0f, 1.0f, 0.1f, 500.0f);
+    auto pbr = gldx::ShaderProgram::CreateFromSource(gldx::shaders::kPbrVertex, gldx::shaders::kPbrFragment);
+    if (!pbr) { std::fprintf(stderr, "PBR shader: %s\n", pbr.error().c_str()); return 1; }
+    pbr->Use();
+    pbr->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);
 
-        std::vector<std::unique_ptr<Item>> items;
-        gldx::Scene scene;
-        auto add = [&](gldx::MeshData data, const gldx::PbrMaterial& m, const gldx::Transform& t) {
-            auto it = std::make_unique<Item>(); it->material = m;
-            glm::vec3 c; float r; gldx::SceneNode::BoundsFromMeshData(data, c, r);
-            it->mesh.Upload(std::move(data));
-            gldx::SceneNode& n = scene.CreateRoot(t);
-            n.SetRenderable(&it->mesh, &it->material); n.SetLocalBounds(c, r);
-            items.push_back(std::move(it));
-        };
-        { gldx::Transform t; t.scale = glm::vec3(30.0f, 1.0f, 30.0f);
-          gldx::PbrMaterial m; m.baseColor = glm::vec4(0.35f, 0.37f, 0.4f, 1.0f); m.roughness = 0.95f;
-          add(gldx::GeometryFactory::Plane(1.0f), m, t); }
-        for (int k = 0; k < 3; ++k) {
-            gldx::Transform t; t.translation = glm::vec3(-1.8f + k * 1.8f, 0.6f, 0.0f);
-            t.SetAxisAngle(glm::vec3(0, 1, 0), 0.5f * k);
-            gldx::PbrMaterial m; m.baseColor = glm::vec4(0.8f, 0.8f, 0.85f, 1.0f); m.roughness = 0.5f;
-            add(gldx::GeometryFactory::Cube(1.0f), m, t);
-        }
+    gldx::SkyboxRenderer skybox;
+    if (!skybox.Init()) { std::fprintf(stderr, "Skybox init failed\n"); return 1; }
+    const glm::vec3 towardSun = glm::normalize(glm::vec3(0.5f, 0.35f, 0.4f));
+    gldx::EnvironmentMap env;
+    if (!env.Generate(-towardSun, 256, 32, 256)) { std::fprintf(stderr, "Env gen failed\n"); return 1; }
 
-        static bool armed = true;
-        return ctx.Loop([&](gldx::RenderFrame& f, const demo::FrameInfo& info) {
-            if (bool p = glfwGetKey(info.window, GLFW_KEY_6) == GLFW_PRESS; p && armed) { view.sky = !view.sky; armed = false; }
-            else if (!p) armed = true;
+    gldx::PostProcessChain post;
+    if (!post.Init()) { std::fprintf(stderr, "Post init failed\n"); return 1; }
+    post.SetExposure(1.0f);
 
-            const glm::vec3 target(0.0f, 0.6f, 0.0f);
-            const float cp = std::cos(view.pitch);
-            const glm::vec3 eye(target.x + view.radius * cp * std::sin(view.yaw),
-                                target.y + view.radius * std::sin(view.pitch),
-                                target.z + view.radius * cp * std::cos(view.yaw));
-            camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
-            camera.LookAt(eye, target, glm::vec3(0, 1, 0));
+    gldx::LightBuffer lights; lights.Init();
+    gldx::Camera camera; camera.SetPerspective(55.0f, 1.0f, 0.1f, 500.0f);
 
-            gldx::LightSetup setup;
-            setup.sun.direction = -towardSun;
-            setup.sun.color = glm::vec3(1.0f);
-            setup.sun.intensity = 2.5f;
-            setup.ambient = glm::vec3(0.15f);   // flat ambient: the sky lights nothing here
-            lights.Update(setup, camera.Position());
-            scene.Update();
+    std::vector<std::unique_ptr<Item>> items;
+    gldx::Scene scene;
+    auto add = [&](gldx::MeshData data, const gldx::PbrMaterial& m, const gldx::Transform& t) {
+        auto it = std::make_unique<Item>(); it->material = m;
+        glm::vec3 c; float r; gldx::SceneNode::BoundsFromMeshData(data, c, r);
+        it->mesh.Upload(std::move(data));
+        gldx::SceneNode& n = scene.CreateRoot(t);
+        n.SetRenderable(&it->mesh, &it->material); n.SetLocalBounds(c, r);
+        items.push_back(std::move(it));
+    };
+    { gldx::Transform t; t.scale = glm::vec3(30.0f, 1.0f, 30.0f);
+      gldx::PbrMaterial m; m.baseColor = glm::vec4(0.35f, 0.37f, 0.4f, 1.0f); m.roughness = 0.95f;
+      add(gldx::GeometryFactory::Plane(1.0f), m, t); }
+    for (int k = 0; k < 3; ++k) {
+        gldx::Transform t; t.translation = glm::vec3(-1.8f + k * 1.8f, 0.6f, 0.0f);
+        t.SetAxisAngle(glm::vec3(0, 1, 0), 0.5f * k);
+        gldx::PbrMaterial m; m.baseColor = glm::vec4(0.8f, 0.8f, 0.85f, 1.0f); m.roughness = 0.5f;
+        add(gldx::GeometryFactory::Cube(1.0f), m, t);
+    }
 
-            f.camera = &camera; f.scene = &scene; f.lights = &lights; f.pbr = &*pbr;
-            f.viewProj = camera.ViewProjection(); f.lightSetup = setup;
-            f.post = &post;
-            f.sky.box = view.sky ? &skybox : nullptr;   // null => no background drawn
-            f.sky.env = &env;
-            f.ibl.enabled = false;                       // sky as scenery, not as a light source
-        });
+    static bool armed = true;
+    window.OnFrame([&](const gldx::win::FrameInfo& info) {
+        gldx::RenderFrame f;
+        f.fbWidth     = info.fbWidth;
+        f.fbHeight    = info.fbHeight;
+        f.smoothedFps = info.smoothedFps;
+
+        if (bool p = glfwGetKey(info.window->Handle(), GLFW_KEY_6) == GLFW_PRESS; p && armed) { view.sky = !view.sky; armed = false; }
+        else if (!p) armed = true;
+
+        const glm::vec3 target(0.0f, 0.6f, 0.0f);
+        const float cp = std::cos(view.pitch);
+        const glm::vec3 eye(target.x + view.radius * cp * std::sin(view.yaw),
+                            target.y + view.radius * std::sin(view.pitch),
+                            target.z + view.radius * cp * std::cos(view.yaw));
+        camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
+        camera.LookAt(eye, target, glm::vec3(0, 1, 0));
+
+        gldx::LightSetup setup;
+        setup.sun.direction = -towardSun;
+        setup.sun.color = glm::vec3(1.0f);
+        setup.sun.intensity = 2.5f;
+        setup.ambient = glm::vec3(0.15f);   // flat ambient: the sky lights nothing here
+        lights.Update(setup, camera.Position());
+        scene.Update();
+
+        f.camera = &camera; f.scene = &scene; f.lights = &lights; f.pbr = &*pbr;
+        f.viewProj = camera.ViewProjection(); f.lightSetup = setup;
+        f.post = &post;
+        f.sky.box = view.sky ? &skybox : nullptr;   // null => no background drawn
+        f.sky.env = &env;
+        f.ibl.enabled = false;                       // sky as scenery, not as a light source
+
+        renderer.Render(f);
     });
+
+    return gldx::win::App::Get().Run({flags.quitAfter()});
 }
