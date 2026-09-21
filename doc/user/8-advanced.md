@@ -1,6 +1,6 @@
 # 🔴 进阶：扩展渲染管线与资源系统
 
-前提：已读完 [🟡 基础](2-basic-usage.md)。**动手写任何会拥有或调用 GL 的代码之前**，先通读 [../developer/thread-safety.md](../developer/thread-safety.md)——本篇的多数约束都源于"GL 只在渲染线程"这条不变量。
+前提：已读完入门篇（[① 骨架](2-core-setup.md)～[⑥ 体素世界](7-voxel-basics.md)）。**动手写任何会拥有或调用 GL 的代码之前**，先通读 [../developer/thread-safety.md](../developer/thread-safety.md)——本篇的多数约束都源于"GL 只在渲染线程"这条不变量。
 
 ---
 
@@ -24,24 +24,7 @@ renderer.AddPass(std::make_unique<MyPass>());      // 追加
 
 ---
 
-## 2. 两阶段资源管线（进阶）
-
-[🟡 基础 §3](2-basic-usage.md#3-加载一张贴图--一个模型最简用法) 的 `Request* + ProcessUploads` 背后是明确的阶段划分：
-
-| 阶段 | 在哪个线程 | 做什么 | 产出 |
-| --- | --- | --- | --- |
-| **Stage A** | 后台工作线程（`ThreadPool`） | 只做 **CPU 解码**（stb 解图、assimp 解模型），绝不碰 GL | `Texture2DDesc` / `LoadedModelData`（纯 CPU 数据） |
-| **Stage B** | 渲染线程，在 `AssetManager::ProcessUploads()` 里 | 把已完成的解码结果 `glGenTextures/glBufferData` 上传 | 真正的 GL 对象 |
-
-含义与约束：
-
-- 请求后**就绪前** `Get*` 返回 `nullptr`/空句柄，绝不暴露半成品——按"可能还没好"写代码（`if (auto t = assets.GetTexture(key))`）。
-- 解码是异步的，但**上传永远排在渲染线程**，所以你在 `Request*` 之后不能立刻假设资源可用，要跨帧轮询。
-- 错误用 `std::expected<T,E>` 传回，**不跨线程抛异常**。线程池顶层另有 `try/catch` 兜底，防止任务抛异常逃逸出 `std::thread` 触发 `std::terminate`——但这是安全网，你的代码不应依赖"抛异常跨线程"。详见 [../developer/thread-safety.md](../developer/thread-safety.md)。
-
----
-
-## 3. 后期链与运行期开关
+## 2. 后期链与运行期开关
 
 HDR 后期是一条固定链：主场景渲染进**线性 HDR target** → bright-pass → 可分离高斯模糊 → **ACES tonemap + gamma 合成**（统一在 composite 一步完成色彩空间转换）。运行期可由 `RenderFrame` 上的一组布尔驱动：
 
@@ -55,11 +38,11 @@ HDR 后期是一条固定链：主场景渲染进**线性 HDR target** → brigh
 | `frame.skybox = nullptr` | `6` | 天空盒（不是布尔字段：置空指针即不画，背景回到 clear color） |
 | `ortho` | `Tab` | 透视 ↔ 正交投影（相机侧还要 `ToggleProjection()` 换投影矩阵，见 `Camera`） |
 
-把它们接你自己的 UI/配置即可。曝光用 `post.SetExposure(...)` 调。
+把它们接你自己的 UI/配置即可。曝光用 `post.SetExposure(...)` 调。投影互切的相机侧细节见 [⑤ 相机与拾取](6-camera-picking.md)。
 
 ---
 
-## 4. 改 GLSL：只有一个真源
+## 3. 改 GLSL：只有一个真源
 
 着色器 GLSL **内嵌**在 `src/gfx/shader/*Shaders.h`（`ShaderLib.h` / `PostProcessShaders.h` / `IblShaders.h`），这是**单一真源**，随 `gfx` 模块一起编译进去。
 
@@ -68,21 +51,7 @@ HDR 后期是一条固定链：主场景渲染进**线性 HDR target** → brigh
 
 ---
 
-## 5. macOS Core Profile 需要 forward-compat
-
-在 macOS 上建窗口必须开 forward-compatible hint，否则拿不到 Core Profile 上下文：
-
-```cpp
-#if GLFW_PLATFORM_MACOS
-glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-#endif
-```
-
-`GLFW_PLATFORM_MACOS` 来自文本 include 的 `Platform.h`（宏不跨模块边界，见 [🟡 基础 §1](2-basic-usage.md#为什么-platformh-还是-include-而不是-import)）。
-
----
-
-## 6. 资源投放与产物目录约定
+## 4. 资源投放与产物目录约定
 
 - **运行期内容**放 [`../../src/assets/`](../../src/assets/)（与 `src/gfx` 代码同级）：`src/assets/models/` 是 FBX/OBJ/glTF 投放目录，经 `AssetManager` 异步加载；材质里的纹理引用必须落在模型自己目录内，图片边长上限 `kMaxTextureSide`（16384）在解码前校验，约定细则见 [`../../src/assets/models/README.md`](../../src/assets/models/README.md)。
 - **可执行文件**固定输出到 `output/`（被 gitignore）。
@@ -92,6 +61,7 @@ glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
 ## 下一步 / 参考
 
-- 出问题了（黑屏、CLion 无配置、缺 `clang-scan-deps`、模型加载不出来）→ [🧰 排错](4-troubleshooting.md)
+- 出问题了（黑屏、CLion 无配置、缺 `clang-scan-deps`、模型加载不出来）→ [🧰 排错](9-troubleshooting.md)
+- 两阶段资源管线的用法与拒收规则在 [③ 贴图与模型加载](4-assets-loading.md)；macOS forward-compat 与"为什么 Platform.h 是 include"在 [① 核心骨架](2-core-setup.md)
 - 要发版本 / 触发 CI → 根 [../../README.md](../../README.md) 与 [../../AGENTS.md](../../AGENTS.md) 的 CI 段
-- 想读权威用法 → [`../../src/main.cpp`](../../src/main.cpp)
+- 想读权威用法 → [`../../src/main.cpp`](../../src/main.cpp) 与 [`../../src/voxel_main.cpp`](../../src/voxel_main.cpp)

@@ -11,7 +11,7 @@
 
 **体素 / 世界层原语**（v1.3）：`Chunk` + `ChunkMesher`（面剔除 + 逐顶点 AO，产出 opaque / transparent 两份网格）、`BlockRegistry`、`Texture2DArray`（一方块一纹理层）、`VoxelOpaquePass` / `VoxelTransparentPass`（视距排序 + 球剔除 + 混合）、`VoxelShaders`（sampler2DArray + 平行光近似 + alpha cutoff）、`RaycastVoxel`（DDA 逐格拾取，返回命中格与进入面法向）、`Camera` 飞行接口、`Noise`（Perlin + fBm，seeded 且 worker 线程安全）、`ParticleBatch`（挖掘碎屑）、`Mesh::Update`（chunk remesh 整缓冲重传）、线性距离雾。
 
-文档按读者角色分三条路径，入口见 **[doc/](doc/README.md)**：使用者请看 [`doc/user/`](doc/user/README.md)（按难易分入门/基础/进阶/排错四篇），开发者请看 [`doc/developer/`](doc/developer/README.md)（[design](doc/developer/design.md) + [thread-safety](doc/developer/thread-safety.md)），AI agent 速查见根目录 [AGENTS.md](AGENTS.md)。
+文档按读者角色分三条路径，入口见 **[doc/](doc/README.md)**：使用者请看 [`doc/user/`](doc/user/README.md)（入门 + 一章一个 API 主题的基础系列：骨架/几何场景/资源加载/光照 UBO/相机拾取/体素世界，再加进阶与排错），开发者请看 [`doc/developer/`](doc/developer/README.md)（[design](doc/developer/design.md) + [thread-safety](doc/developer/thread-safety.md)），AI agent 速查见根目录 [AGENTS.md](AGENTS.md)。
 
 ## 目录结构
 

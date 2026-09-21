@@ -1,6 +1,6 @@
 # 🧰 排错：坑合集与报错速查
 
-这一篇把**需要特别当心的坑**集中在一起，按"症状 → 根因 → 修复"组织，方便出问题时速查。前面的教程在 [🟢 入门](1-getting-started.md)/[🟡 基础](2-basic-usage.md)/[🔴 进阶](3-advanced.md)。
+这一篇把**需要特别当心的坑**集中在一起，按"症状 → 根因 → 修复"组织，方便出问题时速查。前面的教程在 [🟢 入门](1-getting-started.md)与基础系列（[① 骨架](2-core-setup.md)～[⑥ 体素世界](7-voxel-basics.md)），扩展管线在 [🔴 进阶](8-advanced.md)。
 
 目录：
 - [§1 macOS / CLion：必须用 Homebrew LLVM 工具链](#1-macos--clion必须用-homebrew-llvm-工具链)
@@ -47,7 +47,7 @@ pbr->SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);             /
 pbr->SetBlockBinding("ShadowBlock",   gfx::CascadedShadowMap::kShadowBinding); // binding 2
 ```
 
-漏掉这步是经典的"场景全黑但没有 GL 错误"。程序链接后设一次即可（采样器 uniform 同理，用 `Set("uShadowMap", (int)gfx::texunit::shadowArray)` 等设一次）。用法背景见 [🟡 基础 §4](2-basic-usage.md#4-ubo-绑定新代码最常踩的黑屏第一课)。
+漏掉这步是经典的"场景全黑但没有 GL 错误"。程序链接后设一次即可（采样器 uniform 同理，用 `Set("uShadowMap", (int)gfx::texunit::shadowArray)` 等设一次）。用法背景见 [④ 光照与 UBO](5-lighting-ubo.md#2-灌进-ubo-并绑定黑屏第一课)。
 
 ---
 
@@ -61,7 +61,7 @@ glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 ```
 
-`GLFW_PLATFORM_MACOS` 来自文本 include 的 `Platform.h`。见 [🔴 进阶 §5](3-advanced.md#5-macos-core-profile-需要-forward-compat)。
+`GLFW_PLATFORM_MACOS` 来自文本 include 的 `Platform.h`。写法与原因见 [① 核心骨架 §1](2-core-setup.md#1-两行引入一个骨架)。
 
 ---
 
@@ -86,7 +86,7 @@ glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 | GLAD 生成报错 | 缺 Python/jinja2 | `brew install uv` 或 `pip install jinja2` |
 | 改了 `src/assets/shaders/*.glsl` 画面没变 | 那只是镜像，真源在 `*Shaders.h` | 见 [§5](#5-资源投放改-srcassetsshaders-没反应)：改 `src/gfx/shader/*Shaders.h` |
 | `glad/gl.h file not found`（仅 IDE 静态分析报） | include 路径在构建期由 CMake 提供 | 忽略；以真实 `cmake --build` 为准 |
-| 请求模型/贴图后马上取却是空 | 异步加载尚未完成 | 每帧 `ProcessUploads()`，就绪前 `Get*` 返回 `nullptr`，按可能为空写代码（[🔴 进阶 §2](3-advanced.md#2-两阶段资源管线进阶)） |
+| 请求模型/贴图后马上取却是空 | 异步加载尚未完成 | 每帧 `ProcessUploads()`，就绪前 `Get*` 返回 `nullptr`，按可能为空写代码（[③ 贴图与模型加载](4-assets-loading.md)） |
 | 模型加载成功但没有贴图 | 材质里的纹理引用用了绝对路径或 `..` 走出模型目录，被 `ModelLoader` 拒收 | 把贴图放模型同目录（或其子目录），材质里用相对引用；stderr 有 `[ModelLoader] ... names a path outside the model's own directory` 诊断行 |
 | 模型"不见了"（无崩溃无 GL 报错） | 顶点位置含 NaN/inf：合法上传但永不光栅化；或面索引越界被整面丢弃（静默，不打诊断） | 看 stderr 的 `[ModelLoader] ... positions are not finite` 行；无该行则用建模工具重导模型（越界面丢弃是为保住"索引只指向本 mesh 顶点"的不变式） |
 | 图片加载失败 | 边长超 `kMaxTextureSide`（16384），解码前读头部即被拒（防解压炸弹） | 缩小图片；拒收走 `std::expected` 错误串 `image too large: ... is WxH`，带真实尺寸与上限，由调用方自行落日志 |

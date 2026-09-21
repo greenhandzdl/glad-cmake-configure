@@ -1,6 +1,6 @@
 # Agent 运行手册 · 环境搭建
 
-面向 **AI coding agent**：被用户要求"帮我在这个项目上把环境搭起来 / 我编译不过"时，按本手册**幂等地**检测→补齐→验证。命令均为原文，可直接执行。速查版见仓库根 [`../../AGENTS.md`](../../AGENTS.md)；坑的人话解释见 [../user/4-troubleshooting.md](../user/4-troubleshooting.md)。
+面向 **AI coding agent**：被用户要求"帮我在这个项目上把环境搭起来 / 我编译不过"时，按本手册**幂等地**检测→补齐→验证。命令均为原文，可直接执行。速查版见仓库根 [`../../AGENTS.md`](../../AGENTS.md)；坑的人话解释见 [../user/9-troubleshooting.md](../user/9-troubleshooting.md)。
 
 > 原则：**先检测再安装**（别重复装、别假设没装），**每步都有明确成功判据**（判据不过就停下排错，别往下冲）。
 

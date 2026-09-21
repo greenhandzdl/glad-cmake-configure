@@ -157,6 +157,12 @@ PBR `shadow` 0.14% / `ibl` 15.4% / `bloom` 57.8% / `debug` 3.7% / `instances` 6.
   引用了不存在的 `src/utils/stb.cpp`（实现在 `src/gfx/third_party/stb_image_impl.cpp`）并据实补上本轮新增的
   两条拒收规则；`assets/README.md` 里"模型是唯一从磁盘读的东西"不属实（HUD 字体也走 `Font::LoadFromFile`），
   改为"模型/贴图与字体两类"并说明后者是可选同步加载。
+- **使用者文档拆分入门小章**：原 `2-basic-usage.md` 一章塞了四个不相关主题，拆为骨架（`2-core-setup`）、
+  几何与场景（`3-geometry-scene`）、贴图与模型加载（`4-assets-loading`，并入原进阶的两阶段细节）、
+  光照与 UBO（`5-lighting-ubo`）四章，另新增从未进过用户文档的相机/拾取（`6-camera-picking`）与体素
+  子系统（`7-voxel-basics`）两章；原进阶/排错顺延为 `8-advanced`/`9-troubleshooting`。新章每个签名先对
+  头文件核实后再写（修正了初稿中不存在的 `SceneNode::CreateChild`、`SkyboxIBL`、`world.Set` 三处）；
+  全仓 22 个 markdown 的相对链接与锚点经脚本验证无断链。
 
 ## v1.3.0
 

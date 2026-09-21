@@ -1,6 +1,6 @@
 # Agent 运行手册 · 替用户写 / 改程序
 
-面向 **AI coding agent**：环境已按 [`setup-environment.md`](setup-environment.md) 搭好后，用户要"用这个引擎写个程序 / 加个物体 / 改渲染"时照本手册做。权威示例永远是 [`../../src/main.cpp`](../../src/main.cpp)——**拿不准就照抄它的用法**。人类向教程在 [../user/2-basic-usage.md](../user/2-basic-usage.md) / [../user/3-advanced.md](../user/3-advanced.md)。
+面向 **AI coding agent**：环境已按 [`setup-environment.md`](setup-environment.md) 搭好后，用户要"用这个引擎写个程序 / 加个物体 / 改渲染"时照本手册做。权威示例永远是 [`../../src/main.cpp`](../../src/main.cpp)——**拿不准就照抄它的用法**。人类向教程在 [../user/](../user/README.md)：骨架见 [① 核心骨架](../user/2-core-setup.md)，各 API 主题分章（[② 几何场景](../user/3-geometry-scene.md)/[③ 资源加载](../user/4-assets-loading.md)/[④ 光照 UBO](../user/5-lighting-ubo.md)/[⑤ 相机拾取](../user/6-camera-picking.md)/[⑥ 体素世界](../user/7-voxel-basics.md)），扩展见 [🔴 进阶](../user/8-advanced.md)。
 
 ---
 

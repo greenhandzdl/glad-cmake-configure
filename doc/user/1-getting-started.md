@@ -2,7 +2,7 @@
 
 目标：在一台干净的机器上，把项目克隆下来、装好依赖、构建、运行，看到演示窗口。全程不需要读引擎源码。
 
-> 下一篇：跑起来之后想基于它写程序，看 [🟡 基础用法](2-basic-usage.md)。中途报错先翻 [🧰 排错](4-troubleshooting.md)。
+> 下一篇：跑起来之后想基于它写程序，看 [🟢 ① 核心骨架](2-core-setup.md)。中途报错先翻 [🧰 排错](9-troubleshooting.md)。
 
 ---
 
@@ -15,7 +15,7 @@
 | 语言标准 | 工程按 **C++23** 编译（`CMAKE_CXX_STANDARD 23`） |
 | 运行库 | OpenGL **4.1 Core**（macOS 即系统 "4.1 Metal"） |
 
-> ⚠️ **macOS 唯一的关键前提**：Apple 自带的 `/usr/bin/clang` **不带 `clang-scan-deps`**，无法配置本工程的 named module。必须用 **Homebrew LLVM**（`brew install llvm`）。用 CLion 还要额外设一次工具链。细节见 [🧰 排错 §1](4-troubleshooting.md#1-macos--clion必须用-homebrew-llvm-工具链)。命令行按下面第 4 步用 `cmake --preset` 即可自动避开。
+> ⚠️ **macOS 唯一的关键前提**：Apple 自带的 `/usr/bin/clang` **不带 `clang-scan-deps`**，无法配置本工程的 named module。必须用 **Homebrew LLVM**（`brew install llvm`）。用 CLion 还要额外设一次工具链。细节见 [🧰 排错 §1](9-troubleshooting.md#1-macos--clion必须用-homebrew-llvm-工具链)。命令行按下面第 4 步用 `cmake --preset` 即可自动避开。
 
 ---
 
@@ -101,7 +101,7 @@ cmake --build build --target clean-project
 
 ### 4.4 用 CLion 打开
 
-CLion 会自动导入 `CMakePresets.json`。**macOS 上唯一要做的**：在 `Settings → Build, Execution, Deployment → Toolchains` 里加一个 Homebrew LLVM 工具链，并让 `Debug` profile 用它，否则会用回 AppleClang 而配置失败。完整图文步骤见 [🧰 排错 §1](4-troubleshooting.md#1-macos--clion必须用-homebrew-llvm-工具链)。
+CLion 会自动导入 `CMakePresets.json`。**macOS 上唯一要做的**：在 `Settings → Build, Execution, Deployment → Toolchains` 里加一个 Homebrew LLVM 工具链，并让 `Debug` profile 用它，否则会用回 AppleClang 而配置失败。完整图文步骤见 [🧰 排错 §1](9-troubleshooting.md#1-macos--clion必须用-homebrew-llvm-工具链)。
 
 ---
 
@@ -126,6 +126,6 @@ CLion 会自动导入 `CMakePresets.json`。**macOS 上唯一要做的**：在 `
 
 ## 下一步
 
-- 想在自己的程序里用 `gfx` → [🟡 基础用法](2-basic-usage.md)
-- 想知道"为什么全黑 / 为什么 CLion 没配置" → [🧰 排错](4-troubleshooting.md)
+- 想在自己的程序里用 `gfx` → [🟢 ① 核心骨架](2-core-setup.md)，后续 API 章（几何/资源/光照/相机/体素）见 [user 目录](README.md)
+- 想知道"为什么全黑 / 为什么 CLion 没配置" → [🧰 排错](9-troubleshooting.md)
 - 想理解引擎为什么这样设计 → [../developer/design.md](../developer/design.md)

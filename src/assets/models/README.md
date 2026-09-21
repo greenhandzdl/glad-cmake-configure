@@ -38,7 +38,7 @@
 另外：面索引越出本 mesh 顶点数的三角形会被**整面丢弃**（保住"索引只指向自己顶点"的
 不变式，不打诊断）；位置含 NaN/inf 时会有 `[ModelLoader] ... positions are not finite`
 的 stderr 行——NaN 顶点合法上传但永不光栅化，症状是"模型不见了"，看到该行请修模型本身。
-排错速查见 [`doc/user/4-troubleshooting.md`](../../../doc/user/4-troubleshooting.md) §6。
+排错速查见 [`doc/user/9-troubleshooting.md`](../../../doc/user/9-troubleshooting.md) §6；加载用法与两阶段管线的教程见 [`doc/user/4-assets-loading.md`](../../../doc/user/4-assets-loading.md)。
 
 ## 仓库卫生
 

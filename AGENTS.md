@@ -147,7 +147,7 @@ third_party/                 glad · stb · assimp（子模块）
 scripts/                     build.sh.in / run.sh.in / clean.sh.in（CMake 配置期生成 .sh）
 .github/workflows/           release.yml（手动触发的三平台构建+发布）
 CMakeLists.txt · CMakePresets.json
-doc/                         README(入口) · user/(使用者:入门/基础/进阶/排错) · developer/(design + thread-safety) · agents/(setup-environment + author-program)
+doc/                         README(入口) · user/(入门 + API 分章: 骨架/几何场景/资源加载/光照UBO/相机拾取/体素 + 进阶 + 排错) · developer/(design + thread-safety) · agents/(setup-environment + author-program)
 AGENTS.md                    本文件（agent 速查，留在仓库根便于自动发现）
 ```
 
