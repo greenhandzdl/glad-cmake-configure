@@ -103,14 +103,21 @@
   `--rise nan`、`--auto-place -inf`、`--pitch nan`、`--radius -1e300`、`--yaw 1e300`、`--off nosuch`、
   `--on bogus`、缺值的 `--auto-break`、`--freeze-at abc`、空值、`+` 与 `x`——退出码全 0，无一条 sanitizer
   报告；拼错的 feature 与非数字的值各自留下一行 stderr，而不是被静默吞掉。
+- **数据竞争（ThreadSanitizer）**：三轮覆盖两条线程路径——体素空闲 25 s（1067 帧，378 gen / 486 meshed，
+  worker 与渲染线程一直在交接 chunk）、体素挖掘压力 30 s（`--auto-break 60 --auto-place 40`，47 次挖掘 /
+  1034 个粒子 / 366 次 remesh，即反复抢写锁）、PBR 25 s（`--on instances,debug`）。**0 warning**。
+  两阶段线程约定（worker 只算 CPU、渲染线程独占 GL）在运行时拿到了旁证。
 
 - **性能**（60 s × 3 轮，`/usr/bin/time -l`）：PBR CPU 18.3 s / RSS 117 MB；体素空闲 20.7 s / 131.8 MB /
   平均 116 fps（最低 81.5）/ `chunks gen 243 == meshed 243`（流式收敛）；体素压力（`--auto-break 200`）
   25.3 s / RSS 131.5 MB（长跑不涨）/ 平均 117.3 fps / `spawned 748`、退出时 `live 0`（粒子池全部退休，无泄漏）。
+  同参数再各跑 180 s：PBR 退出码 0、RSS 114.6 MB（低于 60 s 基线的 117 MB）、`[ModelLoader]` 诊断 0 次；
+  体素退出码 0、RSS 127.8 MB（基线 131.8 MB）、`chunks gen 243 == meshed 243`——三分钟不比一分钟胖，
+  流式队列在长跑里仍然收敛。
 
 12 个开关全部拿到“信号 ≫ 噪声底”的截图证据（每组噪声底 0.000%，即同参数两跑逐像素全等）：
 PBR `shadow` 0.14% / `ibl` 15.4% / `bloom` 57.8% / `debug` 3.7% / `instances` 6.6% / `sky` 91.4% / `ortho` 18.7%；
-体素 `particles` 3.59% / `fog` 63.5% / `sky` 36.5% / `ortho` 77.8% / `water` 4.5%（均为画面变化像素占比）。改完 CLI 的数字访问器后整轮复跑，12 项数值与改前逐项相同——默认命令行下的画面一字未动。
+体素 `particles` 3.59% / `fog` 63.5% / `sky` 36.5% / `ortho` 77.8% / `water` 4.5%（均为画面变化像素占比）。改完 CLI 的数字访问器后整轮复跑，12 项数值与改前逐项相同——默认命令行下的画面一字未动。`ModelLoader` 收尾与指针捕获两处修复之后又复跑一轮，结果文件逐字段与上一轮完全相同（含每组的绝对 `changed_px`）。
 
 ## v1.3.0
 
