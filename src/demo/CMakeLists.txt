@@ -15,8 +15,20 @@
 # ============================================================================
 
 function(add_gldx_demo name)
-    add_executable(d_${name} ${CMAKE_CURRENT_SOURCE_DIR}/${name}/main.cpp)
+    # A demo is a small standalone C++ project: main.cpp is the thin entry point
+    # that only wires the libraries together and proves the program runs, while
+    # any heavier content (helper classes, scene builders, per-feature code) may
+    # live in sibling .cpp files or in {feature}/ subdirectories. Collect them all
+    # recursively so a demo that stays a single main.cpp is just as valid as one
+    # that has grown a folder tree.
+    file(GLOB_RECURSE demo_sources CONFIGURE_DEPENDS
+         ${CMAKE_CURRENT_SOURCE_DIR}/${name}/*.cpp)
+    add_executable(d_${name} ${demo_sources})
     target_link_libraries(d_${name} PRIVATE gldx gldxwin gldxcli)
+    # Put the demo's own directory on the include path so split-out headers are
+    # included by a stable path ("Scene.h" or "terrain/Chunk.h") regardless of
+    # which .cpp in the demo pulls them in.
+    target_include_directories(d_${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/${name})
     set_target_properties(d_${name} PROPERTIES
         OUTPUT_NAME ${name}
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/output)

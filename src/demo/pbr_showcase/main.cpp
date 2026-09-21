@@ -26,6 +26,11 @@
  * scene nodes reference them by non-owning pointer, so the whole frame's draw
  * sequence - once a wall of inline gl* calls here - is now a single
  * renderer.Render(frame). All GL still happens on the render thread.
+ *
+ * This is deliberately a small C++ project, not one big file: the orbit-camera
+ * state and its GLFW callbacks live in Input.{h,cpp}, and the scene graph +
+ * instanced field + the CPU texture generators in Scene.{h,cpp}. main.cpp stays
+ * the wiring that stitches the engine together around them.
  */
 
 // Platform.h is deliberately a plain text include (not part of module gldx):
@@ -39,6 +44,7 @@
 #include <cstdio>
 #include <iostream>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -52,150 +58,17 @@ import gldx;
 import gldxwin;
 import gldxcli;
 
-namespace {
+// Demo-local headers. They name gldx engine types, so (like Platform.h for the
+// GLFW side) they are textual includes that must come AFTER `import gldx;`.
+#include "Input.h"
+#include "Scene.h"
 
-// ---- orbit-camera + interaction state (shared with the GLFW callbacks) ------
-struct Input {
-    float yaw   = 0.65f;    // azimuth around the target (rad)
-    float pitch = 0.42f;    // elevation above the target (rad)
-    float radius = 11.0f;   // distance to the target
-    double lastX = 0.0;
-    double lastY = 0.0;
-    bool  dragging = false;
-    float sunAzimuth = 0.7f;
-    float sunElevation = 0.85f;   // radians above the horizon
-    bool  useShadow = true;
-    bool  useIbl = true;
-    bool  useBloom = true;
-    bool  useDebug = false;
-    bool  useInstances = false;
-    bool  useSky = true;     // background cube; off leaves the clear colour
-    bool  ortho = false;   // current projection: false=perspective, true=ortho
-    // Pending right-click pick request (consumed + cleared in the main loop).
-    // Stored normalised to the window, not raw cursor pixels: the pick ray is
-    // built in framebuffer pixels, which differ by the content scale (2 on
-    // Retina) from glfwGetCursorPos' window coordinates.
-    bool  pickPending = false;
-    float pickX = 0.0f, pickY = 0.0f;   // [0..1] across the window
-};
-
-// A few well-known system fonts, tried in order; HUD text just no-ops if none
-// are found, so a missing font never breaks the render.
-const char* const kFontCandidates[] = {
-    "/System/Library/Fonts/Menlo.ttc",
-    "/System/Library/Fonts/Helvetica.ttc",
-    "/System/Library/Fonts/Supplemental/Arial.ttf",
-    "C:/Windows/Fonts/consola.ttf",
-    "C:/Windows/Fonts/arial.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-};
-
-// Unit vector pointing from the scene toward the sun (elevation > 0 => upward).
-glm::vec3 SunToward(const Input& in) {
-    const float ce = std::cos(in.sunElevation);
-    return glm::normalize(glm::vec3(ce * std::sin(in.sunAzimuth),
-                                    std::sin(in.sunElevation),
-                                    ce * std::cos(in.sunAzimuth)));
-}
-
-void MouseCallback(GLFWwindow* win, double x, double y) {
-    auto* in = static_cast<Input*>(glfwGetWindowUserPointer(win));
-    if (!in || !in->dragging) return;
-    const float dx = static_cast<float>(x - in->lastX);
-    const float dy = static_cast<float>(y - in->lastY);
-    in->yaw   -= dx * 0.006f;
-    in->pitch += dy * 0.006f;
-    in->pitch = std::clamp(in->pitch, -1.45f, 1.45f);
-    in->lastX = x;
-    in->lastY = y;
-}
-
-void MouseButtonCallback(GLFWwindow* win, int button, int action, int) {
-    auto* in = static_cast<Input*>(glfwGetWindowUserPointer(win));
-    if (!in) return;
-    double cx = 0, cy = 0;
-    glfwGetCursorPos(win, &cx, &cy);
-    if (button == GLFW_MOUSE_BUTTON_RIGHT) {
-        if (action == GLFW_PRESS) {           // request a pick at this pixel
-            int ww = 0, wh = 0;
-            glfwGetWindowSize(win, &ww, &wh);
-            if (ww > 0 && wh > 0) {
-                in->pickPending = true;
-                in->pickX = static_cast<float>(cx / ww);   // window-normalised
-                in->pickY = static_cast<float>(cy / wh);
-            }
-        }
-        return;
-    }
-    if (button != GLFW_MOUSE_BUTTON_LEFT) return;
-    in->dragging = (action == GLFW_PRESS);
-    in->lastX = cx;
-    in->lastY = cy;
-}
-
-void ScrollCallback(GLFWwindow* win, double, double dy) {
-    auto* in = static_cast<Input*>(glfwGetWindowUserPointer(win));
-    if (!in) return;
-    in->radius = std::clamp(in->radius - static_cast<float>(dy) * 0.6f, 2.0f, 60.0f);
-}
-
-void HandleKeys(GLFWwindow* win, Input& in) {
-    const float step = 0.04f;
-    if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_LEFT) == GLFW_PRESS)
-        in.sunAzimuth -= step;
-    if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_RIGHT) == GLFW_PRESS)
-        in.sunAzimuth += step;
-    if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_UP) == GLFW_PRESS)
-        in.sunElevation = std::min(in.sunElevation + step, 1.5f);
-    if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_DOWN) == GLFW_PRESS)
-        in.sunElevation = std::max(in.sunElevation - step, 0.05f);
-}
-
-// Owns the GPU mesh + CPU material for one scene object. Scene nodes point here;
-// storing them by unique_ptr keeps the addresses stable across the whole run.
-struct Owned {
-    gldx::Mesh        mesh;
-    gldx::PbrMaterial material;
-};
-
-// CPU-side checker albedo (Stage A, no GL).
-gldx::Texture2DDesc MakeCheckerDesc(int size = 512, int cells = 8) {
-    gldx::Texture2DDesc d;
-    d.width = d.height = size;
-    d.channels = 3;
-    d.srgb = true;
-    d.pixels.resize(static_cast<std::size_t>(size) * size * 3);
-    const int cell = size / cells;
-    for (int y = 0; y < size; ++y) {
-        for (int x = 0; x < size; ++x) {
-            const bool on = ((x / cell) + (y / cell)) % 2 == 0;
-            const glm::vec3 c = on ? glm::vec3(0.82f, 0.80f, 0.76f) : glm::vec3(0.16f, 0.18f, 0.22f);
-            const std::size_t i = (static_cast<std::size_t>(y) * size + x) * 3;
-            d.pixels[i + 0] = static_cast<std::uint8_t>(c.r * 255.0f);
-            d.pixels[i + 1] = static_cast<std::uint8_t>(c.g * 255.0f);
-            d.pixels[i + 2] = static_cast<std::uint8_t>(c.b * 255.0f);
-        }
-    }
-    return d;
-}
-
-// 1x1 opaque white texel: a cheap solid fill for HUD panels via SpriteBatch.
-gldx::Texture2DDesc MakeSolidDesc() {
-    gldx::Texture2DDesc d;
-    d.width = d.height = 1;
-    d.channels = 4;
-    d.srgb = false;
-    d.pixels = {255, 255, 255, 255};
-    return d;
-}
-
-} // namespace
+using namespace pbr_showcase;
 
 // Application identity + default window geometry now live with the demo, not
 // the engine header (Platform.h no longer carries app-level constants).
 constexpr const char* kAppName      = "GLFW + GLAD gldx Engine";
-constexpr const char* kAppVersion   = "1.3.1";
+constexpr const char* kAppVersion   = "1.4.0";
 constexpr const char* kWindowTitle  = "gldx::Renderer - PBR / scene graph / render passes";
 constexpr int kWindowWidth  = 800;
 constexpr int kWindowHeight = 600;
@@ -203,7 +76,7 @@ constexpr int kWindowHeight = 600;
 int main(int argc, char** argv) {
     const gldx::cli::Flags flags(argc, argv,
                             {"shadow", "ibl", "bloom", "debug", "instances", "sky", "ortho"},
-                            {"freeze-at", "yaw", "pitch", "radius"}, "pbr_showcase");
+                            {"freeze-at", "yaw", "pitch", "radius", "snapshot", "snap-at"}, "pbr_showcase");
     if (flags.wantsHelp()) {
         flags.printUsage();
         return 0;
@@ -279,9 +152,6 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        gldx::Texture2D checker;
-        checker.Upload(MakeCheckerDesc());
-
         // ---- post-process chain + 2D HUD infrastructure ----------------------
         gldx::PostProcessChain post;
         if (!post.Init()) {
@@ -297,8 +167,8 @@ int main(int argc, char** argv) {
         }
 
         gldx::Font font;
-        for (const char* candidate : kFontCandidates) {
-            if (font.LoadFromFile(candidate, 48.0f)) break;
+        for (int i = 0; i < kFontCandidateCount; ++i) {
+            if (font.LoadFromFile(kFontCandidates[i], 48.0f)) break;
         }
         if (!font.loaded()) std::fprintf(stderr, "HUD font not found; text overlay disabled\n");
 
@@ -320,103 +190,14 @@ int main(int argc, char** argv) {
             instProg->Use();
             instProg->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);
         }
-        gldx::InstancedMesh instField;   // CPU data built (Stage A), uploaded once (Stage B)
-        {
-            gldx::MeshData geo = gldx::GeometryFactory::Cube(1.0f);
-            std::vector<gldx::Instance> insts;
-            constexpr int n = 8;
-            for (int ix = 0; ix < n; ++ix) {
-                for (int iz = 0; iz < n; ++iz) {
-                    const float x = 7.5f + ix * 1.4f;
-                    const float z = -4.9f + iz * 1.4f;
-                    const float h = 0.5f + 0.5f * static_cast<float>((ix * 3 + iz * 5) % 6);
-                    const glm::mat4 m =
-                        glm::translate(glm::mat4(1.0f), glm::vec3(x, h * 0.5f, z)) *
-                        glm::scale(glm::mat4(1.0f), glm::vec3(0.4f, h, 0.4f));
-                    gldx::Instance in;
-                    in.model = m;
-                    const float t = static_cast<float>((ix + iz) % 5) / 4.0f;
-                    in.color = glm::vec4(0.3f + 0.6f * t, 0.4f, 0.85f - 0.5f * t, 1.0f);
-                    insts.push_back(in);
-                }
-            }
-            instField.Create(std::move(geo), std::move(insts));
-        }
+        gldx::InstancedMesh instField;   // CPU data staged (Stage A), uploaded once (Stage B)
+        BuildInstancedField(instField);
 
-        // ---- scene graph -----------------------------------------------------
-        // Objects are owned by `owned` (stable addresses); nodes reference them.
-        std::vector<std::unique_ptr<Owned>> owned;
-        gldx::Scene scene;
-        int nextId = 0;
-
-        auto addObject = [&](gldx::MeshData data, const gldx::PbrMaterial& matCfg,
-                             const gldx::Transform& xf,
-                             gldx::SceneNode* parent = nullptr) -> gldx::SceneNode& {
-            auto o = std::make_unique<Owned>();
-            o->material = matCfg;
-            if (!o->material.placeholder) o->material.placeholder = &checker;
-            glm::vec3 c;
-            float r;
-            gldx::SceneNode::BoundsFromMeshData(data, c, r);
-            o->mesh.Upload(std::move(data));
-            Owned* raw = o.get();
-            owned.push_back(std::move(o));
-            gldx::SceneNode& node = parent ? parent->AddChild(xf) : scene.CreateRoot(xf);
-            node.SetRenderable(&raw->mesh, &raw->material);
-            node.SetLocalBounds(c, r);
-            node.id = nextId++;
-            return node;
-        };
-
-        // Ground plane (large scale, never casts).
-        {
-            gldx::Transform t;
-            t.scale = glm::vec3(24.0f, 1.0f, 24.0f);
-            gldx::PbrMaterial m;
-            m.baseColor = glm::vec4(0.9f, 0.9f, 0.92f, 1.0f);
-            m.roughness = 0.85f;
-            m.albedo = &checker;
-            addObject(gldx::GeometryFactory::Plane(1.0f), m, t).castsShadow = false;
-        }
-
-        // PBR test grid (metallic x roughness).
-        for (int i = 0; i < 5; ++i) {
-            for (int j = 0; j < 5; ++j) {
-                gldx::Transform t;
-                t.translation = glm::vec3(-3.0f + i * 1.5f, 0.5f, -3.0f + j * 1.5f);
-                gldx::PbrMaterial m;
-                m.metallic  = static_cast<float>(i) / 4.0f;
-                m.roughness = 0.05f + 0.9f * static_cast<float>(j) / 4.0f;
-                m.baseColor = glm::vec4(0.9f, 0.5f, 0.25f, 1.0f);
-                addObject(gldx::GeometryFactory::Sphere(0.5f, 48, 32), m, t);
-            }
-        }
-
-        // Textured cubes (checker albedo).
-        for (int k = 0; k < 3; ++k) {
-            gldx::Transform t;
-            t.translation = glm::vec3(-1.6f + k * 1.6f, 0.5f, 3.6f);
-            t.SetAxisAngle(glm::vec3(0, 1, 0), 0.5f * k);
-            gldx::PbrMaterial m;
-            m.baseColor = glm::vec4(1.0f);
-            m.roughness = 0.45f;
-            m.albedo = &checker;
-            addObject(gldx::GeometryFactory::Cube(1.0f), m, t);
-        }
-
-        // Hierarchy demo: an empty pivot carrying orbiting children. The pivot is
-        // spun every frame; the children ride along via world-matrix propagation.
-        gldx::SceneNode* carousel = &scene.CreateRoot();
-        for (int c = 0; c < 3; ++c) {
-            const float a = c * 2.0f * 3.14159265f / 3.0f;
-            gldx::Transform t;
-            t.translation = glm::vec3(std::cos(a) * 1.2f, 1.2f, std::sin(a) * 1.2f);
-            gldx::PbrMaterial m;
-            m.metallic = 0.9f;
-            m.roughness = 0.2f;
-            m.baseColor = glm::vec4(0.2f + 0.4f * c, 0.6f, 0.9f - 0.3f * c, 1.0f);
-            addObject(gldx::GeometryFactory::Cube(0.5f), m, t, carousel);
-        }
+        // ---- scene graph (owned + built inside ShowcaseScene) ----------------
+        ShowcaseScene world;
+        world.Build();
+        gldx::Scene& scene = world.scene();
+        gldx::SceneNode* carousel = world.carousel();
 
         gldx::LightBuffer lightBuffer;
         lightBuffer.Init();
@@ -446,6 +227,12 @@ int main(int argc, char** argv) {
         gldx::SceneNode* selected = nullptr;
         const double quitAfter = flags.quitAfter();
         const double freezeAt = flags.number("freeze-at");
+        // Verification hook: dump the rendered framebuffer to a PNG once the scene
+        // has settled, so a blank window can never masquerade as a clean exit.
+        // Only active when --snapshot PATH is given.
+        const std::string snapPath = flags.string("snapshot");
+        const double snapAt = flags.real("snap-at", 2.0, 0.1, 120.0);
+        bool snapped = false;
 
         window.OnFrame([&](gldx::win::FrameInfo& info) {
             GLFWwindow* const window = info.window->Handle();
@@ -564,6 +351,15 @@ int main(int argc, char** argv) {
 
             profiler.BeginFrame();
             renderer.Render(frame);
+
+            if (!snapPath.empty() && !snapped && info.time >= snapAt) {
+                snapped = true;
+                if (gldx::CaptureScreenshot(snapPath))
+                    std::printf("snapshot: %s\n", snapPath.c_str());
+                else
+                    std::fprintf(stderr, "snapshot failed: %s\n", snapPath.c_str());
+                info.window->Close();
+            }
         });
 
         return gldx::win::App::Get().Run({quitAfter});
