@@ -115,6 +115,7 @@ export {
 
 // --- util ------------------------------------------------------------------
 #include "gldx/util/Noise.h"
+#include "gldx/util/Screenshot.h"
 
 // --- voxel -----------------------------------------------------------------
 // Chunk storage + meshing are pure CPU data types; the GPU records and the

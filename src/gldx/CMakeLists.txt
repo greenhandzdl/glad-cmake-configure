@@ -28,6 +28,7 @@ set(GLDX_SOURCES
     camera/Frustum.cpp
     texture/Texture2DArray.cpp
     util/Noise.cpp
+    util/Screenshot.cpp
     voxel/ChunkMesher.cpp
     voxel/VoxelMeshGpu.cpp
     render/ParticleBatch.cpp
