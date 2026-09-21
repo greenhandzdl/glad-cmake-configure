@@ -7,8 +7,8 @@ module gfx;
 namespace gfx {
 
 namespace {
-// Upload() rejects anything wider than this (see the size check below).
-constexpr int kMaxTextureSide = 16384;
+// The bound itself is kMaxTextureSide in Texture2D.h: the image loader has to
+// apply it before decoding, so it cannot live in here.
 GLenum DataFormat(int channels) {
     switch (channels) {
         case 1: return GL_RED;

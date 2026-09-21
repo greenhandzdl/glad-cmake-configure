@@ -12,10 +12,34 @@ module;
 
 #include <cmath>
 #include <cstdio>
+#include <string_view>
 
 module gfx;
 
 namespace gfx {
+
+namespace {
+// True when a reference written inside a model file would land outside the
+// directory the model itself lives in. assimp already confines the buffer uris a
+// glTF points at to that directory ("../../x.bin" is refused with "could not
+// open referenced file"), so the rule only has to be added where this file
+// builds a path by hand - which it does for textures. An absolute reference was
+// concatenated onto the directory too, which yields "/models//etc/hosts": not
+// the file the model named, and not a readable path either, so refusing it here
+// costs no case that used to work.
+bool LeavesDirectory(std::string_view ref) {
+    if (ref.empty()) return true;
+    if (ref.front() == '/' || ref.front() == '\\') return true;
+    if (ref.size() >= 2 && ref[1] == ':') return true;              // Windows drive letter
+    for (std::size_t pos = 0; pos < ref.size(); ) {
+        const auto end = ref.find_first_of("/\\", pos);
+        const auto stop = end == std::string_view::npos ? ref.size() : end;
+        if (ref.compare(pos, stop - pos, "..") == 0) return true;
+        pos = stop + 1;
+    }
+    return false;
+}
+} // namespace
 
 std::string ModelLoader::DirectoryOf(const std::string& path) {
     const auto pos = path.find_last_of("/\\");
@@ -46,6 +70,12 @@ ModelLoader::Load(const std::string& path) {
         if (!mat) return -1;
         aiString texPath;
         if (mat->GetTexture(aiTextureType_DIFFUSE, 0, &texPath) != AI_SUCCESS) return -1;
+        if (LeavesDirectory(texPath.C_Str())) {
+            std::fprintf(stderr, "[ModelLoader] %s: texture '%s' names a path outside the "
+                                 "model's own directory and is not loaded\n",
+                         path.c_str(), texPath.C_Str());
+            return -1;
+        }
         std::string full = dir + texPath.C_Str();
         for (std::size_t i = 0; i < out.texturePaths.size(); ++i) {
             if (out.texturePaths[i] == full) return static_cast<int>(i);

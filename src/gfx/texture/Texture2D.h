@@ -17,6 +17,14 @@
 
 namespace gfx {
 
+// The largest edge any stage of the texture path will accept. Upload() refuses
+// anything above it (the size arithmetic stays out of wrap-around territory and
+// no desktop GL of the 4.1 era samples larger), and ImageLoader checks the
+// header of a file against the same bound before decoding it - otherwise a
+// few-hundred-kilobyte image can make a worker allocate a hundred megabytes of
+// pixels that Upload is going to throw away anyway.
+inline constexpr int kMaxTextureSide = 16384;
+
 struct Texture2DDesc {
     int width = 0;
     int height = 0;

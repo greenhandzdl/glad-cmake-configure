@@ -74,6 +74,19 @@
   但把这条不变式托付给"哪个 importer 碰巧跑了"不负责任；② 位置非有限时打一行 stderr，因为 NaN 顶点是合法上传、
   永不光栅化，用户的感受是"模型不见了"而不是"模型坏了"。两个 demo 都不经 `AssetManager::RequestModel`，画面无关。
 
+- **模型文件里的一条路径引用可以走出模型目录**（纹理和 buffer 不对称）：assimp 自己把 glTF 的 buffer uri 关在
+  模型目录里（绝对路径和 `../../x.bin` 都报 "could not open referenced file"），而 `ModelLoader` 的纹理路径是
+  手工拼的：`dir + texPath` 对绝对引用产出 `models//etc/hosts` 这种既不是模型所指、也无法读取的字符串（一个
+  真实缺陷：带绝对纹理路径的 `.mtl` 从来就没加载出过贴图），而对 `../../../../etc/hosts` 则原样交给调用方去
+  打开——一条依赖已经守住的规则，在我们的拼接里漏了。现在 `LeavesDirectory()` 拒绝绝对路径、盘符与任何 `..`
+  段并留一行 stderr；相对引用（含子目录）不受影响。
+
+- **144 KB 的 PNG 能让 worker 先分配 148 MB 再被丢掉**：`LoadImageToDesc` 直接 `stbi_load`，尺寸检查在下游
+  `Texture2D::Upload`（16384 上限）才做。实测一张 16500×3000 的全零 PNG（144 KB）解码后峰值 RSS 从 185 MB
+  涨到 643 MB，然后被 Upload 整个拒掉。现在先用 `stbi_info` 只读头部比对上限，同一张图在 0 MB 增量上被拒。
+  顺手把这个上限从两个 `.cpp` 的匿名 namespace 提到 `Texture2D.h`（`inline constexpr kMaxTextureSide`），以
+  免解码端与上传端各写一份而漂移。
+
 ### 新增
 
 - **`src/demo_cli.h`**：两个 demo 共用的 header-only 命令行开关（不进 `module gfx`）。
@@ -98,6 +111,13 @@
   `GL_INVALID_VALUE` 而链路自愈：`PostProcessChain::Resize` 拒绝 0/负数尺寸保住上一个好尺寸，不可能的尺寸让 FBO
   不完整（有诊断行），下一次合法 `Resize` 即恢复；`PickRay` 在 0 高度下给出非有限射线，而加固后的
   `RaycastVoxel` 与 `RaySphere` 都拒绝它。
+
+- **模型引用逃逸与图片解压炸弹**：探针扩到 34 项（ASan + UBSan，退出码 0），改前/改后跑同一份：绝对与越界的
+  纹理引用从"返回 1 条越界路径"变成"0 条 + 一行诊断"（对照组：`badtex.obj` 的相对引用始终保留 1 条路径），
+  glTF 的绝对/越界 buffer uri 两轮都由 assimp 拒收；`bomb.png`（144 KB 声称 16500×3000）的峰值 RSS 从
+  643 MB（基线 185 MB）降到 185 MB（增量 0），拒收文案带上真实尺寸与上限。两个 demo 都不从磁盘读图或读模型
+  （`src/assets/models/` 只有 README，几何与纹理全是程序生成的），所以这两处改动不可能影响画面；仍复跑了一轮
+  12 组开关矩阵验收（常量上提重编了纹理上传）。
 
 - **对抗 argv**：两个 demo 用 UBSan 构建跑畸形命令行——`--select inf`、`--auto-break 1e300`、
   `--rise nan`、`--auto-place -inf`、`--pitch nan`、`--radius -1e300`、`--yaw 1e300`、`--off nosuch`、

@@ -113,6 +113,11 @@ cmake -S . -B cmake-build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
 数据竞争用 TSan 重配一个目录（`-fsanitize=thread`，**不能**与 address 共用一个构建），直接 build 两个 demo
 目标、照常带 `--quit-after` 跑几十秒即可（空闲 + 挖掘压力两种节奏），不必改 CMakeLists 也不必写探针。
 
+资产文件里的路径引用有两条解析路径，防守点不一样：依赖库自己解析的（assimp 的 glTF buffer uri）已经把引用
+关在模型目录下，实测绝对路径和 `../` 都被拒；我们自己拼的（`ModelLoader` 的纹理路径）没人守，判据是
+“返回给调用方的每条路径是否仍在模型目录下”。同理，图片尺寸的上限必须在解码前用 `stbi_info` 读头部比对，
+解码完再拒只是把“文件→显存”的放大变成“文件→内存”的放大（实测 144 KB → 643 MB 峰值 RSS）。
+
 ## 文件地图
 
 ```

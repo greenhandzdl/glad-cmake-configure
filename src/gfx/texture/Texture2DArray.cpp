@@ -7,9 +7,9 @@ module gfx;
 namespace gfx {
 
 namespace {
-// Same bound as Texture2D.cpp: it keeps the size arithmetic out of wrap-around
-// territory, and no desktop GL of the 4.1 era samples larger than this.
-constexpr int kMaxTextureSide = 16384;
+// Sides are bounded by kMaxTextureSide (Texture2D.h), the same bound the 2D
+// path and the image loader use. Layers get their own bound, and the total
+// byte count is still checked with division below rather than by multiplying.
 constexpr int kMaxTextureLayers = 4096;
 GLenum ArrayDataFormat(int channels) {
     switch (channels) {
