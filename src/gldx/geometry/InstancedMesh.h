@@ -54,8 +54,6 @@ public:
     [[nodiscard]] std::uint32_t count() const noexcept { return count_; }
 
 private:
-    void UploadInstances();
-
     VertexArray vao_;
     GLBuffer    geoVbo_, ebo_, instVbo_;
     std::uint32_t indexCount_ = 0;
