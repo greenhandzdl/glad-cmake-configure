@@ -3,15 +3,15 @@
 
 /**
  * @file demo_cli.h
- * @brief Command-line switches shared by the two demo executables.
+ * @brief Command-line switches shared by the demo executables under src/demo/.
  *
  * Deliberately *not* part of module gfx: this is application-side test
  * plumbing. Its reason for existing is that a feature can then be forced on or
  * off from a script instead of from the keyboard, which makes the
  * "toggle everything, diff the frame" sweep automatable:
  *
- *   ./output/voxel_demo --off fog,water --quit-after 11
- *   ./output/GLFW_Template --on debug --quit-after 6
+ *   ./output/voxel_terrain --off fog,water --quit-after 11
+ *   ./output/pbr_showcase  --on debug --quit-after 6
  *
  * `--quit-after` is what lets such a run end on its own, and `--help` prints
  * the names the executable actually understands, so a typo in a regression
@@ -72,8 +72,17 @@ public:
                 const char* text = eq == std::string_view::npos
                                        ? ValueAfter(argc, argv, i, arg)
                                        : argv[i] + eq + 1;
-                double value = 0.0;
-                if (text && ParseNumber(text, value)) values_.emplace_back(std::string(name), value);
+                // An option value is a number when it parses as one and a plain
+                // string otherwise (e.g. --model path/to/thing.obj); the accessor
+                // chosen at read time decides how it is consumed.
+                if (text) {
+                    double value = 0.0;
+                    if (TryNumber(text, value)) {
+                        values_.emplace_back(std::string(name), value);
+                    } else {
+                        strValues_.emplace_back(std::string(name), std::string(text));
+                    }
+                }
                 continue;
             }
             std::fprintf(stderr, "%s: unknown argument '%s' (--help lists the switches)\n",
@@ -128,6 +137,15 @@ public:
         return static_cast<float>(value);
     }
 
+    // The same option read verbatim as a string (a path, a mode name...). An
+    // option that parsed as a number is not visible here, so a demo declares a
+    // given name as either numeric or textual, never both.
+    [[nodiscard]] std::string string(std::string_view name, std::string_view fallback = "") const {
+        for (const auto& [key, value] : strValues_)
+            if (key == name) return value;
+        return std::string(fallback);
+    }
+
     // Seconds before the window closes itself; 0 means "until the user does".
     [[nodiscard]] double quitAfter() const noexcept { return quitAfter_; }
     [[nodiscard]] bool wantsHelp() const noexcept { return help_; }
@@ -163,6 +181,16 @@ private:
         return true;
     }
 
+    // Silent sibling of ParseNumber: a non-numeric option value is not an error,
+    // it just means the caller wanted a string, so no message is printed here.
+    static bool TryNumber(const char* text, double& out) {
+        char* end = nullptr;
+        const double value = std::strtod(text, &end);
+        if (end == text || !end || *end != '\0') return false;
+        out = value;
+        return true;
+    }
+
     // The value of "--name VALUE", which also consumes the following argv slot.
     const char* ValueAfter(int argc, char** argv, int& index, std::string_view name) {
         if (index + 1 >= argc) {
@@ -192,6 +220,7 @@ private:
     std::vector<std::string> features_;
     std::vector<std::string> options_;
     std::vector<std::pair<std::string, double>> values_;
+    std::vector<std::pair<std::string, std::string>> strValues_;
     std::vector<std::string> off_;
     std::vector<std::string> on_;
     std::string program_;

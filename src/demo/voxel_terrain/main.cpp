@@ -76,7 +76,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#include "demo_cli.h"
+#include "demo/demo_cli.h"
 
 // The whole engine as a single C++20 named module.
 import gfx;
@@ -621,7 +621,7 @@ int main(int argc, char** argv) {
     const demo::Flags flags(argc, argv,
                             {"particles", "fog", "water", "sky", "ortho", "double-sided"},
                             {"auto-break", "auto-place", "freeze-at", "yaw", "pitch", "rise",
-                             "select"}, "voxel_demo");
+                             "select"}, "voxel_terrain");
     if (flags.wantsHelp()) {
         flags.printUsage();
         return 0;
