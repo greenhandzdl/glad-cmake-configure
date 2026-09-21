@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------------
 // REFERENCE MIRROR - not compiled by the build.
-// The runtime embeds these programs as raw strings in src/gfx/shader/IblShaders.h
+// The runtime embeds these programs as raw strings in src/gldx/shader/IblShaders.h
 // (kIblVertex / kSkyGenFragment / kIrradianceFragment / kPrefilterFragment /
 // kBrdfFragment); that header is the single source of truth. This file is a
 // browsable/editable copy only.

@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------------
 // REFERENCE MIRROR - not compiled by the build.
-// The runtime embeds these programs as raw strings in src/gfx/shader/ShaderLib.h
+// The runtime embeds these programs as raw strings in src/gldx/shader/ShaderLib.h
 // (kDepthVertex / kDepthFragment); that header is the single source of truth.
 // This file is a browsable/editable copy only.
 // -----------------------------------------------------------------------------

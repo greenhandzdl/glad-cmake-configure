@@ -5,7 +5,7 @@
  * @file demo_cli.h
  * @brief Command-line switches shared by the demo executables under src/demo/.
  *
- * Deliberately *not* part of module gfx: this is application-side test
+ * Deliberately *not* part of module gldx: this is application-side test
  * plumbing. Its reason for existing is that a feature can then be forced on or
  * off from a script instead of from the keyboard, which makes the
  * "toggle everything, diff the frame" sweep automatable:

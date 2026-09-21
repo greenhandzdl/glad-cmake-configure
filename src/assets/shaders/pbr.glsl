@@ -1,7 +1,7 @@
 // -----------------------------------------------------------------------------
 // REFERENCE MIRROR - not compiled by the build.
 // The runtime embeds these two programs as the raw strings `kPbrVertex` /
-// `kPbrFragment` in src/gfx/shader/ShaderLib.h; that header is the single
+// `kPbrFragment` in src/gldx/shader/ShaderLib.h; that header is the single
 // source of truth. This file is a browsable/editable copy only.
 // -----------------------------------------------------------------------------
 
@@ -40,7 +40,7 @@ out vec4 FragColor;
 
 // Point-light struct (declared at global scope: GLSL forbids type definitions
 // inside a uniform block). std140 lays two vec4 members out as 32 B/element,
-// matching gfx::PointLightGpu's interleaved array in LightingBlockGpu.
+// matching gldx::PointLightGpu's interleaved array in LightingBlockGpu.
 struct PL { vec4 posRange; vec4 colorIntensity; };
 
 layout(std140) uniform LightingBlock {

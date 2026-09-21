@@ -1,7 +1,7 @@
 // -----------------------------------------------------------------------------
 // REFERENCE MIRROR - not compiled by the build.
 // The runtime embeds these programs as raw strings in
-// src/gfx/shader/SpriteShaders.h (kSpriteVertex / kSpriteFragment); that header
+// src/gldx/shader/SpriteShaders.h (kSpriteVertex / kSpriteFragment); that header
 // is the single source of truth. This file is a browsable/editable copy only.
 //
 // 2D SpriteBatch used by the HUD overlay. Sprites are emitted as screen-space

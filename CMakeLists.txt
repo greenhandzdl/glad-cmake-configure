@@ -128,14 +128,14 @@ target_include_directories(stb INTERFACE ${CMAKE_SOURCE_DIR}/third_party/stb)
 # from source as a static subproject. This keeps the build self-contained
 # across all three CI platforms (no system/vcpkg assimp package needed).
 #
-# GFX_ENABLE_ASSIMP=OFF drops the entire model-import path (and this heavy
+# GLDX_ENABLE_ASSIMP=OFF drops the entire model-import path (and this heavy
 # dependency) out of the build: the submodule is never checked or configured,
-# gfx links without assimp, and ModelLoader::Load reports unavailability at
-# runtime. The exported `gfx` module interface is unchanged either way.
+# gldx links without assimp, and ModelLoader::Load reports unavailability at
+# runtime. The exported `gldx` module interface is unchanged either way.
 # ============================================================================
-option(GFX_ENABLE_ASSIMP "Build assimp-backed 3D model import" ON)
+option(GLDX_ENABLE_ASSIMP "Build assimp-backed 3D model import" ON)
 
-if(GFX_ENABLE_ASSIMP)
+if(GLDX_ENABLE_ASSIMP)
 if(NOT EXISTS ${CMAKE_SOURCE_DIR}/third_party/assimp/CMakeLists.txt)
     message(FATAL_ERROR
         "Assimp submodule not found. Initialize it first:\n"
@@ -190,79 +190,79 @@ if(TARGET assimp)
     endforeach()
 endif()
 else()
-    message(STATUS "Assimp: DISABLED (GFX_ENABLE_ASSIMP=OFF) - model import unavailable")
-    set(ASSIMP_SOURCE "DISABLED (GFX_ENABLE_ASSIMP=OFF)")
+    message(STATUS "Assimp: DISABLED (GLDX_ENABLE_ASSIMP=OFF) - model import unavailable")
+    set(ASSIMP_SOURCE "DISABLED (GLDX_ENABLE_ASSIMP=OFF)")
 endif()
 
 # ============================================================================
-# gfx  — the engine, delivered as a C++20 named module (static library)
+# gldx  — the engine, delivered as a C++20 named module (static library)
 # ============================================================================
-# Every engine translation unit is a module-implementation unit of `gfx`; the
-# single primary interface unit is src/gfx/gfx.cppm (declared via the CXX_MODULES
+# Every engine translation unit is a module-implementation unit of `gldx`; the
+# single primary interface unit is src/gldx/gldx.cppm (declared via the CXX_MODULES
 # FILE_SET below). stb / assimp stay private to the library: they are only ever
 # textually included inside individual implementation units, never on the
 # exported interface. GLAD + GLM leak into exported signatures so their include
 # dirs propagate PUBLIC (main.cpp reaches the same global-module types).
 set(TARGET_NAME "GLFW_Template")
 
-set(GFX_SOURCES
-    src/gfx/core/RenderContext.cpp
-    src/gfx/core/GLBuffer.cpp
-    src/gfx/core/VertexArray.cpp
-    src/gfx/core/UniformBuffer.cpp
-    src/gfx/core/Sampler.cpp
-    src/gfx/shader/ShaderProgram.cpp
-    src/gfx/geometry/Mesh.cpp
-    src/gfx/geometry/GeometryFactory.cpp
-    src/gfx/geometry/InstancedMesh.cpp
-    src/gfx/texture/Texture2D.cpp
-    src/gfx/texture/TextureCubeMap.cpp
-    src/gfx/texture/RenderTexture.cpp
-    src/gfx/camera/Camera.cpp
-    src/gfx/camera/Frustum.cpp
-    src/gfx/texture/Texture2DArray.cpp
-    src/gfx/util/Noise.cpp
-    src/gfx/voxel/ChunkMesher.cpp
-    src/gfx/voxel/VoxelMeshGpu.cpp
-    src/gfx/render/ParticleBatch.cpp
-    src/gfx/scene/SceneNode.cpp
-    src/gfx/scene/Scene.cpp
-    src/gfx/render/Renderer.cpp
-    src/gfx/render/RenderPasses.cpp
-    src/gfx/render/Framebuffer.cpp
-    src/gfx/render/PostProcessChain.cpp
-    src/gfx/render/SkyboxRenderer.cpp
-    src/gfx/render/SpriteBatch.cpp
-    src/gfx/text/Font.cpp
-    src/gfx/light/EnvironmentMap.cpp
-    src/gfx/shadow/CascadedShadowMap.cpp
-    src/gfx/debug/DebugDraw.cpp
-    src/gfx/debug/Profiler.cpp
-    src/gfx/assets/ThreadPool.cpp
-    src/gfx/assets/AssetManager.cpp
-    src/gfx/assets/ModelLoader.cpp
-    src/gfx/assets/ImageLoader.cpp
-    src/gfx/third_party/stb_image_impl.cpp)   # plain (non-module) 3rd-party impl TU
+set(GLDX_SOURCES
+    src/gldx/core/RenderContext.cpp
+    src/gldx/core/GLBuffer.cpp
+    src/gldx/core/VertexArray.cpp
+    src/gldx/core/UniformBuffer.cpp
+    src/gldx/core/Sampler.cpp
+    src/gldx/shader/ShaderProgram.cpp
+    src/gldx/geometry/Mesh.cpp
+    src/gldx/geometry/GeometryFactory.cpp
+    src/gldx/geometry/InstancedMesh.cpp
+    src/gldx/texture/Texture2D.cpp
+    src/gldx/texture/TextureCubeMap.cpp
+    src/gldx/texture/RenderTexture.cpp
+    src/gldx/camera/Camera.cpp
+    src/gldx/camera/Frustum.cpp
+    src/gldx/texture/Texture2DArray.cpp
+    src/gldx/util/Noise.cpp
+    src/gldx/voxel/ChunkMesher.cpp
+    src/gldx/voxel/VoxelMeshGpu.cpp
+    src/gldx/render/ParticleBatch.cpp
+    src/gldx/scene/SceneNode.cpp
+    src/gldx/scene/Scene.cpp
+    src/gldx/render/Renderer.cpp
+    src/gldx/render/RenderPasses.cpp
+    src/gldx/render/Framebuffer.cpp
+    src/gldx/render/PostProcessChain.cpp
+    src/gldx/render/SkyboxRenderer.cpp
+    src/gldx/render/SpriteBatch.cpp
+    src/gldx/text/Font.cpp
+    src/gldx/light/EnvironmentMap.cpp
+    src/gldx/shadow/CascadedShadowMap.cpp
+    src/gldx/debug/DebugDraw.cpp
+    src/gldx/debug/Profiler.cpp
+    src/gldx/assets/ThreadPool.cpp
+    src/gldx/assets/AssetManager.cpp
+    src/gldx/assets/ModelLoader.cpp
+    src/gldx/assets/ImageLoader.cpp
+    src/gldx/third_party/stb_image_impl.cpp)   # plain (non-module) 3rd-party impl TU
 
-add_library(gfx STATIC ${GFX_SOURCES})
+add_library(gldx STATIC ${GLDX_SOURCES})
 
-target_sources(gfx PUBLIC FILE_SET CXX_MODULES FILES src/gfx/gfx.cppm)
+target_sources(gldx PUBLIC FILE_SET CXX_MODULES FILES src/gldx/gldx.cppm)
 
-target_include_directories(gfx PUBLIC
+target_include_directories(gldx PUBLIC
     ${CMAKE_SOURCE_DIR}/src
     ${GLM_INCLUDE_DIR})
 
-target_link_libraries(gfx PUBLIC
+target_link_libraries(gldx PUBLIC
     glfw
     ${GLAD_TARGET})
 
-target_link_libraries(gfx PRIVATE
+target_link_libraries(gldx PRIVATE
     stb)
-if(GFX_ENABLE_ASSIMP)
-    target_link_libraries(gfx PRIVATE
+if(GLDX_ENABLE_ASSIMP)
+    target_link_libraries(gldx PRIVATE
         assimp::assimp)
 else()
-    target_compile_definitions(gfx PRIVATE GFX_NO_ASSIMP)
+    target_compile_definitions(gldx PRIVATE GLDX_NO_ASSIMP)
 endif()
 
 # Per-compiler module tweaks. CMake >= 3.28 drives named-module compilation and
@@ -270,7 +270,7 @@ endif()
 #   * MSVC: /utf-8 so the embedded GLSL raw strings + any non-ASCII comments are
 #     read as UTF-8 regardless of the system code page.
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-    target_compile_options(gfx PRIVATE /utf-8)
+    target_compile_options(gldx PRIVATE /utf-8)
 endif()
 
 # ============================================================================
@@ -279,7 +279,7 @@ endif()
 # The applications only call GLFW (shared) and GLAD (static, loads GL at
 # runtime), so no direct OpenGL / X11 / Cocoa linking is required here — those
 # dependencies are carried transitively by the GLFW and GLAD targets, which the
-# gfx library now links PUBLIC. Each demo is a sole consumer of `import gfx;`.
+# gldx library now links PUBLIC. Each demo is a sole consumer of `import gldx;`.
 #
 #   GLFW_Template  the minimum-pipeline hello-triangle (src/main.cpp, this file)
 #   src/demo/*     the feature demos, one executable each, collected by the
@@ -291,7 +291,7 @@ endif()
 # stays at the top of the tree.
 add_executable(${TARGET_NAME} src/main.cpp)
 
-target_link_libraries(${TARGET_NAME} PRIVATE gfx)
+target_link_libraries(${TARGET_NAME} PRIVATE gldx)
 
 set_target_properties(${TARGET_NAME} PROPERTIES
     OUTPUT_NAME ${TARGET_NAME}

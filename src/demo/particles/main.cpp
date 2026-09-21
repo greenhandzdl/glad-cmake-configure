@@ -32,7 +32,7 @@ namespace {
 
 // A pass that owns the batch, spawns a steady fountain, integrates, and draws
 // straight at the default framebuffer (no post chain, no scene graph).
-class ParticlePass : public gfx::RenderPass {
+class ParticlePass : public gldx::RenderPass {
 public:
     ParticlePass() : RenderPass("Particles") {
         if (!batch_.Init()) {
@@ -42,7 +42,7 @@ public:
         ready_ = true;
     }
 
-    void Execute(gfx::RenderFrame& f) override {
+    void Execute(gldx::RenderFrame& f) override {
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, f.fbWidth, f.fbHeight);
         glClearColor(0.05f, 0.06f, 0.09f, 1.0f);
@@ -77,7 +77,7 @@ private:
         return lo + static_cast<float>(u) * (hi - lo);
     }
 
-    gfx::ParticleBatch batch_;
+    gldx::ParticleBatch batch_;
     bool ready_ = false;
     double lastDt_ = 0.0;
 };
@@ -97,15 +97,15 @@ int main(int argc, char** argv) {
     const demo::Flags flags(argc, argv, {}, {}, "particles");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
-    return demo::Run(flags, "gfx demo - particles (point-sprite fountain)",
+    return demo::Run(flags, "gldx demo - particles (point-sprite fountain)",
                      [&](demo::Ctx& ctx) -> int {
         auto pass = std::make_unique<ParticlePass>();
         ParticlePass* raw = pass.get();
         ctx.renderer.AddPass(std::move(pass));
 
-        gfx::Camera camera; camera.SetPerspective(50.0f, 1.0f, 0.1f, 100.0f);
+        gldx::Camera camera; camera.SetPerspective(50.0f, 1.0f, 0.1f, 100.0f);
 
-        return ctx.Loop([&](gfx::RenderFrame& f, const demo::FrameInfo& info) {
+        return ctx.Loop([&](gldx::RenderFrame& f, const demo::FrameInfo& info) {
             const glm::vec3 eye = orbitEye(static_cast<float>(info.time));
             camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
             camera.LookAt(eye, glm::vec3(0.0f, 1.2f, 0.0f), glm::vec3(0, 1, 0));

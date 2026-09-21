@@ -47,7 +47,7 @@ void OnButton(GLFWwindow* w, int b, int a, int) {
     }
 }
 
-struct Item { gfx::Mesh mesh; gfx::PbrMaterial material; };
+struct Item { gldx::Mesh mesh; gldx::PbrMaterial material; };
 
 } // namespace
 
@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     const demo::Flags flags(argc, argv, {"shadow"}, {"yaw", "pitch", "radius"}, "shadow_csm");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
-    return demo::Run(flags, "gfx demo - shadow_csm (cascaded directional shadows)",
+    return demo::Run(flags, "gldx demo - shadow_csm (cascaded directional shadows)",
                      [&](demo::Ctx& ctx) -> int {
         View view;
         view.yaw = flags.real("yaw", view.yaw);
@@ -66,48 +66,48 @@ int main(int argc, char** argv) {
         glfwSetCursorPosCallback(ctx.window, OnMouse);
         glfwSetMouseButtonCallback(ctx.window, OnButton);
 
-        ctx.renderer.AddPass(std::make_unique<gfx::ShadowPass>());
-        ctx.renderer.AddPass(std::make_unique<gfx::GeometryPass>());
+        ctx.renderer.AddPass(std::make_unique<gldx::ShadowPass>());
+        ctx.renderer.AddPass(std::make_unique<gldx::GeometryPass>());
 
-        auto pbr = gfx::ShaderProgram::CreateFromSource(gfx::shaders::kPbrVertex, gfx::shaders::kPbrFragment);
+        auto pbr = gldx::ShaderProgram::CreateFromSource(gldx::shaders::kPbrVertex, gldx::shaders::kPbrFragment);
         if (!pbr) { std::fprintf(stderr, "PBR shader: %s\n", pbr.error().c_str()); return 1; }
         pbr->Use();
-        pbr->Set("uShadowMap", static_cast<int>(gfx::texunit::shadowArray));
-        pbr->SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);
-        pbr->SetBlockBinding("ShadowBlock", gfx::CascadedShadowMap::kShadowBinding);
+        pbr->Set("uShadowMap", static_cast<int>(gldx::texunit::shadowArray));
+        pbr->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);
+        pbr->SetBlockBinding("ShadowBlock", gldx::CascadedShadowMap::kShadowBinding);
 
-        auto depth = gfx::ShaderProgram::CreateFromSource(gfx::shaders::kDepthVertex, gfx::shaders::kDepthFragment);
+        auto depth = gldx::ShaderProgram::CreateFromSource(gldx::shaders::kDepthVertex, gldx::shaders::kDepthFragment);
         if (!depth) { std::fprintf(stderr, "Depth shader: %s\n", depth.error().c_str()); return 1; }
 
-        gfx::LightBuffer lights; lights.Init();
-        gfx::CascadedShadowMap csm; csm.Init(2048);
-        gfx::Camera camera; camera.SetPerspective(45.0f, 1.0f, 0.1f, 100.0f);
+        gldx::LightBuffer lights; lights.Init();
+        gldx::CascadedShadowMap csm; csm.Init(2048);
+        gldx::Camera camera; camera.SetPerspective(45.0f, 1.0f, 0.1f, 100.0f);
 
         std::vector<std::unique_ptr<Item>> items;
-        gfx::Scene scene;
-        auto add = [&](gfx::MeshData data, const gfx::PbrMaterial& m, const gfx::Transform& t) {
+        gldx::Scene scene;
+        auto add = [&](gldx::MeshData data, const gldx::PbrMaterial& m, const gldx::Transform& t) {
             auto it = std::make_unique<Item>();
             it->material = m;
             glm::vec3 c; float r;
-            gfx::SceneNode::BoundsFromMeshData(data, c, r);
+            gldx::SceneNode::BoundsFromMeshData(data, c, r);
             it->mesh.Upload(std::move(data));
-            gfx::SceneNode& n = scene.CreateRoot(t);
+            gldx::SceneNode& n = scene.CreateRoot(t);
             n.SetRenderable(&it->mesh, &it->material);
             n.SetLocalBounds(c, r);
             items.push_back(std::move(it));
             return &n;
         };
-        { gfx::Transform t; t.scale = glm::vec3(24.0f, 1.0f, 24.0f);
-          gfx::PbrMaterial m; m.baseColor = glm::vec4(0.6f, 0.62f, 0.66f, 1.0f); m.roughness = 0.9f;
-          add(gfx::GeometryFactory::Plane(1.0f), m, t)->castsShadow = false; }   // receives, never casts
+        { gldx::Transform t; t.scale = glm::vec3(24.0f, 1.0f, 24.0f);
+          gldx::PbrMaterial m; m.baseColor = glm::vec4(0.6f, 0.62f, 0.66f, 1.0f); m.roughness = 0.9f;
+          add(gldx::GeometryFactory::Plane(1.0f), m, t)->castsShadow = false; }   // receives, never casts
         for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) {
-            gfx::Transform t; t.translation = glm::vec3(-2.4f + i * 2.4f, 0.7f, -2.4f + j * 2.4f);
-            gfx::PbrMaterial m; m.baseColor = glm::vec4(0.85f, 0.45f, 0.25f, 1.0f); m.roughness = 0.4f;
-            add(gfx::GeometryFactory::Sphere(0.7f, 32, 24), m, t);
+            gldx::Transform t; t.translation = glm::vec3(-2.4f + i * 2.4f, 0.7f, -2.4f + j * 2.4f);
+            gldx::PbrMaterial m; m.baseColor = glm::vec4(0.85f, 0.45f, 0.25f, 1.0f); m.roughness = 0.4f;
+            add(gldx::GeometryFactory::Sphere(0.7f, 32, 24), m, t);
         }
 
         static bool armed = true;
-        return ctx.Loop([&](gfx::RenderFrame& f, const demo::FrameInfo& info) {
+        return ctx.Loop([&](gldx::RenderFrame& f, const demo::FrameInfo& info) {
             if (bool p = glfwGetKey(info.window, GLFW_KEY_1) == GLFW_PRESS; p && armed) { view.shadow = !view.shadow; armed = false; }
             else if (!p) armed = true;
 
@@ -121,7 +121,7 @@ int main(int argc, char** argv) {
 
             const glm::vec3 towardSun = glm::normalize(glm::vec3(0.45f, 0.5f, 0.35f));   // low-ish sun => long shadows
 
-            gfx::LightSetup setup;
+            gldx::LightSetup setup;
             setup.sun.direction = -towardSun;
             setup.sun.color = glm::vec3(1.0f);
             setup.sun.intensity = 3.0f;

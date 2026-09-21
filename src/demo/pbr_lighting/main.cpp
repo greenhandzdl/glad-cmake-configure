@@ -52,8 +52,8 @@ void OnButton(GLFWwindow* w, int b, int a, int) {
 
 // Owns a GPU mesh + its CPU material for one node (addresses stay stable).
 struct Item {
-    gfx::Mesh mesh;
-    gfx::PbrMaterial material;
+    gldx::Mesh mesh;
+    gldx::PbrMaterial material;
 };
 
 } // namespace
@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
     const demo::Flags flags(argc, argv, {}, {"yaw", "pitch", "radius"}, "pbr_lighting");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
-    return demo::Run(flags, "gfx demo - pbr_lighting (camera + lights + PBR + scene)",
+    return demo::Run(flags, "gldx demo - pbr_lighting (camera + lights + PBR + scene)",
                      [&](demo::Ctx& ctx) -> int {
         View view;
         view.yaw = flags.real("yaw", view.yaw);
@@ -72,48 +72,48 @@ int main(int argc, char** argv) {
         glfwSetCursorPosCallback(ctx.window, OnMouse);
         glfwSetMouseButtonCallback(ctx.window, OnButton);
 
-        ctx.renderer.AddPass(std::make_unique<gfx::GeometryPass>());   // only the pass the scene needs
+        ctx.renderer.AddPass(std::make_unique<gldx::GeometryPass>());   // only the pass the scene needs
 
-        auto pbr = gfx::ShaderProgram::CreateFromSource(gfx::shaders::kPbrVertex, gfx::shaders::kPbrFragment);
+        auto pbr = gldx::ShaderProgram::CreateFromSource(gldx::shaders::kPbrVertex, gldx::shaders::kPbrFragment);
         if (!pbr) { std::fprintf(stderr, "PBR shader: %s\n", pbr.error().c_str()); return 1; }
         pbr->Use();
-        pbr->SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);
+        pbr->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);
 
-        gfx::LightBuffer lights;
+        gldx::LightBuffer lights;
         lights.Init();
 
-        gfx::Camera camera;
+        gldx::Camera camera;
         camera.SetPerspective(45.0f, 1.0f, 0.1f, 100.0f);
 
         std::vector<std::unique_ptr<Item>> items;
-        gfx::Scene scene;
-        auto add = [&](gfx::MeshData data, const gfx::PbrMaterial& m, const gfx::Transform& t) {
+        gldx::Scene scene;
+        auto add = [&](gldx::MeshData data, const gldx::PbrMaterial& m, const gldx::Transform& t) {
             auto it = std::make_unique<Item>();
             it->material = m;
             glm::vec3 c; float r;
-            gfx::SceneNode::BoundsFromMeshData(data, c, r);
+            gldx::SceneNode::BoundsFromMeshData(data, c, r);
             it->mesh.Upload(std::move(data));
-            gfx::SceneNode& n = scene.CreateRoot(t);
+            gldx::SceneNode& n = scene.CreateRoot(t);
             n.SetRenderable(&it->mesh, &it->material);
             n.SetLocalBounds(c, r);
             items.push_back(std::move(it));
         };
 
         {   // ground (never casts — no shadow subsystem here anyway).
-            gfx::Transform t; t.scale = glm::vec3(20.0f, 1.0f, 20.0f);
-            gfx::PbrMaterial m; m.baseColor = glm::vec4(0.55f, 0.56f, 0.6f, 1.0f); m.roughness = 0.9f;
-            add(gfx::GeometryFactory::Plane(1.0f), m, t);
+            gldx::Transform t; t.scale = glm::vec3(20.0f, 1.0f, 20.0f);
+            gldx::PbrMaterial m; m.baseColor = glm::vec4(0.55f, 0.56f, 0.6f, 1.0f); m.roughness = 0.9f;
+            add(gldx::GeometryFactory::Plane(1.0f), m, t);
         }
         for (int i = 0; i < 5; ++i) for (int j = 0; j < 5; ++j) {   // metal x roughness grid
-            gfx::Transform t; t.translation = glm::vec3(-3.0f + i * 1.5f, 0.5f, -3.0f + j * 1.5f);
-            gfx::PbrMaterial m;
+            gldx::Transform t; t.translation = glm::vec3(-3.0f + i * 1.5f, 0.5f, -3.0f + j * 1.5f);
+            gldx::PbrMaterial m;
             m.metallic = static_cast<float>(i) / 4.0f;
             m.roughness = 0.05f + 0.9f * static_cast<float>(j) / 4.0f;
             m.baseColor = glm::vec4(0.9f, 0.5f, 0.25f, 1.0f);
-            add(gfx::GeometryFactory::Sphere(0.5f, 32, 24), m, t);
+            add(gldx::GeometryFactory::Sphere(0.5f, 32, 24), m, t);
         }
 
-        return ctx.Loop([&](gfx::RenderFrame& f, const demo::FrameInfo& info) {
+        return ctx.Loop([&](gldx::RenderFrame& f, const demo::FrameInfo& info) {
             const glm::vec3 target(0.0f, 0.5f, 0.0f);
             const float cp = std::cos(view.pitch);
             const glm::vec3 eye(target.x + view.radius * cp * std::sin(view.yaw),
@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
             camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
             camera.LookAt(eye, target, glm::vec3(0, 1, 0));
 
-            gfx::LightSetup setup;
+            gldx::LightSetup setup;
             setup.sun.direction = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
             setup.sun.color = glm::vec3(1.0f);
             setup.sun.intensity = 3.0f;

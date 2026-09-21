@@ -5,7 +5,7 @@
  * @file demo_app.h
  * @brief Shared application-side scaffolding for the src/demo/{feature} demos.
  *
- * Deliberately *not* part of module gfx (same rationale as demo_cli.h): this is
+ * Deliberately *not* part of module gldx (same rationale as demo_cli.h): this is
  * executable plumbing, not an engine type. Every demo used to repeat the same
  * ~40 lines of `glfwInit -> context hints -> createWindow -> makeContextCurrent
  * -> gladLoad -> MarkAsRenderThread -> frame loop -> lambda-scoped teardown`,
@@ -25,7 +25,7 @@
 
 // Plain text includes (not module members): Platform.h orders <glad/gl.h> before
 // <GLFW/glfw3.h> and carries the window/title constants + GLFW_PLATFORM_* macros.
-#include "gfx/core/Platform.h"
+#include "gldx/core/Platform.h"
 
 #include <functional>
 #include <iostream>
@@ -33,9 +33,9 @@
 #include "demo/demo_cli.h"
 
 // The whole engine as a single C++20 named module. Importing here means each
-// demo TU gets gfx simply by including this header; a repeated `import gfx;`
+// demo TU gets gldx simply by including this header; a repeated `import gldx;`
 // in the demo itself would be a harmless no-op, so none is required.
-import gfx;
+import gldx;
 
 namespace demo {
 
@@ -54,7 +54,7 @@ struct FrameInfo {
 // only for the duration of the Run() call that created this Ctx.
 class Ctx {
 public:
-    Ctx(GLFWwindow* w, gfx::Renderer& r, const Flags& f) noexcept
+    Ctx(GLFWwindow* w, gldx::Renderer& r, const Flags& f) noexcept
         : window(w), renderer(r), flags(f) {}
 
     Ctx(const Ctx&)            = delete;
@@ -64,10 +64,10 @@ public:
     // iteration builds an empty RenderFrame (with fb size + fps pre-filled),
     // lets `draw` attach whatever subsystems the demo is showing, then runs the
     // renderer. Returns 0; the app callback propagates any real exit code.
-    int Loop(const std::function<void(gfx::RenderFrame&, const FrameInfo&)>& draw);
+    int Loop(const std::function<void(gldx::RenderFrame&, const FrameInfo&)>& draw);
 
     GLFWwindow*  window;
-    gfx::Renderer& renderer;
+    gldx::Renderer& renderer;
     const Flags& flags;
 };
 
@@ -87,7 +87,7 @@ inline int Run(const Flags& flags, const char* title, const std::function<int(Ct
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
-    GLFWwindow* window = glfwCreateWindow(gfx::kWindowWidth, gfx::kWindowHeight, title, nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(gldx::kWindowWidth, gldx::kWindowHeight, title, nullptr, nullptr);
     if (!window) {
         std::cerr << "Failed to create GLFW window (OpenGL 4.1 core?)\n";
         glfwTerminate();
@@ -103,12 +103,12 @@ inline int Run(const Flags& flags, const char* title, const std::function<int(Ct
         return 1;
     }
 
-    gfx::RenderContext::MarkAsRenderThread();
+    gldx::RenderContext::MarkAsRenderThread();
 
-    std::printf("%s %s\n", gfx::kAppName, gfx::kAppVersion);
+    std::printf("%s %s\n", gldx::kAppName, gldx::kAppVersion);
     std::printf("OpenGL %s\n", reinterpret_cast<const char*>(glGetString(GL_VERSION)));
 
-    gfx::Renderer renderer;
+    gldx::Renderer renderer;
     renderer.Init();   // global depth/cull state; demos then add or build passes
 
     Ctx ctx(window, renderer, flags);
@@ -119,7 +119,7 @@ inline int Run(const Flags& flags, const char* title, const std::function<int(Ct
     return rc;
 }
 
-inline int Ctx::Loop(const std::function<void(gfx::RenderFrame&, const FrameInfo&)>& draw) {
+inline int Ctx::Loop(const std::function<void(gldx::RenderFrame&, const FrameInfo&)>& draw) {
     const double startedAt = glfwGetTime();
     const double quitAfter = flags.quitAfter();
     double smoothedFps = 60.0;
@@ -150,7 +150,7 @@ inline int Ctx::Loop(const std::function<void(gfx::RenderFrame&, const FrameInfo
         int fbw = 0, fbh = 0;
         glfwGetFramebufferSize(window, &fbw, &fbh);
 
-        gfx::RenderFrame frame;
+        gldx::RenderFrame frame;
         frame.fbWidth = fbw;
         frame.fbHeight = fbh;
         frame.smoothedFps = smoothedFps;

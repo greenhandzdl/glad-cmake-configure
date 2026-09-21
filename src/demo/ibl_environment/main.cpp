@@ -46,7 +46,7 @@ void OnButton(GLFWwindow* w, int b, int a, int) {
         v->dragging = (a == GLFW_PRESS); glfwGetCursorPos(w, &v->lastX, &v->lastY);
     }
 }
-struct Item { gfx::Mesh mesh; gfx::PbrMaterial material; };
+struct Item { gldx::Mesh mesh; gldx::PbrMaterial material; };
 
 } // namespace
 
@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
     const demo::Flags flags(argc, argv, {"ibl"}, {"yaw", "pitch", "radius"}, "ibl_environment");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
-    return demo::Run(flags, "gfx demo - ibl_environment (sky-driven image-based lighting)",
+    return demo::Run(flags, "gldx demo - ibl_environment (sky-driven image-based lighting)",
                      [&](demo::Ctx& ctx) -> int {
         View view;
         view.yaw = flags.real("yaw", view.yaw);
@@ -65,53 +65,53 @@ int main(int argc, char** argv) {
         glfwSetCursorPosCallback(ctx.window, OnMouse);
         glfwSetMouseButtonCallback(ctx.window, OnButton);
 
-        ctx.renderer.AddPass(std::make_unique<gfx::GeometryPass>());
-        ctx.renderer.AddPass(std::make_unique<gfx::SkyboxPass>());
+        ctx.renderer.AddPass(std::make_unique<gldx::GeometryPass>());
+        ctx.renderer.AddPass(std::make_unique<gldx::SkyboxPass>());
 
-        auto pbr = gfx::ShaderProgram::CreateFromSource(gfx::shaders::kPbrVertex, gfx::shaders::kPbrFragment);
+        auto pbr = gldx::ShaderProgram::CreateFromSource(gldx::shaders::kPbrVertex, gldx::shaders::kPbrFragment);
         if (!pbr) { std::fprintf(stderr, "PBR shader: %s\n", pbr.error().c_str()); return 1; }
         pbr->Use();
-        pbr->Set("uIrradiance", static_cast<int>(gfx::texunit::irradiance));
-        pbr->Set("uPrefilter",  static_cast<int>(gfx::texunit::prefilter));
-        pbr->Set("uBrdfLut",    static_cast<int>(gfx::texunit::brdfLut));
-        pbr->SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);
+        pbr->Set("uIrradiance", static_cast<int>(gldx::texunit::irradiance));
+        pbr->Set("uPrefilter",  static_cast<int>(gldx::texunit::prefilter));
+        pbr->Set("uBrdfLut",    static_cast<int>(gldx::texunit::brdfLut));
+        pbr->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);
 
-        gfx::SkyboxRenderer skybox;
+        gldx::SkyboxRenderer skybox;
         if (!skybox.Init()) { std::fprintf(stderr, "Skybox init failed\n"); return 1; }
 
         const glm::vec3 towardSun = glm::normalize(glm::vec3(0.4f, 0.55f, 0.3f));
-        gfx::EnvironmentMap env;
+        gldx::EnvironmentMap env;
         if (!env.Generate(-towardSun, 256, 32, 256)) {   // Generate wants the travel direction
             std::fprintf(stderr, "Environment generation failed\n"); return 1;
         }
 
-        gfx::LightBuffer lights; lights.Init();
-        gfx::Camera camera; camera.SetPerspective(45.0f, 1.0f, 0.1f, 100.0f);
+        gldx::LightBuffer lights; lights.Init();
+        gldx::Camera camera; camera.SetPerspective(45.0f, 1.0f, 0.1f, 100.0f);
 
         std::vector<std::unique_ptr<Item>> items;
-        gfx::Scene scene;
-        auto add = [&](gfx::MeshData data, const gfx::PbrMaterial& m, const gfx::Transform& t) {
+        gldx::Scene scene;
+        auto add = [&](gldx::MeshData data, const gldx::PbrMaterial& m, const gldx::Transform& t) {
             auto it = std::make_unique<Item>(); it->material = m;
-            glm::vec3 c; float r; gfx::SceneNode::BoundsFromMeshData(data, c, r);
+            glm::vec3 c; float r; gldx::SceneNode::BoundsFromMeshData(data, c, r);
             it->mesh.Upload(std::move(data));
-            gfx::SceneNode& n = scene.CreateRoot(t);
+            gldx::SceneNode& n = scene.CreateRoot(t);
             n.SetRenderable(&it->mesh, &it->material); n.SetLocalBounds(c, r);
             items.push_back(std::move(it));
             return &n;
         };
-        { gfx::Transform t; t.scale = glm::vec3(18.0f, 1.0f, 18.0f);
-          gfx::PbrMaterial m; m.baseColor = glm::vec4(0.5f, 0.5f, 0.55f, 1.0f); m.roughness = 0.9f;
-          add(gfx::GeometryFactory::Plane(1.0f), m, t)->castsShadow = false; }
+        { gldx::Transform t; t.scale = glm::vec3(18.0f, 1.0f, 18.0f);
+          gldx::PbrMaterial m; m.baseColor = glm::vec4(0.5f, 0.5f, 0.55f, 1.0f); m.roughness = 0.9f;
+          add(gldx::GeometryFactory::Plane(1.0f), m, t)->castsShadow = false; }
         for (int i = 0; i < 4; ++i) for (int j = 0; j < 4; ++j) {   // roughness rises across the row
-            gfx::Transform t; t.translation = glm::vec3(-2.4f + i * 1.6f, 0.55f, -2.4f + j * 1.6f);
-            gfx::PbrMaterial m; m.metallic = 1.0f;
+            gldx::Transform t; t.translation = glm::vec3(-2.4f + i * 1.6f, 0.55f, -2.4f + j * 1.6f);
+            gldx::PbrMaterial m; m.metallic = 1.0f;
             m.roughness = 0.05f + 0.9f * static_cast<float>(j) / 3.0f;
             m.baseColor = glm::vec4(0.9f, 0.85f, 0.8f, 1.0f);
-            add(gfx::GeometryFactory::Sphere(0.55f, 40, 28), m, t);
+            add(gldx::GeometryFactory::Sphere(0.55f, 40, 28), m, t);
         }
 
         static bool armed = true;
-        return ctx.Loop([&](gfx::RenderFrame& f, const demo::FrameInfo& info) {
+        return ctx.Loop([&](gldx::RenderFrame& f, const demo::FrameInfo& info) {
             if (bool p = glfwGetKey(info.window, GLFW_KEY_2) == GLFW_PRESS; p && armed) { view.ibl = !view.ibl; armed = false; }
             else if (!p) armed = true;
 
@@ -123,7 +123,7 @@ int main(int argc, char** argv) {
             camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
             camera.LookAt(eye, target, glm::vec3(0, 1, 0));
 
-            gfx::LightSetup setup;
+            gldx::LightSetup setup;
             setup.sun.direction = -towardSun;
             setup.sun.color = glm::vec3(1.0f);
             setup.sun.intensity = 0.6f;   // sun kept weak so IBL dominates when on

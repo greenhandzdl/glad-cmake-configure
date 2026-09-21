@@ -4,12 +4,12 @@
  *
  * This is the bare geometry pipeline with no lighting model, no material system
  * and no scene graph: the four CPU-only primitives GeometryFactory hands back
- * (Cube / Sphere / Plane / Quad, each a MeshData of gfx::Vertex + indices, built
+ * (Cube / Sphere / Plane / Quad, each a MeshData of gldx::Vertex + indices, built
  * freely on any thread = Stage A) are shipped to the GPU by Mesh::Upload on the
  * render thread (Stage B, which builds the VAO over an interleaved VBO + an EBO),
  * then drawn with a tiny inline unlit-but-shaded program.
  *
- * The vertex layout the VAO encodes is fixed by gfx::Vertex (ShaderLib and the
+ * The vertex layout the VAO encodes is fixed by gldx::Vertex (ShaderLib and the
  * PBR/instanced shaders all agree on it): location 0 position, 1 normal, 2 uv,
  * 3 tangent, 4 colour. This demo's own GLSL only consumes 0 + 1 (a fixed half-
  * lambert term so the facets read), but every attribute is present in the buffer
@@ -60,38 +60,38 @@ void main() {
 )GLSL";
 
 struct Shape {
-    gfx::Mesh mesh;
+    gldx::Mesh mesh;
     glm::mat4 model{1.0f};
     glm::vec3 color{1.0f};
 };
 
-class UploadPass : public gfx::RenderPass {
+class UploadPass : public gldx::RenderPass {
 public:
     UploadPass() : RenderPass("Upload") {
-        auto p = gfx::ShaderProgram::CreateFromSource(kVertex, kFragment);
+        auto p = gldx::ShaderProgram::CreateFromSource(kVertex, kFragment);
         if (!p) {
             std::fprintf(stderr, "unlit shader: %s\n", p.error().c_str());
             return;
         }
-        program_ = std::make_unique<gfx::ShaderProgram>(std::move(*p));
+        program_ = std::make_unique<gldx::ShaderProgram>(std::move(*p));
 
         // Stage A (CPU MeshData) -> Stage B (upload) for each primitive.
-        add(gfx::GeometryFactory::Cube(1.4f),
+        add(gldx::GeometryFactory::Cube(1.4f),
             glm::translate(glm::mat4(1.0f), glm::vec3(-3.0f, 0.8f, 0.0f)),
             {0.85f, 0.35f, 0.30f});
-        add(gfx::GeometryFactory::Sphere(1.0f, 48, 32),
+        add(gldx::GeometryFactory::Sphere(1.0f, 48, 32),
             glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 1.0f, 0.0f)),
             {0.30f, 0.65f, 0.90f});
-        add(gfx::GeometryFactory::Quad(1.6f, 1.6f),
+        add(gldx::GeometryFactory::Quad(1.6f, 1.6f),
             glm::rotate(glm::translate(glm::mat4(1.0f), glm::vec3(3.0f, 1.0f, 0.0f)),
                         0.4f, glm::vec3(0, 1, 0)),
             {0.95f, 0.75f, 0.25f});
-        add(gfx::GeometryFactory::Plane(4.0f),
+        add(gldx::GeometryFactory::Plane(4.0f),
             glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.5f, 0.0f)),
             {0.45f, 0.5f, 0.55f});
     }
 
-    void Execute(gfx::RenderFrame& f) override {
+    void Execute(gldx::RenderFrame& f) override {
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, f.fbWidth, f.fbHeight);
         glClearColor(0.11f, 0.12f, 0.15f, 1.0f);
@@ -108,7 +108,7 @@ public:
     }
 
 private:
-    void add(gfx::MeshData data, const glm::mat4& model, const glm::vec3& color) {
+    void add(gldx::MeshData data, const glm::mat4& model, const glm::vec3& color) {
         Shape s;
         s.model = model;
         s.color = color;
@@ -116,7 +116,7 @@ private:
         shapes_.push_back(std::move(s));
     }
 
-    std::unique_ptr<gfx::ShaderProgram> program_;
+    std::unique_ptr<gldx::ShaderProgram> program_;
     std::vector<Shape> shapes_;
 };
 
@@ -145,7 +145,7 @@ int main(int argc, char** argv) {
     const demo::Flags flags(argc, argv, {}, {"yaw", "pitch", "radius"}, "geometry_upload");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
-    return demo::Run(flags, "gfx demo - geometry_upload (MeshData -> Mesh -> draw)",
+    return demo::Run(flags, "gldx demo - geometry_upload (MeshData -> Mesh -> draw)",
                      [&](demo::Ctx& ctx) -> int {
         View view;
         view.yaw = flags.real("yaw", view.yaw);
@@ -157,9 +157,9 @@ int main(int argc, char** argv) {
 
         ctx.renderer.AddPass(std::make_unique<UploadPass>());
 
-        gfx::Camera camera; camera.SetPerspective(50.0f, 1.0f, 0.1f, 100.0f);
+        gldx::Camera camera; camera.SetPerspective(50.0f, 1.0f, 0.1f, 100.0f);
 
-        return ctx.Loop([&](gfx::RenderFrame& f, const demo::FrameInfo& info) {
+        return ctx.Loop([&](gldx::RenderFrame& f, const demo::FrameInfo& info) {
             const glm::vec3 target(0.0f, 0.6f, 0.0f);
             const float cp = std::cos(view.pitch);
             const glm::vec3 eye(target.x + view.radius * cp * std::sin(view.yaw),

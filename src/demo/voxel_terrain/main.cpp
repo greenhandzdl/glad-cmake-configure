@@ -1,8 +1,8 @@
 /**
  * @file voxel_main.cpp
- * @brief voxel_demo — the playable acceptance test for gfx's voxel primitives.
+ * @brief voxel_demo — the playable acceptance test for gldx's voxel primitives.
  *
- * Everything engine-side lives in module gfx (chunks, the mesher, the texture
+ * Everything engine-side lives in module gldx (chunks, the mesher, the texture
  * array, the voxel passes, the DDA raycast, noise, particles, fog). What is
  * *game* side — the chunk grid, the streaming policy, the terrain generator,
  * the block editing rules and the HUD — is built here, on top of the library,
@@ -52,9 +52,9 @@
  * main.cpp for the engine's other showcase.
  */
 
-// Platform.h stays a plain text include (not part of module gfx): it orders
+// Platform.h stays a plain text include (not part of module gldx): it orders
 // <glad/gl.h> before <GLFW/glfw3.h> and carries the window constants.
-#include "gfx/core/Platform.h"
+#include "gldx/core/Platform.h"
 
 #include <algorithm>
 #include <array>
@@ -79,7 +79,7 @@
 #include "demo/demo_cli.h"
 
 // The whole engine as a single C++20 named module.
-import gfx;
+import gldx;
 
 namespace {
 
@@ -89,7 +89,7 @@ namespace {
 constexpr int kGridX = 32;
 constexpr int kGridY = 8;
 constexpr int kGridZ = 32;
-constexpr int kChunk = gfx::kChunkSize;                       // 16
+constexpr int kChunk = gldx::kChunkSize;                       // 16
 constexpr int kWorldX = kGridX * kChunk;                      // 512
 constexpr int kWorldY = kGridY * kChunk;                      // 128
 constexpr int kWorldZ = kGridZ * kChunk;                      // 512
@@ -119,11 +119,11 @@ inline std::uint32_t Hash2(int x, int z) {
 // sea level (30) carves real coastlines: about a third of the map ends up
 // underwater, the rest is grass plain, and the ridge term alone reaches the
 // snow line.
-int TerrainHeight(const gfx::Noise& noise, int wx, int wz) {
+int TerrainHeight(const gldx::Noise& noise, int wx, int wz) {
     const double base   = noise.Fbm2(wx / 96.0,  wz / 96.0,  4);   // rolling hills
     const double detail = noise.Fbm2(wx / 24.0,  wz / 24.0,  3);   // bumps
     const double mask   = noise.Fbm2(wx / 240.0, wz / 240.0, 2);   // where mountains sit
-    double h = 24.0 + 26.0 * gfx::Noise::ToUnit(base) + 6.0 * detail;
+    double h = 24.0 + 26.0 * gldx::Noise::ToUnit(base) + 6.0 * detail;
     const double lift = std::max(0.0, mask - 0.15);
     h += 150.0 * lift * lift;        // steep, rare ridges
     return static_cast<int>(std::clamp(h, 3.0, static_cast<double>(kWorldY - 12)));
@@ -131,7 +131,7 @@ int TerrainHeight(const gfx::Noise& noise, int wx, int wz) {
 
 bool TreeAnchor(int wx, int wz) { return Hash2(wx, wz) % 977u < 5u; }
 
-using Block = gfx::BlockRegistry;   // home of the built-in block ids
+using Block = gldx::BlockRegistry;   // home of the built-in block ids
 using BlockId = std::uint16_t;
 
 // Top material of a column: beaches near the water line, snow on the peaks.
@@ -169,10 +169,10 @@ glm::vec3 ToLinear(const glm::vec3& srgb) {
 // One 16x16 slice per block type (texLayer 1..8; slice 0 stays unused because
 // id 0 is air). Layer isolation is the whole reason for the array: no bleed,
 // free per-slice mipmapping, and the mesher only carries a layer float.
-gfx::Texture2DArrayDesc MakeBlockAtlasDesc() {
+gldx::Texture2DArrayDesc MakeBlockAtlasDesc() {
     constexpr int kTile = 16;
     constexpr int kLayers = 9;
-    gfx::Texture2DArrayDesc d;
+    gldx::Texture2DArrayDesc d;
     d.width = d.height = kTile;
     d.layers = kLayers;
     d.channels = 4;
@@ -235,13 +235,13 @@ struct ChunkState {
     std::uint8_t phase = kEmpty;
 };
 
-struct World final : gfx::IVoxelSource {
-    std::vector<std::unique_ptr<gfx::Chunk>> cpu;   // filled lazily
-    std::vector<gfx::VoxelChunkGpu> gpu;            // one record per grid cell
+struct World final : gldx::IVoxelSource {
+    std::vector<std::unique_ptr<gldx::Chunk>> cpu;   // filled lazily
+    std::vector<gldx::VoxelChunkGpu> gpu;            // one record per grid cell
     std::vector<ChunkState> state;
-    const gfx::BlockRegistry blocks;
-    const gfx::ChunkMesher mesher{blocks};
-    const gfx::Noise noise{0x5EED1u};
+    const gldx::BlockRegistry blocks;
+    const gldx::ChunkMesher mesher{blocks};
+    const gldx::Noise noise{0x5EED1u};
     mutable std::shared_mutex mx;                   // guards cpu block data
 
     World()
@@ -254,12 +254,12 @@ struct World final : gfx::IVoxelSource {
         return cx >= 0 && cy >= 0 && cz >= 0 && cx < kGridX && cy < kGridY && cz < kGridZ;
     }
 
-    // gfx::IVoxelSource. Callers hold at least a shared lock (the meshing jobs
+    // gldx::IVoxelSource. Callers hold at least a shared lock (the meshing jobs
     // take one for their whole Build, so nested Sample calls never re-lock).
     std::uint16_t Sample(glm::ivec3 c) const override {
         if (c.x < 0 || c.y < 0 || c.z < 0 || c.x >= kWorldX || c.y >= kWorldY || c.z >= kWorldZ)
             return 0;
-        const gfx::Chunk* ch = cpu[Index(c.x / kChunk, c.y / kChunk, c.z / kChunk)].get();
+        const gldx::Chunk* ch = cpu[Index(c.x / kChunk, c.y / kChunk, c.z / kChunk)].get();
         return ch ? ch->Get(c.x & (kChunk - 1), c.y & (kChunk - 1), c.z & (kChunk - 1)) : 0;
     }
 
@@ -332,7 +332,7 @@ struct World final : gfx::IVoxelSource {
             || cell.x >= kWorldX || cell.y >= kWorldY || cell.z >= kWorldZ) return false;
         const int cx = cell.x / kChunk, cy = cell.y / kChunk, cz = cell.z / kChunk;
         std::unique_lock<std::shared_mutex> lk(mx);
-        gfx::Chunk* ch = cpu[Index(cx, cy, cz)].get();
+        gldx::Chunk* ch = cpu[Index(cx, cy, cz)].get();
         if (!ch) return false;
         ch->Set(cell.x & (kChunk - 1), cell.y & (kChunk - 1), cell.z & (kChunk - 1), id);
         return true;
@@ -422,7 +422,7 @@ private:
 // instead of requiring cross-chunk writes. Returns false for a chunk that came
 // out completely empty, which is how the streaming loop turns a false keep from
 // the cheap pre-filter into a kVoid cell.
-bool GenerateChunk(gfx::Chunk& ch, const World& world) {
+bool GenerateChunk(gldx::Chunk& ch, const World& world) {
     const glm::ivec3 o = ch.origin();
 
     for (int lz = 0; lz < kChunk; ++lz) {
@@ -585,23 +585,23 @@ void ScrollCallback(GLFWwindow* win, double, double dy) {
 // The HUD pass: reuses the engine's sprite + text renderers, then closes the
 // frame in the profiler. Demo-owned on purpose - the library's DebugHudPass
 // prints the PBR demo's scene-graph counters, which say nothing here.
-class VoxelHudPass final : public gfx::RenderPass {
+class VoxelHudPass final : public gldx::RenderPass {
 public:
-    VoxelHudPass() : gfx::RenderPass("VoxelHud") {}
+    VoxelHudPass() : gldx::RenderPass("VoxelHud") {}
 
-    void Execute(gfx::RenderFrame& f) override;
+    void Execute(gldx::RenderFrame& f) override;
 
     std::string text;
     bool crosshair = false;
 };
 
-void VoxelHudPass::Execute(gfx::RenderFrame& f) {
-    gfx::RenderContext::AssertRenderThread("VoxelHudPass::Execute");
+void VoxelHudPass::Execute(gldx::RenderFrame& f) {
+    gldx::RenderContext::AssertRenderThread("VoxelHudPass::Execute");
     if (f.overlay.sprite && f.overlay.font && f.overlay.white) {
         f.overlay.sprite->Begin(*f.overlay.white, f.fbWidth, f.fbHeight);
         f.overlay.sprite->Draw(*f.overlay.white, 0.0f, 0.0f, 560.0f, 116.0f, 0.0f, 0.0f, 1.0f, 1.0f,
                        glm::vec4(0.0f, 0.0f, 0.0f, 0.35f));
-        gfx::TextRenderer::Draw(*f.overlay.sprite, *f.overlay.font, text, 12.0f, 8.0f, 20.0f,
+        gldx::TextRenderer::Draw(*f.overlay.sprite, *f.overlay.font, text, 12.0f, 8.0f, 20.0f,
                                 glm::vec4(1.0f));
         if (crosshair) {
             const float cx = f.fbWidth * 0.5f, cy = f.fbHeight * 0.5f;
@@ -639,8 +639,8 @@ int main(int argc, char** argv) {
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
-    GLFWwindow* window = glfwCreateWindow(gfx::kWindowWidth, gfx::kWindowHeight,
-                                          "gfx::Renderer - voxel playground",
+    GLFWwindow* window = glfwCreateWindow(gldx::kWindowWidth, gldx::kWindowHeight,
+                                          "gldx::Renderer - voxel playground",
                                           nullptr, nullptr);
     if (!window) {
         std::cerr << "Failed to create GLFW window (OpenGL 4.1 core?)\n";
@@ -657,8 +657,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    gfx::RenderContext::MarkAsRenderThread();
-    std::printf("voxel_demo %s\n", gfx::kAppVersion);
+    gldx::RenderContext::MarkAsRenderThread();
+    std::printf("voxel_demo %s\n", gldx::kAppVersion);
     std::printf("OpenGL %s\n", reinterpret_cast<const char*>(glGetString(GL_VERSION)));
 
     Input input;
@@ -684,39 +684,39 @@ int main(int argc, char** argv) {
     // lambda so destructors run while the context is current.
     auto runDemo = [&]() -> int {
         // ---- engine objects -------------------------------------------------
-        gfx::Renderer renderer;
+        gldx::Renderer renderer;
         renderer.Init();
         // No BuildPbrPipeline(): the voxel demo swaps GeometryPass for the
         // voxel pair, adds the standalone sky stage between opaque and
         // transparent (where the inline sky used to sit), and brings its own HUD.
-        auto opaquePass = std::make_unique<gfx::VoxelOpaquePass>();
-        auto transpPass = std::make_unique<gfx::VoxelTransparentPass>();
+        auto opaquePass = std::make_unique<gldx::VoxelOpaquePass>();
+        auto transpPass = std::make_unique<gldx::VoxelTransparentPass>();
         auto hudPass = std::make_unique<VoxelHudPass>();
-        gfx::VoxelOpaquePass* opaqueRaw = opaquePass.get();
-        gfx::VoxelTransparentPass* transpRaw = transpPass.get();
+        gldx::VoxelOpaquePass* opaqueRaw = opaquePass.get();
+        gldx::VoxelTransparentPass* transpRaw = transpPass.get();
         VoxelHudPass* hudRaw = hudPass.get();
 
         renderer.AddPass(std::move(opaquePass));
-        renderer.AddPass(std::make_unique<gfx::SkyboxPass>());
+        renderer.AddPass(std::make_unique<gldx::SkyboxPass>());
         renderer.AddPass(std::move(transpPass));
-        renderer.AddPass(std::make_unique<gfx::PostProcessPass>());
+        renderer.AddPass(std::make_unique<gldx::PostProcessPass>());
         renderer.AddPass(std::move(hudPass));
 
-        auto voxelProg = gfx::ShaderProgram::CreateFromSource(gfx::shaders::kVoxelVertex,
-                                                             gfx::shaders::kVoxelFragment);
+        auto voxelProg = gldx::ShaderProgram::CreateFromSource(gldx::shaders::kVoxelVertex,
+                                                             gldx::shaders::kVoxelFragment);
         if (!voxelProg) {
             std::fprintf(stderr, "Voxel shader error:\n%s\n", voxelProg.error().c_str());
             return 1;
         }
         voxelProg->Use();
-        voxelProg->SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);
+        voxelProg->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);
         // Sampler-unit uniforms persist on the program object.
-        voxelProg->Set("uAtlas", static_cast<int>(gfx::texunit::voxelAtlas));
+        voxelProg->Set("uAtlas", static_cast<int>(gldx::texunit::voxelAtlas));
 
-        gfx::Texture2DArray atlas;
+        gldx::Texture2DArray atlas;
         atlas.Upload(MakeBlockAtlasDesc());
 
-        gfx::SkyboxRenderer skybox;
+        gldx::SkyboxRenderer skybox;
         if (!skybox.Init()) {
             std::fprintf(stderr, "Skybox init failed\n");
             return 1;
@@ -726,32 +726,32 @@ int main(int argc, char** argv) {
         // disc in the sky - regenerating the cube per frame would cost more than
         // the feature is worth in a demo.
         const glm::vec3 initialTravel = -SunToward(input);
-        gfx::EnvironmentMap env;
+        gldx::EnvironmentMap env;
         if (!env.Generate(initialTravel, 256, 32, 256)) {
             std::fprintf(stderr, "Environment generation failed\n");
             return 1;
         }
 
-        gfx::PostProcessChain post;
+        gldx::PostProcessChain post;
         if (!post.Init()) {
             std::fprintf(stderr, "PostProcessChain init failed\n");
             return 1;
         }
         post.SetExposure(1.15f);
 
-        gfx::SpriteBatch sprite;
+        gldx::SpriteBatch sprite;
         if (!sprite.Init()) {
             std::fprintf(stderr, "SpriteBatch init failed\n");
             return 1;
         }
-        gfx::Font font;
+        gldx::Font font;
         for (const char* candidate : kFontCandidates) {
             if (font.LoadFromFile(candidate, 48.0f)) break;
         }
         if (!font.loaded()) std::fprintf(stderr, "HUD font not found; text overlay disabled\n");
-        gfx::Texture2D white;
+        gldx::Texture2D white;
         white.Upload([]() {
-            gfx::Texture2DDesc d;
+            gldx::Texture2DDesc d;
             d.width = d.height = 1;
             d.channels = 4;
             d.srgb = false;
@@ -759,16 +759,16 @@ int main(int argc, char** argv) {
             return d;
         }());
 
-        gfx::ParticleBatch particles;
+        gldx::ParticleBatch particles;
         if (!particles.Init()) std::fprintf(stderr, "ParticleBatch init failed\n");
 
-        gfx::Profiler profiler;
+        gldx::Profiler profiler;
         profiler.Init();
 
-        gfx::LightBuffer lightBuffer;
+        gldx::LightBuffer lightBuffer;
         lightBuffer.Init();
 
-        gfx::Camera camera;
+        gldx::Camera camera;
         camera.SetPerspective(60.0f, 1.0f, 0.1f, 400.0f);
         // --on ortho gives the camera the one kick the Tab key would have; the
         // camera stays the projection authority and input.ortho mirrors it.
@@ -800,7 +800,7 @@ int main(int argc, char** argv) {
             camera.Translate(input.focus - camera.Position());
         }
 
-        gfx::VoxelPipeline vx;
+        gldx::VoxelPipeline vx;
         vx.prog = &*voxelProg;
         vx.atlas = &atlas;
         vx.chunks = &world.gpu;
@@ -812,10 +812,10 @@ int main(int argc, char** argv) {
         opaqueRaw->SetPipeline(vx);
         transpRaw->SetPipeline(vx);
 
-        gfx::ThreadPool pool(4);
-        using GenResult = std::pair<std::unique_ptr<gfx::Chunk>, bool>;
+        gldx::ThreadPool pool(4);
+        using GenResult = std::pair<std::unique_ptr<gldx::Chunk>, bool>;
         struct GenJob { int idx; std::future<GenResult> fut; };
-        struct MeshJob { int idx; std::future<gfx::VoxelChunkMesh> fut; };
+        struct MeshJob { int idx; std::future<gldx::VoxelChunkMesh> fut; };
         std::deque<GenJob> genPending;
         std::deque<MeshJob> meshPending;
         std::vector<std::pair<int, glm::ivec3>> candidates;   // scratch
@@ -835,14 +835,14 @@ int main(int argc, char** argv) {
             }
             world.state[idx].phase = kMeshing;
             try {
-                auto fut = pool.enqueue([idx, &world]() -> gfx::VoxelChunkMesh {
+                auto fut = pool.enqueue([idx, &world]() -> gldx::VoxelChunkMesh {
                     std::shared_lock<std::shared_mutex> lk(world.mx);
-                    const gfx::Chunk& ch = *world.cpu[idx];
+                    const gldx::Chunk& ch = *world.cpu[idx];
                     // Private 8 KB snapshot of the cells, taken under the lock:
                     // the mesher never sees a torn view of a concurrent edit.
                     const std::array<std::uint16_t,
-                                     static_cast<std::size_t>(gfx::kChunkSize)
-                                         * gfx::kChunkSize * gfx::kChunkSize> cells = ch.blocks();
+                                     static_cast<std::size_t>(gldx::kChunkSize)
+                                         * gldx::kChunkSize * gldx::kChunkSize> cells = ch.blocks();
                     return world.mesher.Build(cells.data(), ch.origin(), world);
                 });
                 meshPending.push_back({idx, std::move(fut)});
@@ -855,7 +855,7 @@ int main(int argc, char** argv) {
             world.state[idx].phase = kGenerating;
             try {
                 auto fut = pool.enqueue([g, &world]() -> GenResult {
-                    auto ch = std::make_unique<gfx::Chunk>(g * kChunk);
+                    auto ch = std::make_unique<gldx::Chunk>(g * kChunk);
                     const bool any = GenerateChunk(*ch, world);
                     return {std::move(ch), any};
                 });
@@ -914,7 +914,7 @@ int main(int argc, char** argv) {
                     }
                 } else if (phase == kReady) {
                     std::shared_lock<std::shared_mutex> lk(world.mx);
-                    const gfx::Chunk* ch = world.cpu[idx].get();
+                    const gldx::Chunk* ch = world.cpu[idx].get();
                     const bool dirty = ch && ch->dirty();
                     lk.unlock();
                     if (dirty && meshPending.size() < kMaxMeshInFlight) submitMesh(idx);
@@ -930,7 +930,7 @@ int main(int argc, char** argv) {
                 }
                 const int idx = it->idx;
                 GenResult result = it->fut.get();
-                std::unique_ptr<gfx::Chunk> ch = std::move(result.first);
+                std::unique_ptr<gldx::Chunk> ch = std::move(result.first);
                 const glm::ivec3 g = ch->origin() / kChunk;
                 if (!result.second) {
                     // Pure air after all: cache the verdict instead of the
@@ -967,10 +967,10 @@ int main(int argc, char** argv) {
                     continue;
                 }
                 const int idx = it->idx;
-                gfx::VoxelChunkMesh mesh = it->fut.get();
+                gldx::VoxelChunkMesh mesh = it->fut.get();
                 ++uploads;
-                gfx::Chunk& ch = *world.cpu[idx];
-                gfx::VoxelChunkGpu& rec = world.gpu[idx];
+                gldx::Chunk& ch = *world.cpu[idx];
+                gldx::VoxelChunkGpu& rec = world.gpu[idx];
                 const glm::ivec3 g = ch.origin() / kChunk;
 
                 // A live opaque VAO is also the record's "built" flag: the
@@ -981,7 +981,7 @@ int main(int argc, char** argv) {
                     rec.origin = g * kChunk;
                     rec.model = glm::translate(glm::mat4(1.0f), glm::vec3(rec.origin));
                     rec.center = glm::vec3(rec.origin) + glm::vec3(kChunk * 0.5f);
-                    rec.radius = gfx::Chunk::circumRadius();
+                    rec.radius = gldx::Chunk::circumRadius();
                     rec.opaque.Upload(std::move(mesh.opaque));
                 }
                 // Water is optional per chunk. An empty mesh leaves the buffer
@@ -1092,7 +1092,7 @@ int main(int argc, char** argv) {
                 // The camera owns the projection state; the demo only mirrors
                 // the result here for the HUD line.
                 input.ortho = camera.ToggleProjection()
-                              == gfx::Camera::Projection::Orthographic;
+                              == gldx::Camera::Projection::Orthographic;
             }
             if (edge(glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS, bsArmed))
                 input.doubleSided = !input.doubleSided;
@@ -1182,7 +1182,7 @@ int main(int argc, char** argv) {
                 // feet, so terrain under the player is what stops the descent (a
                 // real floor) rather than the old sea-level teleport that made
                 // the camera refuse to go down below the water line.
-                const gfx::VoxelBody playerBody{0.3f, 1.9f};
+                const gldx::VoxelBody playerBody{0.3f, 1.9f};
                 glm::vec3 feet = camera.Position();
                 feet.y -= kEyeHeight;
                 // Sub-step so one resolve never advances the body past half a
@@ -1194,7 +1194,7 @@ int main(int argc, char** argv) {
                 {
                     std::shared_lock<std::shared_mutex> lk(world.mx);
                     for (int s = 0; s < segs; ++s)
-                        gfx::MoveVoxelAabb(feet, playerBody, seg,
+                        gldx::MoveVoxelAabb(feet, playerBody, seg,
                                            [&world](glm::ivec3 c) { return world.Pickable(c); });
                 }
                 feet.y += kEyeHeight;
@@ -1234,12 +1234,12 @@ int main(int argc, char** argv) {
                 }
             }
             if (input.wantBreak || input.wantPlace) {
-                const gfx::Ray ray = gfx::PickRay(fbw * 0.5f, fbh * 0.5f, fbw, fbh,
+                const gldx::Ray ray = gldx::PickRay(fbw * 0.5f, fbh * 0.5f, fbw, fbh,
                                                   camera.InverseViewProjection());
-                std::optional<gfx::VoxelHit> hit;
+                std::optional<gldx::VoxelHit> hit;
                 {
                     std::shared_lock<std::shared_mutex> lk(world.mx);
-                    hit = gfx::RaycastVoxel(
+                    hit = gldx::RaycastVoxel(
                         ray, glm::ivec3{0, 0, 0},
                         glm::ivec3{kWorldX - 1, kWorldY - 1, kWorldZ - 1},
                         [&world](glm::ivec3 c) { return world.Pickable(c); }, kReach);
@@ -1303,7 +1303,7 @@ int main(int argc, char** argv) {
 
             // ---- lighting + fog ---------------------------------------------
             const glm::vec3 towardSun = SunToward(input);
-            gfx::LightSetup setup;
+            gldx::LightSetup setup;
             setup.sun.direction = -towardSun;
             setup.sun.color = glm::vec3(1.0f, 0.96f, 0.88f);
             setup.sun.intensity = 2.2f;
@@ -1319,7 +1319,7 @@ int main(int argc, char** argv) {
             lightBuffer.Update(setup, camera.Position());
 
             const glm::mat4 viewProj = camera.ViewProjection();
-            gfx::Frustum frustum;
+            gldx::Frustum frustum;
             frustum.Extract(viewProj);
 
             vx.time = static_cast<float>(elapsed);
@@ -1332,7 +1332,7 @@ int main(int argc, char** argv) {
                           "streaming gen %zu mesh %zu   particles %zu   visible %d/%d\n"
                           "picked: %s   (WASD fly, space/ctrl up/down, shift slow, LMB break, RMB place)\n"
                           "F camera %s   ESC pointer %s   P particles %s   B 2-sided %s   [ ] - = sun   X quit",
-                          gfx::kAppVersion,
+                          gldx::kAppVersion,
                           input.cam == Input::Cam::Fly ? "FLY" : "ORBIT",
                           smoothedFps,
                           profiler.CpuMs(), profiler.GpuMs(),
@@ -1348,7 +1348,7 @@ int main(int argc, char** argv) {
             hudRaw->text = line;
             hudRaw->crosshair = (input.cam == Input::Cam::Fly);
 
-            gfx::RenderFrame frame;
+            gldx::RenderFrame frame;
             frame.camera = &camera;
             frame.frustum = &frustum;
             frame.viewProj = viewProj;

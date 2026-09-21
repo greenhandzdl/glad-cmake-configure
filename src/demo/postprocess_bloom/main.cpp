@@ -46,7 +46,7 @@ void OnButton(GLFWwindow* w, int b, int a, int) {
         v->dragging = (a == GLFW_PRESS); glfwGetCursorPos(w, &v->lastX, &v->lastY);
     }
 }
-struct Item { gfx::Mesh mesh; gfx::PbrMaterial material; };
+struct Item { gldx::Mesh mesh; gldx::PbrMaterial material; };
 
 } // namespace
 
@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
     const demo::Flags flags(argc, argv, {"bloom"}, {"yaw", "pitch", "radius"}, "postprocess_bloom");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
-    return demo::Run(flags, "gfx demo - postprocess_bloom (HDR + MSAA + bloom + ACES)",
+    return demo::Run(flags, "gldx demo - postprocess_bloom (HDR + MSAA + bloom + ACES)",
                      [&](demo::Ctx& ctx) -> int {
         View view;
         view.yaw = flags.real("yaw", view.yaw);
@@ -65,43 +65,43 @@ int main(int argc, char** argv) {
         glfwSetCursorPosCallback(ctx.window, OnMouse);
         glfwSetMouseButtonCallback(ctx.window, OnButton);
 
-        ctx.renderer.AddPass(std::make_unique<gfx::GeometryPass>());
-        ctx.renderer.AddPass(std::make_unique<gfx::PostProcessPass>());
+        ctx.renderer.AddPass(std::make_unique<gldx::GeometryPass>());
+        ctx.renderer.AddPass(std::make_unique<gldx::PostProcessPass>());
 
-        auto pbr = gfx::ShaderProgram::CreateFromSource(gfx::shaders::kPbrVertex, gfx::shaders::kPbrFragment);
+        auto pbr = gldx::ShaderProgram::CreateFromSource(gldx::shaders::kPbrVertex, gldx::shaders::kPbrFragment);
         if (!pbr) { std::fprintf(stderr, "PBR shader: %s\n", pbr.error().c_str()); return 1; }
         pbr->Use();
-        pbr->SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);
+        pbr->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);
 
-        gfx::PostProcessChain post;
+        gldx::PostProcessChain post;
         if (!post.Init()) { std::fprintf(stderr, "PostProcessChain init failed\n"); return 1; }
         post.SetExposure(1.15f);
 
-        gfx::LightBuffer lights; lights.Init();
-        gfx::Camera camera; camera.SetPerspective(45.0f, 1.0f, 0.1f, 100.0f);
+        gldx::LightBuffer lights; lights.Init();
+        gldx::Camera camera; camera.SetPerspective(45.0f, 1.0f, 0.1f, 100.0f);
 
         std::vector<std::unique_ptr<Item>> items;
-        gfx::Scene scene;
-        auto add = [&](gfx::MeshData data, const gfx::PbrMaterial& m, const gfx::Transform& t) {
+        gldx::Scene scene;
+        auto add = [&](gldx::MeshData data, const gldx::PbrMaterial& m, const gldx::Transform& t) {
             auto it = std::make_unique<Item>(); it->material = m;
-            glm::vec3 c; float r; gfx::SceneNode::BoundsFromMeshData(data, c, r);
+            glm::vec3 c; float r; gldx::SceneNode::BoundsFromMeshData(data, c, r);
             it->mesh.Upload(std::move(data));
-            gfx::SceneNode& n = scene.CreateRoot(t);
+            gldx::SceneNode& n = scene.CreateRoot(t);
             n.SetRenderable(&it->mesh, &it->material); n.SetLocalBounds(c, r);
             items.push_back(std::move(it));
         };
-        { gfx::Transform t; t.scale = glm::vec3(16.0f, 1.0f, 16.0f);
-          gfx::PbrMaterial m; m.baseColor = glm::vec4(0.4f, 0.42f, 0.46f, 1.0f); m.roughness = 0.95f;
-          add(gfx::GeometryFactory::Plane(1.0f), m, t); }
+        { gldx::Transform t; t.scale = glm::vec3(16.0f, 1.0f, 16.0f);
+          gldx::PbrMaterial m; m.baseColor = glm::vec4(0.4f, 0.42f, 0.46f, 1.0f); m.roughness = 0.95f;
+          add(gldx::GeometryFactory::Plane(1.0f), m, t); }
         for (int i = 0; i < 5; ++i) {   // a row of polished metal balls: bright, camera-facing glints
-            gfx::Transform t; t.translation = glm::vec3(-2.8f + i * 1.4f, 0.5f, 0.0f);
-            gfx::PbrMaterial m; m.metallic = 1.0f; m.roughness = 0.12f + 0.15f * i;
+            gldx::Transform t; t.translation = glm::vec3(-2.8f + i * 1.4f, 0.5f, 0.0f);
+            gldx::PbrMaterial m; m.metallic = 1.0f; m.roughness = 0.12f + 0.15f * i;
             m.baseColor = glm::vec4(1.0f, 0.6f - 0.08f * i, 0.25f, 1.0f);
-            add(gfx::GeometryFactory::Sphere(0.5f, 48, 32), m, t);
+            add(gldx::GeometryFactory::Sphere(0.5f, 48, 32), m, t);
         }
 
         static bool armed = true;
-        return ctx.Loop([&](gfx::RenderFrame& f, const demo::FrameInfo& info) {
+        return ctx.Loop([&](gldx::RenderFrame& f, const demo::FrameInfo& info) {
             if (bool p = glfwGetKey(info.window, GLFW_KEY_3) == GLFW_PRESS; p && armed) { view.bloom = !view.bloom; armed = false; }
             else if (!p) armed = true;
 
@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
             camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
             camera.LookAt(eye, target, glm::vec3(0, 1, 0));
 
-            gfx::LightSetup setup;
+            gldx::LightSetup setup;
             setup.sun.direction = glm::normalize(glm::vec3(-0.5f, -0.9f, 0.4f));
             setup.sun.color = glm::vec3(1.0f);
             setup.sun.intensity = 4.0f;   // hot sun -> real HDR glints for the bright pass

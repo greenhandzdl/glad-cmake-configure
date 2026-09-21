@@ -48,8 +48,8 @@ void main() { FragColor = texture(uTex, vUV); }
 
 // A colourful 32x32 checker with diagonal bands: unmistakably blocky under
 // NEAREST, unmistakably soft under LINEAR once magnified.
-gfx::Texture2DDesc MakeCheckerDesc(int size = 32) {
-    gfx::Texture2DDesc d;
+gldx::Texture2DDesc MakeCheckerDesc(int size = 32) {
+    gldx::Texture2DDesc d;
     d.width = d.height = size;
     d.channels = 3;
     d.srgb = true;
@@ -73,8 +73,8 @@ const char* const kFontCandidates[] = {
     "/System/Library/Fonts/Menlo.ttc", "/System/Library/Fonts/Helvetica.ttc",
     "C:/Windows/Fonts/consola.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
 };
-gfx::Texture2DDesc MakeSolidDesc() {
-    gfx::Texture2DDesc d;
+gldx::Texture2DDesc MakeSolidDesc() {
+    gldx::Texture2DDesc d;
     d.width = d.height = 1; d.channels = 4; d.srgb = false;
     d.pixels = {255, 255, 255, 255};
     return d;
@@ -96,19 +96,19 @@ const GLfloat kVerts[] = {
 };
 const GLuint kIdx[] = {0, 1, 2, 2, 1, 3,   4, 5, 6, 6, 5, 7};
 
-class SamplerPass : public gfx::RenderPass {
+class SamplerPass : public gldx::RenderPass {
 public:
     SamplerPass() : RenderPass("Samplers") {
-        auto p = gfx::ShaderProgram::CreateFromSource(kVertex, kFragment);
+        auto p = gldx::ShaderProgram::CreateFromSource(kVertex, kFragment);
         if (!p) { std::fprintf(stderr, "tex shader: %s\n", p.error().c_str()); return; }
-        program_ = std::make_unique<gfx::ShaderProgram>(std::move(*p));
+        program_ = std::make_unique<gldx::ShaderProgram>(std::move(*p));
 
         tex_.Upload(MakeCheckerDesc());
 
-        gfx::Sampler::Desc near_;
+        gldx::Sampler::Desc near_;
         near_.minFilter = near_.magFilter = GL_NEAREST;
         nearest_.Create(near_);
-        gfx::Sampler::Desc lin_;
+        gldx::Sampler::Desc lin_;
         lin_.minFilter = lin_.magFilter = GL_LINEAR;
         linear_.Create(lin_);
 
@@ -140,7 +140,7 @@ public:
         glBindSampler(0, 0);   // don't leave our sampler objects bound past teardown
     }
 
-    void Execute(gfx::RenderFrame& f) override {
+    void Execute(gldx::RenderFrame& f) override {
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, f.fbWidth, f.fbHeight);
         glClearColor(0.10f, 0.11f, 0.14f, 1.0f);
@@ -162,10 +162,10 @@ public:
 
         if (font_.loaded() && white_.valid()) {
             sprite_.Begin(white_, f.fbWidth, f.fbHeight);
-            gfx::TextRenderer::Draw(sprite_, font_, "NEAREST",
+            gldx::TextRenderer::Draw(sprite_, font_, "NEAREST",
                                     labelX(f, 0.25f), 0.62f * static_cast<float>(f.fbHeight),
                                     24.0f, glm::vec4(1.0f));
-            gfx::TextRenderer::Draw(sprite_, font_, "LINEAR",
+            gldx::TextRenderer::Draw(sprite_, font_, "LINEAR",
                                     labelX(f, 0.75f), 0.62f * static_cast<float>(f.fbHeight),
                                     24.0f, glm::vec4(1.0f));
             sprite_.End();
@@ -173,16 +173,16 @@ public:
     }
 
 private:
-    static float labelX(const gfx::RenderFrame& f, float frac) {
+    static float labelX(const gldx::RenderFrame& f, float frac) {
         return frac * static_cast<float>(f.fbWidth) - 46.0f;
     }
 
-    std::unique_ptr<gfx::ShaderProgram> program_;
-    gfx::Texture2D tex_;
-    gfx::Sampler   nearest_, linear_;
-    gfx::SpriteBatch sprite_;
-    gfx::Font        font_;
-    gfx::Texture2D   white_;
+    std::unique_ptr<gldx::ShaderProgram> program_;
+    gldx::Texture2D tex_;
+    gldx::Sampler   nearest_, linear_;
+    gldx::SpriteBatch sprite_;
+    gldx::Font        font_;
+    gldx::Texture2D   white_;
     GLuint vao_ = 0, vbo_ = 0, ebo_ = 0;
 };
 
@@ -192,9 +192,9 @@ int main(int argc, char** argv) {
     const demo::Flags flags(argc, argv, {}, {}, "texture_samplers");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
-    return demo::Run(flags, "gfx demo - texture_samplers (Texture2D + Sampler)",
+    return demo::Run(flags, "gldx demo - texture_samplers (Texture2D + Sampler)",
                      [&](demo::Ctx& ctx) -> int {
         ctx.renderer.AddPass(std::make_unique<SamplerPass>());
-        return ctx.Loop([](gfx::RenderFrame&, const demo::FrameInfo&) {});
+        return ctx.Loop([](gldx::RenderFrame&, const demo::FrameInfo&) {});
     });
 }

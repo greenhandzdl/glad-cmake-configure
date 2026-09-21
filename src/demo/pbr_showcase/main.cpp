@@ -28,10 +28,10 @@
  * renderer.Render(frame). All GL still happens on the render thread.
  */
 
-// Platform.h is deliberately a plain text include (not part of module gfx):
+// Platform.h is deliberately a plain text include (not part of module gldx):
 // it pulls <glad/gl.h> before <GLFW/glfw3.h> and defines the app/window
 // constants + GLFW_PLATFORM_* macros this executable's #if checks rely on.
-#include "gfx/core/Platform.h"
+#include "gldx/core/Platform.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -50,7 +50,7 @@
 #include "demo/demo_cli.h"
 
 // The whole engine as a single C++20 named module: no per-header includes.
-import gfx;
+import gldx;
 
 namespace {
 
@@ -155,13 +155,13 @@ void HandleKeys(GLFWwindow* win, Input& in) {
 // Owns the GPU mesh + CPU material for one scene object. Scene nodes point here;
 // storing them by unique_ptr keeps the addresses stable across the whole run.
 struct Owned {
-    gfx::Mesh        mesh;
-    gfx::PbrMaterial material;
+    gldx::Mesh        mesh;
+    gldx::PbrMaterial material;
 };
 
 // CPU-side checker albedo (Stage A, no GL).
-gfx::Texture2DDesc MakeCheckerDesc(int size = 512, int cells = 8) {
-    gfx::Texture2DDesc d;
+gldx::Texture2DDesc MakeCheckerDesc(int size = 512, int cells = 8) {
+    gldx::Texture2DDesc d;
     d.width = d.height = size;
     d.channels = 3;
     d.srgb = true;
@@ -181,8 +181,8 @@ gfx::Texture2DDesc MakeCheckerDesc(int size = 512, int cells = 8) {
 }
 
 // 1x1 opaque white texel: a cheap solid fill for HUD panels via SpriteBatch.
-gfx::Texture2DDesc MakeSolidDesc() {
-    gfx::Texture2DDesc d;
+gldx::Texture2DDesc MakeSolidDesc() {
+    gldx::Texture2DDesc d;
     d.width = d.height = 1;
     d.channels = 4;
     d.srgb = false;
@@ -213,7 +213,7 @@ int main(int argc, char** argv) {
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
-    GLFWwindow* window = glfwCreateWindow(gfx::kWindowWidth, gfx::kWindowHeight, gfx::kWindowTitle, nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(gldx::kWindowWidth, gldx::kWindowHeight, gldx::kWindowTitle, nullptr, nullptr);
     if (!window) {
         std::cerr << "Failed to create GLFW window (OpenGL 4.1 core?)\n";
         glfwTerminate();
@@ -229,9 +229,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    gfx::RenderContext::MarkAsRenderThread();
+    gldx::RenderContext::MarkAsRenderThread();
 
-    std::printf("%s %s\n", gfx::kAppName, gfx::kAppVersion);
+    std::printf("%s %s\n", gldx::kAppName, gldx::kAppVersion);
     std::printf("OpenGL %s\n", reinterpret_cast<const char*>(glGetString(GL_VERSION)));
 
     Input input;
@@ -259,22 +259,22 @@ int main(int argc, char** argv) {
     // is destroyed. A failure path just `return 1;`; the single exit below owns
     // the glfwDestroyWindow / glfwTerminate teardown, so no context is lost first.
     auto runDemo = [&]() -> int {
-        gfx::Renderer renderer;
+        gldx::Renderer renderer;
         renderer.Init();
         renderer.BuildPbrPipeline();
 
-        auto pbr = gfx::ShaderProgram::CreateFromSource(gfx::shaders::kPbrVertex, gfx::shaders::kPbrFragment);
+        auto pbr = gldx::ShaderProgram::CreateFromSource(gldx::shaders::kPbrVertex, gldx::shaders::kPbrFragment);
         if (!pbr) {
             std::fprintf(stderr, "PBR shader error:\n%s\n", pbr.error().c_str());
             return 1;
         }
-        auto depth = gfx::ShaderProgram::CreateFromSource(gfx::shaders::kDepthVertex, gfx::shaders::kDepthFragment);
+        auto depth = gldx::ShaderProgram::CreateFromSource(gldx::shaders::kDepthVertex, gldx::shaders::kDepthFragment);
         if (!depth) {
             std::fprintf(stderr, "Depth shader error:\n%s\n", depth.error().c_str());
             return 1;
         }
 
-        gfx::SkyboxRenderer skybox;
+        gldx::SkyboxRenderer skybox;
         if (!skybox.Init()) {
             std::fprintf(stderr, "Skybox init failed\n");
             return 1;
@@ -282,57 +282,57 @@ int main(int argc, char** argv) {
 
         // Procedural HDR sky + IBL precomputes, baked once from the initial sun.
         const glm::vec3 initialTravel = -SunToward(input);
-        gfx::EnvironmentMap env;
+        gldx::EnvironmentMap env;
         if (!env.Generate(initialTravel, 256, 32, 256)) {
             std::fprintf(stderr, "Environment generation failed\n");
             return 1;
         }
 
-        gfx::Texture2D checker;
+        gldx::Texture2D checker;
         checker.Upload(MakeCheckerDesc());
 
         // ---- post-process chain + 2D HUD infrastructure ----------------------
-        gfx::PostProcessChain post;
+        gldx::PostProcessChain post;
         if (!post.Init()) {
             std::fprintf(stderr, "PostProcessChain init failed\n");
             return 1;
         }
         post.SetExposure(1.1f);
 
-        gfx::SpriteBatch sprite;
+        gldx::SpriteBatch sprite;
         if (!sprite.Init()) {
             std::fprintf(stderr, "SpriteBatch init failed\n");
             return 1;
         }
 
-        gfx::Font font;
+        gldx::Font font;
         for (const char* candidate : kFontCandidates) {
             if (font.LoadFromFile(candidate, 48.0f)) break;
         }
         if (!font.loaded()) std::fprintf(stderr, "HUD font not found; text overlay disabled\n");
 
-        gfx::Texture2D white;
+        gldx::Texture2D white;
         white.Upload(MakeSolidDesc());
 
         // ---- debug overlay, profiler, GPU-instanced field --------------------
-        gfx::DebugDraw debug;
+        gldx::DebugDraw debug;
         if (!debug.Init()) std::fprintf(stderr, "DebugDraw init failed\n");
 
-        gfx::Profiler profiler;
+        gldx::Profiler profiler;
         profiler.Init();
 
-        auto instProg = gfx::ShaderProgram::CreateFromSource(
-            gfx::shaders::kInstancedVertex, gfx::shaders::kInstancedFragment);
+        auto instProg = gldx::ShaderProgram::CreateFromSource(
+            gldx::shaders::kInstancedVertex, gldx::shaders::kInstancedFragment);
         if (!instProg) {
             std::fprintf(stderr, "Instanced shader error:\n%s\n", instProg.error().c_str());
         } else {
             instProg->Use();
-            instProg->SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);
+            instProg->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);
         }
-        gfx::InstancedMesh instField;   // CPU data built (Stage A), uploaded once (Stage B)
+        gldx::InstancedMesh instField;   // CPU data built (Stage A), uploaded once (Stage B)
         {
-            gfx::MeshData geo = gfx::GeometryFactory::Cube(1.0f);
-            std::vector<gfx::Instance> insts;
+            gldx::MeshData geo = gldx::GeometryFactory::Cube(1.0f);
+            std::vector<gldx::Instance> insts;
             constexpr int n = 8;
             for (int ix = 0; ix < n; ++ix) {
                 for (int iz = 0; iz < n; ++iz) {
@@ -342,7 +342,7 @@ int main(int argc, char** argv) {
                     const glm::mat4 m =
                         glm::translate(glm::mat4(1.0f), glm::vec3(x, h * 0.5f, z)) *
                         glm::scale(glm::mat4(1.0f), glm::vec3(0.4f, h, 0.4f));
-                    gfx::Instance in;
+                    gldx::Instance in;
                     in.model = m;
                     const float t = static_cast<float>((ix + iz) % 5) / 4.0f;
                     in.color = glm::vec4(0.3f + 0.6f * t, 0.4f, 0.85f - 0.5f * t, 1.0f);
@@ -355,22 +355,22 @@ int main(int argc, char** argv) {
         // ---- scene graph -----------------------------------------------------
         // Objects are owned by `owned` (stable addresses); nodes reference them.
         std::vector<std::unique_ptr<Owned>> owned;
-        gfx::Scene scene;
+        gldx::Scene scene;
         int nextId = 0;
 
-        auto addObject = [&](gfx::MeshData data, const gfx::PbrMaterial& matCfg,
-                             const gfx::Transform& xf,
-                             gfx::SceneNode* parent = nullptr) -> gfx::SceneNode& {
+        auto addObject = [&](gldx::MeshData data, const gldx::PbrMaterial& matCfg,
+                             const gldx::Transform& xf,
+                             gldx::SceneNode* parent = nullptr) -> gldx::SceneNode& {
             auto o = std::make_unique<Owned>();
             o->material = matCfg;
             if (!o->material.placeholder) o->material.placeholder = &checker;
             glm::vec3 c;
             float r;
-            gfx::SceneNode::BoundsFromMeshData(data, c, r);
+            gldx::SceneNode::BoundsFromMeshData(data, c, r);
             o->mesh.Upload(std::move(data));
             Owned* raw = o.get();
             owned.push_back(std::move(o));
-            gfx::SceneNode& node = parent ? parent->AddChild(xf) : scene.CreateRoot(xf);
+            gldx::SceneNode& node = parent ? parent->AddChild(xf) : scene.CreateRoot(xf);
             node.SetRenderable(&raw->mesh, &raw->material);
             node.SetLocalBounds(c, r);
             node.id = nextId++;
@@ -379,60 +379,60 @@ int main(int argc, char** argv) {
 
         // Ground plane (large scale, never casts).
         {
-            gfx::Transform t;
+            gldx::Transform t;
             t.scale = glm::vec3(24.0f, 1.0f, 24.0f);
-            gfx::PbrMaterial m;
+            gldx::PbrMaterial m;
             m.baseColor = glm::vec4(0.9f, 0.9f, 0.92f, 1.0f);
             m.roughness = 0.85f;
             m.albedo = &checker;
-            addObject(gfx::GeometryFactory::Plane(1.0f), m, t).castsShadow = false;
+            addObject(gldx::GeometryFactory::Plane(1.0f), m, t).castsShadow = false;
         }
 
         // PBR test grid (metallic x roughness).
         for (int i = 0; i < 5; ++i) {
             for (int j = 0; j < 5; ++j) {
-                gfx::Transform t;
+                gldx::Transform t;
                 t.translation = glm::vec3(-3.0f + i * 1.5f, 0.5f, -3.0f + j * 1.5f);
-                gfx::PbrMaterial m;
+                gldx::PbrMaterial m;
                 m.metallic  = static_cast<float>(i) / 4.0f;
                 m.roughness = 0.05f + 0.9f * static_cast<float>(j) / 4.0f;
                 m.baseColor = glm::vec4(0.9f, 0.5f, 0.25f, 1.0f);
-                addObject(gfx::GeometryFactory::Sphere(0.5f, 48, 32), m, t);
+                addObject(gldx::GeometryFactory::Sphere(0.5f, 48, 32), m, t);
             }
         }
 
         // Textured cubes (checker albedo).
         for (int k = 0; k < 3; ++k) {
-            gfx::Transform t;
+            gldx::Transform t;
             t.translation = glm::vec3(-1.6f + k * 1.6f, 0.5f, 3.6f);
             t.SetAxisAngle(glm::vec3(0, 1, 0), 0.5f * k);
-            gfx::PbrMaterial m;
+            gldx::PbrMaterial m;
             m.baseColor = glm::vec4(1.0f);
             m.roughness = 0.45f;
             m.albedo = &checker;
-            addObject(gfx::GeometryFactory::Cube(1.0f), m, t);
+            addObject(gldx::GeometryFactory::Cube(1.0f), m, t);
         }
 
         // Hierarchy demo: an empty pivot carrying orbiting children. The pivot is
         // spun every frame; the children ride along via world-matrix propagation.
-        gfx::SceneNode* carousel = &scene.CreateRoot();
+        gldx::SceneNode* carousel = &scene.CreateRoot();
         for (int c = 0; c < 3; ++c) {
             const float a = c * 2.0f * 3.14159265f / 3.0f;
-            gfx::Transform t;
+            gldx::Transform t;
             t.translation = glm::vec3(std::cos(a) * 1.2f, 1.2f, std::sin(a) * 1.2f);
-            gfx::PbrMaterial m;
+            gldx::PbrMaterial m;
             m.metallic = 0.9f;
             m.roughness = 0.2f;
             m.baseColor = glm::vec4(0.2f + 0.4f * c, 0.6f, 0.9f - 0.3f * c, 1.0f);
-            addObject(gfx::GeometryFactory::Cube(0.5f), m, t, carousel);
+            addObject(gldx::GeometryFactory::Cube(0.5f), m, t, carousel);
         }
 
-        gfx::LightBuffer lightBuffer;
+        gldx::LightBuffer lightBuffer;
         lightBuffer.Init();
-        gfx::CascadedShadowMap csm;
+        gldx::CascadedShadowMap csm;
         csm.Init(2048);
 
-        gfx::Camera camera;
+        gldx::Camera camera;
         camera.SetPerspective(45.0f, 1.0f, 0.1f, 200.0f);
         // The camera owns the projection state; --on ortho just gives it the one
         // kick the Tab key would have, and input.ortho mirrors the result for the
@@ -443,16 +443,16 @@ int main(int argc, char** argv) {
 
         // Sampler-unit uniforms persist on the program; set them once.
         pbr->Use();
-        pbr->Set("uShadowMap", static_cast<int>(gfx::texunit::shadowArray));
-        pbr->Set("uIrradiance", static_cast<int>(gfx::texunit::irradiance));
-        pbr->Set("uPrefilter", static_cast<int>(gfx::texunit::prefilter));
-        pbr->Set("uBrdfLut", static_cast<int>(gfx::texunit::brdfLut));
+        pbr->Set("uShadowMap", static_cast<int>(gldx::texunit::shadowArray));
+        pbr->Set("uIrradiance", static_cast<int>(gldx::texunit::irradiance));
+        pbr->Set("uPrefilter", static_cast<int>(gldx::texunit::prefilter));
+        pbr->Set("uBrdfLut", static_cast<int>(gldx::texunit::brdfLut));
         // GLSL 4.10: map the std140 blocks onto the fixed UBO binding points
         // that LightBuffer / CascadedShadowMap bind their buffers to each frame.
-        pbr->SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);
-        pbr->SetBlockBinding("ShadowBlock", gfx::CascadedShadowMap::kShadowBinding);
+        pbr->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);
+        pbr->SetBlockBinding("ShadowBlock", gldx::CascadedShadowMap::kShadowBinding);
 
-        gfx::SceneNode* selected = nullptr;
+        gldx::SceneNode* selected = nullptr;
         const double startedAt = glfwGetTime();
         const double quitAfter = flags.quitAfter();
         const double freezeAt = flags.number("freeze-at");
@@ -479,7 +479,7 @@ int main(int argc, char** argv) {
             // Tab swaps perspective <-> orthographic once per press.
             if (bool tabDown = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS; tabDown && projArmed) {
                 input.ortho = camera.ToggleProjection()
-                              == gfx::Camera::Projection::Orthographic;
+                              == gldx::Camera::Projection::Orthographic;
                 projArmed = false;
             } else if (!tabDown) {
                 projArmed = true;
@@ -514,7 +514,7 @@ int main(int argc, char** argv) {
             const glm::vec3 towardSun = SunToward(input);
             const glm::vec3 sunTravel = -towardSun;
 
-            gfx::LightSetup setup;
+            gldx::LightSetup setup;
             setup.sun.direction = sunTravel;
             setup.sun.color = glm::vec3(1.0f);
             setup.sun.intensity = 3.0f;
@@ -537,7 +537,7 @@ int main(int argc, char** argv) {
             scene.Update();
 
             const glm::mat4 viewProj = camera.ViewProjection();
-            gfx::Frustum frustum;
+            gldx::Frustum frustum;
             frustum.Extract(viewProj);
 
             // Consume a pending right-click pick against the fresh world spheres.
@@ -547,16 +547,16 @@ int main(int argc, char** argv) {
                 std::vector<std::pair<glm::vec3, float>> spheres;
                 spheres.reserve(targets.size());
                 for (const auto& t : targets) spheres.emplace_back(t.center, t.radius);
-                const gfx::Ray ray = gfx::PickRay(
+                const gldx::Ray ray = gldx::PickRay(
                     input.pickX * static_cast<float>(fbw),
                     input.pickY * static_cast<float>(fbh), fbw, fbh,
                     camera.InverseViewProjection());
-                const int idx = gfx::PickNearest(ray, spheres);
+                const int idx = gldx::PickNearest(ray, spheres);
                 selected = (idx >= 0) ? targets[idx].node : nullptr;
             }
 
             // Assemble the frame and run the whole pipeline.
-            gfx::RenderFrame frame;
+            gldx::RenderFrame frame;
             frame.camera = &camera;
             frame.frustum = &frustum;
             frame.scene = &scene;

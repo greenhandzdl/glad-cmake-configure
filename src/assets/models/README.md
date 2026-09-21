@@ -8,8 +8,8 @@
 
 ## 模型如何到达 GPU
 
-模型经 `gfx::AssetManager::RequestModel(key, path)` 加载（见
-[`src/gfx/assets`](../../../src/gfx/assets)），走**两阶段管线**，保证任何 GL 调用都不发生在渲染线程之外：
+模型经 `gldx::AssetManager::RequestModel(key, path)` 加载（见
+[`src/gldx/assets`](../../../src/gldx/assets)），走**两阶段管线**，保证任何 GL 调用都不发生在渲染线程之外：
 
 1. **Stage A（后台线程，不碰 GL）：** Assimp 解析文件，importer 在 CPU 侧构建
    `MeshData`（位置、法线、UV、切线）与材质描述，结果以不可变共享数据返回。
@@ -24,7 +24,7 @@
 ## 纹理 / 材质（两条硬性拒收规则）
 
 模型内嵌与独立贴图都按路径引用，用 STB 解码（实现单元在
-`src/gfx/third_party/stb_image_impl.cpp`）。加载器对资产文件本身有两道已验证的防线：
+`src/gldx/third_party/stb_image_impl.cpp`）。加载器对资产文件本身有两道已验证的防线：
 
 - **纹理引用不许走出模型所在目录。** 材质（如 `.mtl` 的 `map_Kd`）里的引用只接受
   模型目录内的相对路径（子目录可以）；绝对路径、盘符或含 `..` 的引用会被

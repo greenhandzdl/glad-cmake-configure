@@ -1,7 +1,7 @@
 // -----------------------------------------------------------------------------
 // REFERENCE MIRROR - not compiled by the build.
 // The runtime embeds these programs as raw strings in
-// src/gfx/shader/PostProcessShaders.h (kPostVertex / kBrightPassFragment /
+// src/gldx/shader/PostProcessShaders.h (kPostVertex / kBrightPassFragment /
 // kBlurFragment / kCompositeFragment); that header is the single source of
 // truth. This file is a browsable/editable copy only.
 //

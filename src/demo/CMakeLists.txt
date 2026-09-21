@@ -4,8 +4,8 @@
 # Every subdirectory here that owns a main.cpp becomes a graphics demo target
 # with no further CMake edits: create src/demo/{feature}/main.cpp, reconfigure,
 # and it is built into output/{feature}. The engine include dir (src/) is
-# inherited PUBLIC from `gfx`, so the demos' `#include "gfx/core/Platform.h"`,
-# "demo/demo_cli.h" and "demo/demo_app.h" all resolve, and `import gfx;` reaches
+# inherited PUBLIC from `gldx`, so the demos' `#include "gldx/core/Platform.h"`,
+# "demo/demo_cli.h" and "demo/demo_app.h" all resolve, and `import gldx;` reaches
 # the whole library. demo_cli.h / demo_app.h are application-side scaffolding,
 # not engine members, and are compiled straight into each demo that includes
 # them (header-only, no library of their own).
@@ -17,7 +17,7 @@
 
 function(add_gfx_demo name)
     add_executable(d_${name} ${CMAKE_CURRENT_SOURCE_DIR}/${name}/main.cpp)
-    target_link_libraries(d_${name} PRIVATE gfx)
+    target_link_libraries(d_${name} PRIVATE gldx)
     set_target_properties(d_${name} PROPERTIES
         OUTPUT_NAME ${name}
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/output)

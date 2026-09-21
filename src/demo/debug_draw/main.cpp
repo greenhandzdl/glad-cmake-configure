@@ -44,8 +44,8 @@ const char* const kFontCandidates[] = {
     "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
 };
 
-gfx::Texture2DDesc MakeSolidDesc() {
-    gfx::Texture2DDesc d;
+gldx::Texture2DDesc MakeSolidDesc() {
+    gldx::Texture2DDesc d;
     d.width = d.height = 1;
     d.channels = 4;
     d.srgb = false;
@@ -53,7 +53,7 @@ gfx::Texture2DDesc MakeSolidDesc() {
     return d;
 }
 
-class DebugPass : public gfx::RenderPass {
+class DebugPass : public gldx::RenderPass {
 public:
     DebugPass() : RenderPass("Debug") {
         if (!debug_.Init()) std::fprintf(stderr, "DebugDraw init failed\n");
@@ -65,7 +65,7 @@ public:
         white_.Upload(MakeSolidDesc());
     }
 
-    void Execute(gfx::RenderFrame& f) override {
+    void Execute(gldx::RenderFrame& f) override {
         profiler_.BeginFrame();
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -102,7 +102,7 @@ public:
             sprite_.Begin(white_, f.fbWidth, f.fbHeight);
             sprite_.Draw(white_, 14.0f, 14.0f, 360.0f, 40.0f,
                          0.0f, 0.0f, 1.0f, 1.0f, glm::vec4(0.0f, 0.0f, 0.0f, 0.4f));
-            gfx::TextRenderer::Draw(sprite_, font_, line, 24.0f, 22.0f, 20.0f,
+            gldx::TextRenderer::Draw(sprite_, font_, line, 24.0f, 22.0f, 20.0f,
                                     glm::vec4(0.75f, 0.9f, 1.0f, 1.0f));
             sprite_.End();
         }
@@ -113,11 +113,11 @@ public:
     void setFrameInfo(demo::FrameInfo info) noexcept { info_ = info; }
 
 private:
-    gfx::DebugDraw   debug_;
-    gfx::Profiler    profiler_;
-    gfx::SpriteBatch sprite_;
-    gfx::Font        font_;
-    gfx::Texture2D   white_;
+    gldx::DebugDraw   debug_;
+    gldx::Profiler    profiler_;
+    gldx::SpriteBatch sprite_;
+    gldx::Font        font_;
+    gldx::Texture2D   white_;
     demo::FrameInfo  info_;
 };
 
@@ -127,15 +127,15 @@ int main(int argc, char** argv) {
     const demo::Flags flags(argc, argv, {}, {}, "debug_draw");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
-    return demo::Run(flags, "gfx demo - debug_draw (line overlay + profiler)",
+    return demo::Run(flags, "gldx demo - debug_draw (line overlay + profiler)",
                      [&](demo::Ctx& ctx) -> int {
         auto pass = std::make_unique<DebugPass>();
         DebugPass* raw = pass.get();
         ctx.renderer.AddPass(std::move(pass));
 
-        gfx::Camera camera; camera.SetPerspective(50.0f, 1.0f, 0.1f, 100.0f);
+        gldx::Camera camera; camera.SetPerspective(50.0f, 1.0f, 0.1f, 100.0f);
 
-        return ctx.Loop([&](gfx::RenderFrame& f, const demo::FrameInfo& info) {
+        return ctx.Loop([&](gldx::RenderFrame& f, const demo::FrameInfo& info) {
             const float yaw = static_cast<float>(info.time) * 0.3f;
             const glm::vec3 eye(8.0f * std::cos(yaw), 6.0f, 8.0f * std::sin(yaw));
             camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);

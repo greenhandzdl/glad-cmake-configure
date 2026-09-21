@@ -7,10 +7,10 @@
  * hangs off it) stays stable. Its whole point is subtraction: unlike the
  * feature demos under src/demo/, it brings *none* of the render subsystems -
  * no GeometryPass, no LightBuffer, no PBR program, no scene graph, no shadow /
- * IBL / bloom / skybox. It defines one custom gfx::RenderPass holding an inline
+ * IBL / bloom / skybox. It defines one custom gldx::RenderPass holding an inline
  * GLSL program and a hand-built VAO, and hands the renderer an otherwise-empty
  * RenderFrame (Run only fills fbWidth/fbHeight). If this builds and draws, then
- * "import gfx + one pass + one window" really is the floor of the whole engine.
+ * "import gldx + one pass + one window" really is the floor of the whole engine.
  *
  * The window / context / frame-loop lifecycle is demo::Run from demo_app.h; the
  * only per-frame callback does nothing, because the triangle pass needs no data
@@ -57,15 +57,15 @@ const GLfloat kVertices[] = {
 // framebuffer. Built on the render thread (Run has made the context current
 // before the app callback constructs it), torn down inside it, so both the GL
 // calls here and the ShaderProgram destructor see a live context.
-class TrianglePass : public gfx::RenderPass {
+class TrianglePass : public gldx::RenderPass {
 public:
     TrianglePass() : RenderPass("Triangle") {
-        auto program = gfx::ShaderProgram::CreateFromSource(kVertex, kFragment);
+        auto program = gldx::ShaderProgram::CreateFromSource(kVertex, kFragment);
         if (!program) {
             std::fprintf(stderr, "Triangle shader error:\n%s\n", program.error().c_str());
             return;   // Execute() then becomes a no-op clear; the run still ends cleanly.
         }
-        program_ = std::make_unique<gfx::ShaderProgram>(std::move(*program));
+        program_ = std::make_unique<gldx::ShaderProgram>(std::move(*program));
 
         glGenVertexArrays(1, &vao_);
         glGenBuffers(1, &vbo_);
@@ -86,7 +86,7 @@ public:
         if (vbo_) glDeleteBuffers(1, &vbo_);
     }
 
-    void Execute(gfx::RenderFrame& frame) override {
+    void Execute(gldx::RenderFrame& frame) override {
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, frame.fbWidth, frame.fbHeight);
         glClearColor(0.12f, 0.14f, 0.18f, 1.0f);
@@ -100,7 +100,7 @@ public:
     }
 
 private:
-    std::unique_ptr<gfx::ShaderProgram> program_;
+    std::unique_ptr<gldx::ShaderProgram> program_;
     GLuint vao_ = 0;
     GLuint vbo_ = 0;
 };
@@ -114,10 +114,10 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    return demo::Run(flags, "gfx - hello triangle (minimum pipeline)", [&](demo::Ctx& ctx) {
+    return demo::Run(flags, "gldx - hello triangle (minimum pipeline)", [&](demo::Ctx& ctx) {
         ctx.renderer.AddPass(std::make_unique<TrianglePass>());
         // Nothing to attach: the pass reads only fb size off the frame, which
         // demo::Run already fills. An empty body is the demonstration.
-        return ctx.Loop([](gfx::RenderFrame&, const demo::FrameInfo&) {});
+        return ctx.Loop([](gldx::RenderFrame&, const demo::FrameInfo&) {});
     });
 }

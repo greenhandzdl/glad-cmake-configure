@@ -76,7 +76,7 @@ void OnButton(GLFWwindow* w, int b, int a, int) {
     v->lastX = cx; v->lastY = cy;
 }
 
-struct Item { gfx::Mesh mesh; gfx::PbrMaterial material; };
+struct Item { gldx::Mesh mesh; gldx::PbrMaterial material; };
 
 const char* const kFontCandidates[] = {
     "/System/Library/Fonts/Menlo.ttc",
@@ -87,8 +87,8 @@ const char* const kFontCandidates[] = {
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
     "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
 };
-gfx::Texture2DDesc MakeSolidDesc() {
-    gfx::Texture2DDesc d;
+gldx::Texture2DDesc MakeSolidDesc() {
+    gldx::Texture2DDesc d;
     d.width = d.height = 1; d.channels = 4; d.srgb = false;
     d.pixels = {255, 255, 255, 255};
     return d;
@@ -96,30 +96,30 @@ gfx::Texture2DDesc MakeSolidDesc() {
 
 // HUD strip that reads the culling + selection results GeometryPass wrote into the
 // shared frame this same pass order (added after GeometryPass, so it sees them).
-class PickHudPass : public gfx::RenderPass {
+class PickHudPass : public gldx::RenderPass {
 public:
     PickHudPass() : RenderPass("PickHud") {
         if (!sprite_.Init()) std::fprintf(stderr, "SpriteBatch init failed\n");
         for (const char* c : kFontCandidates) { if (font_.LoadFromFile(c, 48.0f)) break; }
         white_.Upload(MakeSolidDesc());
     }
-    void Execute(gfx::RenderFrame& f) override {
+    void Execute(gldx::RenderFrame& f) override {
         if (!font_.loaded() || !white_.valid()) return;
         char line[128];
         std::snprintf(line, sizeof(line),
                       "right-click = pick   visible %d/%d   selected #%d",
                       f.visibleCount, f.totalNodes, f.selected ? f.selected->id : -1);
-        const float w = gfx::TextRenderer::Measure(font_, line, 20.0f) + 24.0f;
+        const float w = gldx::TextRenderer::Measure(font_, line, 20.0f) + 24.0f;
         sprite_.Begin(white_, f.fbWidth, f.fbHeight);
         sprite_.Draw(white_, 14.0f, 14.0f, w, 38.0f, 0, 0, 1, 1, glm::vec4(0, 0, 0, 0.4f));
-        gfx::TextRenderer::Draw(sprite_, font_, line, 26.0f, 22.0f, 20.0f,
+        gldx::TextRenderer::Draw(sprite_, font_, line, 26.0f, 22.0f, 20.0f,
                                 glm::vec4(0.8f, 0.9f, 1.0f, 1.0f));
         sprite_.End();
     }
 private:
-    gfx::SpriteBatch sprite_;
-    gfx::Font        font_;
-    gfx::Texture2D   white_;
+    gldx::SpriteBatch sprite_;
+    gldx::Font        font_;
+    gldx::Texture2D   white_;
 };
 
 } // namespace
@@ -128,7 +128,7 @@ int main(int argc, char** argv) {
     const demo::Flags flags(argc, argv, {}, {"yaw", "pitch", "radius"}, "camera_picking");
     if (flags.wantsHelp()) { flags.printUsage(); return 0; }
 
-    return demo::Run(flags, "gfx demo - camera_picking (frustum cull + mouse pick)",
+    return demo::Run(flags, "gldx demo - camera_picking (frustum cull + mouse pick)",
                      [&](demo::Ctx& ctx) -> int {
         View view;
         view.yaw = flags.real("yaw", view.yaw);
@@ -138,43 +138,43 @@ int main(int argc, char** argv) {
         glfwSetCursorPosCallback(ctx.window, OnMouse);
         glfwSetMouseButtonCallback(ctx.window, OnButton);
 
-        ctx.renderer.AddPass(std::make_unique<gfx::GeometryPass>());
+        ctx.renderer.AddPass(std::make_unique<gldx::GeometryPass>());
         ctx.renderer.AddPass(std::make_unique<PickHudPass>());
 
-        auto pbr = gfx::ShaderProgram::CreateFromSource(gfx::shaders::kPbrVertex, gfx::shaders::kPbrFragment);
+        auto pbr = gldx::ShaderProgram::CreateFromSource(gldx::shaders::kPbrVertex, gldx::shaders::kPbrFragment);
         if (!pbr) { std::fprintf(stderr, "PBR shader: %s\n", pbr.error().c_str()); return 1; }
         pbr->Use();
-        pbr->SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);
+        pbr->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);
 
-        gfx::LightBuffer lights; lights.Init();
-        gfx::Camera camera; camera.SetPerspective(55.0f, 1.0f, 0.1f, 100.0f);
+        gldx::LightBuffer lights; lights.Init();
+        gldx::Camera camera; camera.SetPerspective(55.0f, 1.0f, 0.1f, 100.0f);
 
         std::vector<std::unique_ptr<Item>> items;
-        gfx::Scene scene;
+        gldx::Scene scene;
         int nextId = 0;
-        auto add = [&](gfx::MeshData data, const gfx::PbrMaterial& m, const gfx::Transform& t) {
+        auto add = [&](gldx::MeshData data, const gldx::PbrMaterial& m, const gldx::Transform& t) {
             auto it = std::make_unique<Item>(); it->material = m;
-            glm::vec3 c; float r; gfx::SceneNode::BoundsFromMeshData(data, c, r);
+            glm::vec3 c; float r; gldx::SceneNode::BoundsFromMeshData(data, c, r);
             it->mesh.Upload(std::move(data));
-            gfx::SceneNode& n = scene.CreateRoot(t);
+            gldx::SceneNode& n = scene.CreateRoot(t);
             n.SetRenderable(&it->mesh, &it->material); n.SetLocalBounds(c, r);
             n.id = nextId++;
             items.push_back(std::move(it));
         };
-        { gfx::Transform t; t.scale = glm::vec3(20.0f, 1.0f, 20.0f);
-          gfx::PbrMaterial m; m.baseColor = glm::vec4(0.4f, 0.42f, 0.46f, 1.0f); m.roughness = 0.95f;
-          add(gfx::GeometryFactory::Plane(1.0f), m, t); }
+        { gldx::Transform t; t.scale = glm::vec3(20.0f, 1.0f, 20.0f);
+          gldx::PbrMaterial m; m.baseColor = glm::vec4(0.4f, 0.42f, 0.46f, 1.0f); m.roughness = 0.95f;
+          add(gldx::GeometryFactory::Plane(1.0f), m, t); }
         for (int i = 0; i < 16; ++i) {   // a full ring: half is behind the eye at rest
             const float a = static_cast<float>(i) / 16.0f * 2.0f * 3.14159265f;
-            gfx::Transform t; t.translation = glm::vec3(std::cos(a) * 6.0f, 0.55f, std::sin(a) * 6.0f);
-            gfx::PbrMaterial m; m.metallic = 0.3f; m.roughness = 0.5f;
+            gldx::Transform t; t.translation = glm::vec3(std::cos(a) * 6.0f, 0.55f, std::sin(a) * 6.0f);
+            gldx::PbrMaterial m; m.metallic = 0.3f; m.roughness = 0.5f;
             m.baseColor = glm::vec4(0.3f + 0.5f * std::cos(a) * std::cos(a),
                                     0.5f, 0.4f + 0.5f * std::sin(a) * std::sin(a), 1.0f);
-            add(gfx::GeometryFactory::Sphere(0.55f, 32, 24), m, t);
+            add(gldx::GeometryFactory::Sphere(0.55f, 32, 24), m, t);
         }
 
-        gfx::SceneNode* selected = nullptr;
-        return ctx.Loop([&](gfx::RenderFrame& f, const demo::FrameInfo& info) {
+        gldx::SceneNode* selected = nullptr;
+        return ctx.Loop([&](gldx::RenderFrame& f, const demo::FrameInfo& info) {
             const glm::vec3 target(0.0f, 0.5f, 0.0f);
             const float cp = std::cos(view.pitch);
             const glm::vec3 eye(target.x + view.radius * cp * std::sin(view.yaw),
@@ -183,7 +183,7 @@ int main(int argc, char** argv) {
             camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
             camera.LookAt(eye, target, glm::vec3(0, 1, 0));
 
-            gfx::LightSetup setup;
+            gldx::LightSetup setup;
             setup.sun.direction = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
             setup.sun.color = glm::vec3(1.0f);
             setup.sun.intensity = 3.0f;
@@ -192,7 +192,7 @@ int main(int argc, char** argv) {
             scene.Update();
 
             const glm::mat4 viewProj = camera.ViewProjection();
-            gfx::Frustum frustum;
+            gldx::Frustum frustum;
             frustum.Extract(viewProj);
 
             if (view.pickPending) {
@@ -201,11 +201,11 @@ int main(int argc, char** argv) {
                 std::vector<std::pair<glm::vec3, float>> spheres;
                 spheres.reserve(targets.size());
                 for (const auto& t : targets) spheres.emplace_back(t.center, t.radius);
-                const gfx::Ray ray = gfx::PickRay(
+                const gldx::Ray ray = gldx::PickRay(
                     view.pickX * static_cast<float>(info.fbWidth),
                     view.pickY * static_cast<float>(info.fbHeight),
                     info.fbWidth, info.fbHeight, camera.InverseViewProjection());
-                const int idx = gfx::PickNearest(ray, spheres);
+                const int idx = gldx::PickNearest(ray, spheres);
                 selected = (idx >= 0) ? targets[idx].node : nullptr;
             }
 

@@ -1,7 +1,7 @@
 // -----------------------------------------------------------------------------
 // REFERENCE MIRROR - not compiled by the build.
 // The runtime embeds these programs as raw strings in
-// src/gfx/shader/DebugShaders.h (kDebugVertex / kDebugFragment); that header is
+// src/gldx/shader/DebugShaders.h (kDebugVertex / kDebugFragment); that header is
 // the single source of truth. This file is a browsable/editable copy only.
 //
 // Minimal GLSL for the DebugDraw line overlay. Per-vertex position + RGBA
