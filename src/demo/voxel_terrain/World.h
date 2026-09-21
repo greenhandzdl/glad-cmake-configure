@@ -19,6 +19,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <unordered_set>
 #include <vector>
