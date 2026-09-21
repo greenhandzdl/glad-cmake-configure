@@ -61,6 +61,13 @@
   一点如实的区分：double→float 的越界转换在这套工具链上 UBSan 并不报（实测 `static_cast<float>(1e300)`
   rc=0，加 `-fstrict-float-cast-overflow` 也不报），所以 `real()` 是防御性收敛，不是被抓到的 UB。
 
+- **`ModelLoader::Load` 的两处收尾**：把 8 份畸形模型喂给带 ASan + UBSan 的 libgfx（只有 `v` 没有 `f`、空文件、
+  随机字节、截断的 glTF JSON、指向不存在 `.bin` 的 glTF、面索引越界、位置为 NaN/inf、材质指向一张只有文件头的
+  PNG），判据不是"没崩"，而是"被接受的那些模型里，每个索引都指向该 mesh 自己发出的顶点"。两处改动：① 面索引现在由
+  我们自己判界并整面丢弃（丢单个索引会打乱下面按三个一组算出的 `GeometryRange`）——OBJ importer 恰好会拒绝这种文件，
+  但把这条不变式托付给"哪个 importer 碰巧跑了"不负责任；② 位置非有限时打一行 stderr，因为 NaN 顶点是合法上传、
+  永不光栅化，用户的感受是"模型不见了"而不是"模型坏了"。两个 demo 都不经 `AssetManager::RequestModel`，画面无关。
+
 ### 新增
 
 - **`src/demo_cli.h`**：两个 demo 共用的 header-only 命令行开关（不进 `module gfx`）。
@@ -79,6 +86,13 @@
   `glTexImage2D` 的那个不变式。探针本身是仓外的临时工具（`/tmp/adv/advcheck.cpp`）：它是 `import gfx;` 的
   模块消费者，因为定义在 module 实现单元里的实体带着模块附着（`__ZN3gfxW3gfx5NoiseC1Ej`），
   文本 include 同一份头文件链不上。
+- **畸形模型文件与退化视口**：9 份模型文件（8 份畸形 + 1 份正常立方体，正常那份是"失败不等于加载器坏了"的对照）
+  与下面的视口检查合起来 29 项，在 ASan + UBSan 下全通过，退出码 0（含 0×0 / 1×1 / 超过
+  `GL_MAX_TEXTURE_SIZE` 的视口、`SpriteBatch` 与 `PickRay` 的退化尺寸）。退化尺寸下驱动只报
+  `GL_INVALID_VALUE` 而链路自愈：`PostProcessChain::Resize` 拒绝 0/负数尺寸保住上一个好尺寸，不可能的尺寸让 FBO
+  不完整（有诊断行），下一次合法 `Resize` 即恢复；`PickRay` 在 0 高度下给出非有限射线，而加固后的
+  `RaycastVoxel` 与 `RaySphere` 都拒绝它。
+
 - **对抗 argv**：两个 demo 用 UBSan 构建跑畸形命令行——`--select inf`、`--auto-break 1e300`、
   `--rise nan`、`--auto-place -inf`、`--pitch nan`、`--radius -1e300`、`--yaw 1e300`、`--off nosuch`、
   `--on bogus`、缺值的 `--auto-break`、`--freeze-at abc`、空值、`+` 与 `x`——退出码全 0，无一条 sanitizer

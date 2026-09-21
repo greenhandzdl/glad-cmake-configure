@@ -103,6 +103,10 @@ cmake -S . -B cmake-build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
 构建目录、直接 build 两个 demo 目标，再用 `--select inf --rise nan --auto-break 1e300` 这类 argv 跑一遍即可。
 一个要记住的不对称：double→float 的越界转换 UBSan 并不报（加 `-fstrict-float-cast-overflow` 也不报），
 所以喂给 float 的角度与距离必须先在 double 域里夹好范围再转。
+畸形模型走同一条链（`ModelLoader::Load` 无 GL、线程安全，探针里直接调用即可）：判据不是"没崩"，而是"被接受
+的模型中每个索引都指向该 mesh 自己发出的顶点"——assimp 的 importer 会拒绝一部分越界文件，但那条不变式该由
+`ModelLoader` 自己守住。另外记住退化视口这条路是安全的（`PostProcessChain::Resize` 拒绝 0/负数尺寸、FBO 不完整时
+有 stderr 诊断、下一次合法尺寸自愈），所以不必在 demo 的每帧 `Resize` 前再加判空。
 
 ## 文件地图
 

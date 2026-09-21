@@ -10,6 +10,9 @@ module;
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 
+#include <cmath>
+#include <cstdio>
+
 module gfx;
 
 namespace gfx {
@@ -55,12 +58,17 @@ ModelLoader::Load(const std::string& path) {
         const aiMesh* src = scene->mMeshes[mi];
         if (!src || src->mNumVertices == 0) continue;
 
+        unsigned int nonFinite = 0;
         MeshData data;
         data.vertices.resize(src->mNumVertices);
         for (unsigned int v = 0; v < src->mNumVertices; ++v) {
             const aiVector3D& p = src->mVertices[v];
             Vertex& dst = data.vertices[v];
             dst.position = glm::vec3(p.x, p.y, p.z);
+            // A NaN position is legal to upload and impossible to see: the
+            // triangle just never rasterises, which reads as "the model is
+            // missing" rather than "the model is broken". Say so once.
+            if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) ++nonFinite;
             if (src->mNormals) {
                 const aiVector3D& n = src->mNormals[v];
                 dst.normal = glm::vec3(n.x, n.y, n.z);
@@ -87,6 +95,16 @@ ModelLoader::Load(const std::string& path) {
         const std::uint32_t start = static_cast<std::uint32_t>(data.indices.size());
         for (unsigned int f = 0; f < src->mNumFaces; ++f) {
             const aiFace& face = src->mFaces[f];
+            // An index that names a vertex this mesh never declared would go
+            // straight into a GPU buffer. The OBJ importer refuses such a file
+            // on its own, but the invariant belongs here rather than in whichever
+            // importer ran, and it costs one compare per face. The whole face is
+            // dropped, not the stray index: dropping single indices would
+            // mis-align the triples that `ranges` below counts out.
+            bool usable = face.mIndices != nullptr;
+            for (unsigned int k = 0; usable && k < face.mNumIndices; ++k)
+                usable = face.mIndices[k] < src->mNumVertices;
+            if (!usable) continue;
             for (unsigned int k = 0; k < face.mNumIndices; ++k) {
                 data.indices.push_back(face.mIndices[k]);
             }
@@ -96,6 +114,11 @@ ModelLoader::Load(const std::string& path) {
         range.indexCount = static_cast<std::uint32_t>(data.indices.size()) - start;
         range.materialIndex = materialIndex;
         data.ranges.push_back(range);
+
+        if (nonFinite)
+            std::fprintf(stderr, "[ModelLoader] %s mesh %u: %u/%u positions are not finite "
+                                 "and will not draw\n", path.c_str(), mi, nonFinite,
+                         src->mNumVertices);
 
         out.meshes.push_back(std::move(data));
     }
