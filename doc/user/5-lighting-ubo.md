@@ -29,13 +29,15 @@ lights.Update(setup, cameraPos);    // 每帧：CPU 端打包 std140 块并整�
 lights.Bind();                      // glBindBufferBase(GL_UNIFORM_BUFFER, 1, handle)
 ```
 
-`lighting` uniform block 是**全局共享接口**。若你写自己的 PBR pass 直接 `Renderer::Render()`，忘了绑定制服块，片段着色器读到 `nullptr` UBO → **全黑且无 GL error**（`glGetError` 抓不到）。两种解法：
+`lighting` uniform block 是**全局共享接口**。若你写自己的 PBR pass 直接 `Renderer::Render()`，忘了绑定制服块，片段着色器读到 `nullptr` UBO → **全黑且无 GL error**（`glGetError` 抓不到）。GLSL 4.10 不允许在 block 上写 `layout(binding=N)`，所以绑定在 C++ 侧做——把自己的 block 映射到引擎的固定 binding，再每帧 `Bind()`：
 
 ```cpp
-GLuint idx = pbrProgram.uniformBlockIndex("lighting");      // ShaderProgram 已暴露查询
-glBindBufferBase(GL_UNIFORM_BUFFER, idx, lights.handle());  // 绑到引擎同款 LightBuffer 即可
-// 或更省事：走 BuildDefaultPipeline() 的默认链，由引擎自动绑 binding 1
+myProgram.SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);  // 链接后设一次，binding = 1
+lights.Bind();                                                           // 每帧，在渲染线程
+// 阴影同理：SetBlockBinding("ShadowBlock", gfx::CascadedShadowMap::kShadowBinding)
 ```
+
+`LightBuffer` 只暴露 `Init/Update/Bind/valid`——没有也不需要 `handle()`，别拿裸句柄自己 `glBindBufferBase`。当然，走 `BuildDefaultPipeline()` 的默认链时引擎已把这两步都做了。
 
 **遇到"全黑且无报错"，先查这一步。** 同类"忘了一步就静默无输出"的坑记在 [排错 §3](9-troubleshooting.md#3-黑屏且无任何报错忘了给-ubouniform-block-绑定)。
 

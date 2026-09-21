@@ -42,7 +42,12 @@ node.SetRenderable(&mesh, &mat);             // 节点持"非拥有"指针：mes
 
 ## 4. 批量的同一网格：实例化
 
-同一个 `MeshData` 画几百份、每份不同变换/颜色，用 `gfx::InstancedMesh::Create(std::move(geo), std::move(instances))`（`gfx::Instance{model, color}`），别建几百个 `SceneNode`。demo 中按 `5` 切换的就是它。
+同一个 `MeshData` 画几百份、每份不同变换/颜色，用 `gfx::InstancedMesh`，别建几百个 `SceneNode`：
+
+```cpp
+gfx::InstancedMesh field;
+field.Create(std::move(geo), std::move(instances));   // 返回 bool；gfx::Instance{model, color}
+```
 
 ---
 

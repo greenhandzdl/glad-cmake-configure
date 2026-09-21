@@ -161,8 +161,11 @@ PBR `shadow` 0.14% / `ibl` 15.4% / `bloom` 57.8% / `debug` 3.7% / `instances` 6.
   几何与场景（`3-geometry-scene`）、贴图与模型加载（`4-assets-loading`，并入原进阶的两阶段细节）、
   光照与 UBO（`5-lighting-ubo`）四章，另新增从未进过用户文档的相机/拾取（`6-camera-picking`）与体素
   子系统（`7-voxel-basics`）两章；原进阶/排错顺延为 `8-advanced`/`9-troubleshooting`。新章每个签名先对
-  头文件核实后再写（修正了初稿中不存在的 `SceneNode::CreateChild`、`SkyboxIBL`、`world.Set` 三处）；
-  全仓 22 个 markdown 的相对链接与锚点经脚本验证无断链。
+  头文件核实后再写（修正了初稿中不存在的 `SceneNode::CreateChild`、`World::Set`（实为 `Edit`）、
+  静态形式的 `InstancedMesh::Create`、`LightBuffer::handle()` 四处）；agent 速查表同步修掉已改签名的旧写法（`PickRay` 多余的 `eye` 参数、
+  `Sphere/Plane` 参数名、`InstancedMesh::Create` 实为返 bool 的成员函数），并清掉本 CHANGELOG 自己的两处
+  陈旧 API 名（`Fbm2d`→`Fbm2`、`MoveUp(dt)`→`MoveUp(distance)`）；全仓 markdown 的相对链接/锚点与
+  全部 `gfx::` 符号、反引号内方法名经脚本扫描零断链、零不存在的符号。
 
 ## v1.3.0
 
@@ -181,8 +184,8 @@ PBR `shadow` 0.14% / `ibl` 15.4% / `bloom` 57.8% / `debug` 3.7% / `instances` 6.
 - **`VoxelShaders`**（GLSL 410）：采样 `sampler2DArray`，顶点 light 通道调制 + `LightingBlock` 平行光近似 + 雾 + 水面 uv scroll。
 - **`RaycastVoxel`（DDA）**：`src/gfx/camera/VoxelRay.h`，Amanatides & Woo 逐格步进，header-only 纯函数，
   对 solidity 谓词做模板参数（chunk / chunk 网格 / 扁平数组皆可），返回命中格 + 进入面法向 + 距离，放置方块不必二次查询。
-- **`Camera` 飞行接口**：`MoveForward/MoveRight/MoveUp(dt)` 与 `SetYawPitch`，原有 orbit 行为不变。
-- **`Noise`（`src/gfx/util/`）**：seeded 排列表的 Perlin 2D/3D + `Fbm2d(x, z, octaves)` + `ToUnit`；确定性、无全局状态、worker 线程安全。
+- **`Camera` 飞行接口**：`SetYawPitch(yaw, pitch)` 与 `MoveForward/MoveRight/MoveUp(distance)`（参数是世界单位距离，`速度×dt` 留在调用方游戏层），原有 orbit 行为不变。
+- **`Noise`（`src/gfx/util/`）**：seeded 排列表的 Perlin 2D/3D + `Fbm2(x, y, octaves)` + `ToUnit`；确定性、无全局状态、worker 线程安全。
 - **`ParticleBatch`**：POINT sprite 批次，`Spawn/Update/Draw`，着色器内按 lifetime 缩尺寸与淡出（挖掘碎屑、放置反馈）。
 - **线性距离雾**：`LightingBlock` 尾部追加 `fogColor` / `fogParams`，`LightSetup` 加 CPU 侧字段，PBR / Instanced / Voxel
   三条 fragment 程序统一 `mix`；默认关闭，未开启时既有场景视觉零变化（2D 精灵不雾）。

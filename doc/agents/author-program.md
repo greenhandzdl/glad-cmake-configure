@@ -107,7 +107,7 @@ int main() {
 | 着色器 | `gfx::ShaderProgram::CreateFromSource(vs, fs)` → 有 `operator bool`/`.error()` | 常量在 `gfx::shaders::kPbrVertex/kPbrFragment/kDepthVertex/kDepthFragment/kInstancedVertex/kInstancedFragment` |
 | UBO 绑定 | `prog->SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding)`；`"ShadowBlock", gfx::CascadedShadowMap::kShadowBinding` | **链接后设一次**；不绑=全黑无报错 |
 | 采样器 | `prog->Set("uShadowMap", (int)gfx::texunit::shadowArray)` 等 | `texunit::{shadowArray,irradiance,prefilter,brdfLut,skybox}` |
-| 几何 | `gfx::GeometryFactory::Cube(size)` / `Sphere(r,sectors,stacks)` / `Plane(size)` → `gfx::MeshData` | |
+| 几何 | `gfx::GeometryFactory::Cube(size)` / `Sphere(radius,segments,rings)` / `Plane(halfExtent)` → `gfx::MeshData` | |
 | 上传网格 | `gfx::Mesh m; m.Upload(std::move(data));` | 仅渲染线程；move-only |
 | 材质 | `gfx::PbrMaterial{ baseColor(vec4), metallic, roughness, albedo(Texture2D*), ... }` | `albedo` 可空 |
 | 变换 | `gfx::Transform t; t.translation/t.scale; t.SetAxisAngle(axis, rad);` | |
@@ -118,8 +118,8 @@ int main() {
 | 阴影 | `gfx::CascadedShadowMap csm; csm.Init(2048);` | |
 | 环境/天空 | `gfx::EnvironmentMap env; env.Generate(travel,256,32,256);` `gfx::SkyboxRenderer sky; sky.Init();` | |
 | 光照 | `gfx::LightBuffer lb; lb.Init(); gfx::LightSetup s; s.sun.{direction,color,intensity}; s.ambient; lb.Update(s, camPos);` | |
-| 实例化 | `gfx::InstancedMesh im; im.Create(std::move(geo), std::move(std::vector<gfx::Instance>));` | `gfx::Instance{model(mat4),color(vec4)}` |
-| 拾取 | `gfx::PickRay(px,py,fbw,fbh,invVP,eye)` → `gfx::Ray`；`gfx::PickNearest(ray, spheres)`→index | `spheres: vector<pair<vec3,float>>`，取自 `scene.PickTargets()` |
+| 实例化 | `gfx::InstancedMesh im; if (!im.Create(std::move(geo), std::move(insts))) {...}` | **成员函数非静态**，返回 `bool`；`gfx::Instance{model(mat4),color(vec4)}` |
+| 拾取 | `gfx::PickRay(px,py,fbw,fbh,invViewProj)` → `gfx::Ray`；`gfx::PickNearest(ray, spheres)`→index | 像素是 framebuffer 坐标（Retina 下先从 GLFW 窗口坐标乘 scale）；`spheres: vector<pair<vec3,float>>`，取自 `scene.PickTargets()` |
 | 常量 | `gfx::kWindowWidth/kWindowHeight/kWindowTitle/kAppName/kAppVersion` | 来自 `Platform.h` |
 
 ---
