@@ -44,7 +44,25 @@ public:
 class GeometryPass : public RenderPass {
 public:
     GeometryPass() : RenderPass("Geometry") {}
+    ~GeometryPass() override;
     void Execute(RenderFrame& frame) override;
+
+private:
+    // The PBR fragment shader statically declares the shadow / IBL samplers
+    // (sampler2DArrayShadow + two samplerCube + a sampler2D), so GLSL keeps them
+    // active no matter what uUseShadow / uUseIbl say at runtime. On Apple's GL an
+    // active sampler whose unit holds no, or a wrongly-typed, texture makes the
+    // whole draw call INVALID_OPERATION and the driver then drops every triangle,
+    // so a scene without the shadow / IBL subsystems would render as nothing but
+    // the clear colour. These are the 1x1 stand-ins that give each such unit a
+    // type-correct, complete texture; a real subsystem rebinds its unit over the
+    // top of them. Render-thread only, freed in the destructor (the demo holds the
+    // Renderer on the stack above its Window, so the context is still current).
+    void EnsureSamplerPlaceholders();
+    GLuint phShadowArray_ = 0;   // sampler2DArrayShadow  (texunit::shadowArray)
+    GLuint phCube_        = 0;   // samplerCube           (irradiance + prefilter)
+    GLuint phBrdfLut_     = 0;   // sampler2D             (brdfLut)
+    bool   phReady_       = false;
 };
 
 // Standalone sky stage. The opaque geometry / voxel pass opens the scene target

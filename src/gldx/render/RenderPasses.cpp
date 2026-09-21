@@ -47,6 +47,55 @@ void ShadowPass::Execute(RenderFrame& f) {
     f.shadow.map->Upload();
 }
 
+GeometryPass::~GeometryPass() {
+    if (phShadowArray_) glDeleteTextures(1, &phShadowArray_);
+    if (phCube_)        glDeleteTextures(1, &phCube_);
+    if (phBrdfLut_)     glDeleteTextures(1, &phBrdfLut_);
+}
+
+void GeometryPass::EnsureSamplerPlaceholders() {
+    if (phReady_) return;
+    phReady_ = true;
+    // GL 4.1 (macOS' ceiling) predates glTexStorage*, so allocate with glTexImage.
+    // Data is a real 1x1 texel: a texture only counts as "complete" once a level
+    // is specified, and an incomplete bound texture is itself an INVALID_OPERATION
+    // at draw time — exactly the frame-poisoning this is here to prevent.
+    static const GLfloat depthOne = 1.0f;          // empty (far) depth for the shadow sampler
+    static const GLubyte white[4] = {255, 255, 255, 255};
+
+    glGenTextures(1, &phShadowArray_);             // sampler2DArrayShadow -> depth array
+    glBindTexture(GL_TEXTURE_2D_ARRAY, phShadowArray_);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, 1, 1, 1, 0,
+                 GL_DEPTH_COMPONENT, GL_FLOAT, &depthOne);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+
+    glGenTextures(1, &phCube_);                     // samplerCube (irradiance + prefilter share it)
+    glBindTexture(GL_TEXTURE_CUBE_MAP, phCube_);
+    for (int face = 0; face < 6; ++face)
+        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, 0, GL_RGBA8, 1, 1, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, white);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glGenTextures(1, &phBrdfLut_);                  // sampler2D (BRDF LUT)
+    glBindTexture(GL_TEXTURE_2D, phBrdfLut_);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
 void GeometryPass::Execute(RenderFrame& f) {
     RenderContext::AssertRenderThread("GeometryPass::Execute");
     // The scene minimum: a camera, the lighting UBO, a PBR program and a scene
@@ -64,6 +113,26 @@ void GeometryPass::Execute(RenderFrame& f) {
 
     const ShaderProgram& pbr = *f.pbr;
     pbr.Use();
+    // Point the statically-declared shadow / IBL samplers at their dedicated
+    // units and back each unit with a type-correct 1x1 stand-in. This has to run
+    // before the draws and regardless of uUseShadow / uUseIbl: the samplers stay
+    // active in the compiled program, and an active-but-invalid sampler poisons
+    // the whole draw on Apple's driver. A real subsystem rebinds its unit right
+    // afterwards, so this only takes effect where the subsystem is absent.
+    EnsureSamplerPlaceholders();
+    pbr.Set("uShadowMap",  static_cast<int>(texunit::shadowArray));
+    pbr.Set("uIrradiance", static_cast<int>(texunit::irradiance));
+    pbr.Set("uPrefilter",  static_cast<int>(texunit::prefilter));
+    pbr.Set("uBrdfLut",    static_cast<int>(texunit::brdfLut));
+    glActiveTexture(GL_TEXTURE0 + texunit::shadowArray);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, phShadowArray_);
+    glActiveTexture(GL_TEXTURE0 + texunit::irradiance);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, phCube_);
+    glActiveTexture(GL_TEXTURE0 + texunit::prefilter);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, phCube_);
+    glActiveTexture(GL_TEXTURE0 + texunit::brdfLut);
+    glBindTexture(GL_TEXTURE_2D, phBrdfLut_);
+    glActiveTexture(GL_TEXTURE0);
     pbr.Set("uViewProj", f.viewProj);
     // Ask for the feature only where the data behind it exists: the shader
     // would otherwise sample a shadow array or IBL set that was never bound.
