@@ -1,0 +1,138 @@
+/**
+ * @file main.cpp
+ * @brief shadow_csm - cascaded shadow maps, the one extra pass they need.
+ *
+ * Same lit scene as pbr_lighting plus the two shadow pieces: a CascadedShadowMap
+ * (a depth texture array + a ShadowBlock UBO), the depth-only program that fills
+ * it, and ShadowPass ahead of GeometryPass. The scene's sun is angled low so the
+ * spheres throw long, readable shadows across the ground. GeometryPass already
+ * binds the cascade array and toggles uUseShadow off `shadow.enabled &&
+ * shadow.map`, so a frame that never brings the shadow record renders exactly
+ * like the no-shadow case - which is the whole point of the split.
+ *
+ * Controls: 1 toggles shadows, Esc quits, drag orbits, --on/--off shadow,
+ * --quit-after SECONDS for headless.
+ */
+
+#include "demo/demo_app.h"
+
+#include <cmath>
+#include <memory>
+#include <vector>
+
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+namespace {
+
+struct View {
+    float yaw = 0.7f, pitch = 0.35f, radius = 10.0f;
+    double lastX = 0.0, lastY = 0.0;
+    bool dragging = false;
+    bool shadow = true;
+};
+
+void OnMouse(GLFWwindow* w, double x, double y) {
+    auto* v = static_cast<View*>(glfwGetWindowUserPointer(w));
+    if (!v || !v->dragging) return;
+    v->yaw   -= static_cast<float>(x - v->lastX) * 0.006f;
+    v->pitch  = std::min(std::max(v->pitch + static_cast<float>(y - v->lastY) * 0.006f, -1.45f), 1.45f);
+    v->lastX = x; v->lastY = y;
+}
+void OnButton(GLFWwindow* w, int b, int a, int) {
+    if (b != GLFW_MOUSE_BUTTON_LEFT) return;
+    if (auto* v = static_cast<View*>(glfwGetWindowUserPointer(w))) {
+        v->dragging = (a == GLFW_PRESS);
+        glfwGetCursorPos(w, &v->lastX, &v->lastY);
+    }
+}
+
+struct Item { gfx::Mesh mesh; gfx::PbrMaterial material; };
+
+} // namespace
+
+int main(int argc, char** argv) {
+    const demo::Flags flags(argc, argv, {"shadow"}, {"yaw", "pitch", "radius"}, "shadow_csm");
+    if (flags.wantsHelp()) { flags.printUsage(); return 0; }
+
+    return demo::Run(flags, "gfx demo - shadow_csm (cascaded directional shadows)",
+                     [&](demo::Ctx& ctx) -> int {
+        View view;
+        view.yaw = flags.real("yaw", view.yaw);
+        view.pitch = flags.real("pitch", view.pitch);
+        view.radius = flags.real("radius", view.radius, 2.0f, 40.0f);
+        view.shadow = flags.on("shadow");
+        glfwSetWindowUserPointer(ctx.window, &view);
+        glfwSetCursorPosCallback(ctx.window, OnMouse);
+        glfwSetMouseButtonCallback(ctx.window, OnButton);
+
+        ctx.renderer.AddPass(std::make_unique<gfx::ShadowPass>());
+        ctx.renderer.AddPass(std::make_unique<gfx::GeometryPass>());
+
+        auto pbr = gfx::ShaderProgram::CreateFromSource(gfx::shaders::kPbrVertex, gfx::shaders::kPbrFragment);
+        if (!pbr) { std::fprintf(stderr, "PBR shader: %s\n", pbr.error().c_str()); return 1; }
+        pbr->Use();
+        pbr->Set("uShadowMap", static_cast<int>(gfx::texunit::shadowArray));
+        pbr->SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);
+        pbr->SetBlockBinding("ShadowBlock", gfx::CascadedShadowMap::kShadowBinding);
+
+        auto depth = gfx::ShaderProgram::CreateFromSource(gfx::shaders::kDepthVertex, gfx::shaders::kDepthFragment);
+        if (!depth) { std::fprintf(stderr, "Depth shader: %s\n", depth.error().c_str()); return 1; }
+
+        gfx::LightBuffer lights; lights.Init();
+        gfx::CascadedShadowMap csm; csm.Init(2048);
+        gfx::Camera camera; camera.SetPerspective(45.0f, 1.0f, 0.1f, 100.0f);
+
+        std::vector<std::unique_ptr<Item>> items;
+        gfx::Scene scene;
+        auto add = [&](gfx::MeshData data, const gfx::PbrMaterial& m, const gfx::Transform& t) {
+            auto it = std::make_unique<Item>();
+            it->material = m;
+            glm::vec3 c; float r;
+            gfx::SceneNode::BoundsFromMeshData(data, c, r);
+            it->mesh.Upload(std::move(data));
+            gfx::SceneNode& n = scene.CreateRoot(t);
+            n.SetRenderable(&it->mesh, &it->material);
+            n.SetLocalBounds(c, r);
+            items.push_back(std::move(it));
+            return &n;
+        };
+        { gfx::Transform t; t.scale = glm::vec3(24.0f, 1.0f, 24.0f);
+          gfx::PbrMaterial m; m.baseColor = glm::vec4(0.6f, 0.62f, 0.66f, 1.0f); m.roughness = 0.9f;
+          add(gfx::GeometryFactory::Plane(1.0f), m, t)->castsShadow = false; }   // receives, never casts
+        for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) {
+            gfx::Transform t; t.translation = glm::vec3(-2.4f + i * 2.4f, 0.7f, -2.4f + j * 2.4f);
+            gfx::PbrMaterial m; m.baseColor = glm::vec4(0.85f, 0.45f, 0.25f, 1.0f); m.roughness = 0.4f;
+            add(gfx::GeometryFactory::Sphere(0.7f, 32, 24), m, t);
+        }
+
+        static bool armed = true;
+        return ctx.Loop([&](gfx::RenderFrame& f, const demo::FrameInfo& info) {
+            if (bool p = glfwGetKey(info.window, GLFW_KEY_1) == GLFW_PRESS; p && armed) { view.shadow = !view.shadow; armed = false; }
+            else if (!p) armed = true;
+
+            const glm::vec3 target(0.0f, 0.4f, 0.0f);
+            const float cp = std::cos(view.pitch);
+            const glm::vec3 eye(target.x + view.radius * cp * std::sin(view.yaw),
+                                target.y + view.radius * std::sin(view.pitch),
+                                target.z + view.radius * cp * std::cos(view.yaw));
+            camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
+            camera.LookAt(eye, target, glm::vec3(0, 1, 0));
+
+            const glm::vec3 towardSun = glm::normalize(glm::vec3(0.45f, 0.5f, 0.35f));   // low-ish sun => long shadows
+
+            gfx::LightSetup setup;
+            setup.sun.direction = -towardSun;
+            setup.sun.color = glm::vec3(1.0f);
+            setup.sun.intensity = 3.0f;
+            setup.ambient = glm::vec3(0.12f);
+            lights.Update(setup, camera.Position());
+            scene.Update();
+
+            f.camera = &camera; f.scene = &scene; f.lights = &lights; f.pbr = &*pbr;
+            f.viewProj = camera.ViewProjection(); f.lightSetup = setup;
+            f.shadow.map = &csm; f.shadow.depth = &*depth;
+            f.shadow.sunToward = towardSun; f.shadow.enabled = view.shadow;
+        });
+    });
+}
