@@ -7,7 +7,7 @@
 ## 1. 描述这一帧的光：`LightSetup`
 
 ```cpp
-gfx::LightSetup setup;
+gldx::LightSetup setup;
 setup.sun.color     = {1.0f, 0.98f, 0.94f};   // DirectionalLight：color/intensity/direction（传播方向）
 setup.sun.intensity = 3.2f;
 setup.sun.direction = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.25f));
@@ -23,7 +23,7 @@ setup.fogEnd       = 120.0f;
 ## 2. 灌进 UBO 并绑定（黑屏第一课）
 
 ```cpp
-gfx::LightBuffer lights;            // binding = 1，引擎内部固定
+gldx::LightBuffer lights;            // binding = 1，引擎内部固定
 lights.Init();                      // 渲染线程：按 sizeof(LightingBlockGpu) 建动态 UBO
 lights.Update(setup, cameraPos);    // 每帧：CPU 端打包 std140 块并整块替换
 lights.Bind();                      // glBindBufferBase(GL_UNIFORM_BUFFER, 1, handle)
@@ -32,9 +32,9 @@ lights.Bind();                      // glBindBufferBase(GL_UNIFORM_BUFFER, 1, ha
 `lighting` uniform block 是**全局共享接口**。若你写自己的 PBR pass 直接 `Renderer::Render()`，忘了绑定制服块，片段着色器读到 `nullptr` UBO → **全黑且无 GL error**（`glGetError` 抓不到）。GLSL 4.10 不允许在 block 上写 `layout(binding=N)`，所以绑定在 C++ 侧做——把自己的 block 映射到引擎的固定 binding，再每帧 `Bind()`：
 
 ```cpp
-myProgram.SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);  // 链接后设一次，binding = 1
+myProgram.SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);  // 链接后设一次，binding = 1
 lights.Bind();                                                           // 每帧，在渲染线程
-// 阴影同理：SetBlockBinding("ShadowBlock", gfx::CascadedShadowMap::kShadowBinding)
+// 阴影同理：SetBlockBinding("ShadowBlock", gldx::CascadedShadowMap::kShadowBinding)
 ```
 
 `LightBuffer` 只暴露 `Init/Update/Bind/valid`——没有也不需要 `handle()`，别拿裸句柄自己 `glBindBufferBase`。当然，走 `BuildPbrPipeline()` 或 `BuildMinimalPipeline()` 时，只要几何 pass 在链里，引擎已把这两步都做了。
@@ -44,8 +44,8 @@ lights.Bind();                                                           // 每�
 ## 3. 采样贴图：走 `Sampler`，别硬写过滤
 
 ```cpp
-gfx::Sampler albedo;  albedo.wrap = gfx::Sampler::Wrap::Repeat;
-                      albedo.minFilter = gfx::Sampler::MinFilter::LinearMipmapLinear;
+gldx::Sampler albedo;  albedo.wrap = gldx::Sampler::Wrap::Repeat;
+                      albedo.minFilter = gldx::Sampler::MinFilter::LinearMipmapLinear;
                       albedo.maxAnisotropy = 8.0f;   // 各向异性；4.0/8.0/16.0 会向下钳制
 albedo.Apply(0);      // 绑到 texture unit 0
 ```
@@ -57,7 +57,7 @@ albedo.Apply(0);      // 绑到 texture unit 0
 想摆脱"只有太阳 + 点光"的塑料感，程序化烘一套天空 IBL（自测可当天空盒背景）：
 
 ```cpp
-gfx::EnvironmentMap env;
+gldx::EnvironmentMap env;
 env.Generate(sunDir);       // 渲染线程烘焙 4 张贴图：HDR 天空 cube / 漫反射 irradiance /
                             // GGX prefilter 镜面（粗糙度存进 mip）/ BRDF 积分 LUT
 frame.sky.env = &env;       // 之后每帧随 RenderFrame 交给引擎（同一份 env 既喂 IBL 也喂天空盒）

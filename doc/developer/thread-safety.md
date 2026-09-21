@@ -11,7 +11,7 @@
 
 ## 1. GL 上下文的线程亲和（强制，而非假设）
 
-`RenderContext`（`src/gfx/core/RenderContext.{h,cpp}`）是守门人：
+`RenderContext`（`src/gldx/core/RenderContext.{h,cpp}`）是守门人：
 
 - `MarkAsRenderThread()` 设一个 `thread_local bool g_isRenderThread = true`。
   `src/main.cpp` 在拥有 GL 上下文的那个线程上、紧跟上下文创建之后调用它一次。
@@ -30,7 +30,7 @@
 
 ## 2. 两阶段资源管线（CPU 离线线程，GL 在线线程）
 
-在 GL 边界处切开——见 `AssetManager`（`src/gfx/assets/`）：
+在 GL 边界处切开——见 `AssetManager`（`src/gldx/assets/`）：
 
 - **Stage A** —— `RequestModel()` / `RequestTexture()` 把*路径*交给一个
   `ThreadPool`；工作线程跑 Assimp/STB 解码并构建普通 CPU 结构体
@@ -46,7 +46,7 @@
 ## 3. `AssetManager` 中的同步原语
 
 管理器用两把不同的锁，分别守护两处不同的共享结构
-（`src/gfx/assets/AssetManager.h`）：
+（`src/gldx/assets/AssetManager.h`）：
 
 - `mutable std::mutex queueMutex_` —— 守护在途的 future 向量（工作队列）。在
   入队 / 抽取周围是短临界区。
@@ -111,22 +111,22 @@ future）、在环境生成（`EnvironmentMap`）里都是如此。这让失败�
 
 ## 9. named module 不改变以上任何一条
 
-自 Phase 6 起，引擎以 C++20 named module `gfx` 交付（见
+自 Phase 6 起，引擎以 C++20 named module `gldx` 交付（见
 [design.md](design.md) §7）。那是一个*链接/打包*层面的改动，不是并发层面的，线程
 亲和的保证原封不动地挺过它：
 
 - **单一渲染线程 TLS。** `g_isRenderThread` 活在 `RenderContext.cpp` 内的一个匿名
-  namespace 里——一个单一的 `module gfx;` 实现单元——所以它在整个库里恰有一个
+  namespace 里——一个单一的 `module gldx;` 实现单元——所以它在整个库里恰有一个
   定义。每个单元只能通过导出的 `RenderContext` 成员函数触达它，绝无第二份拷贝。
 - **没有头文件内联的可变状态。** 没有任何带线程亲和的东西定义在头文件里，所以把
-  头文件包进 `gfx.cppm` 不会分裂出一个单例或静态量。仅有的头作用域对象是
+  头文件包进 `gldx.cppm` 不会分裂出一个单例或静态量。仅有的头作用域对象是
   `inline constexpr`/`inline const` 的值数据（GLSL 源码、布局常量）——不可变，
   所以跨模块边界共享它们构造上就无竞争。
 - **断言覆盖完好。** 那次"仅把 include 改成 import"的重构没动过任何函数体；横跨
   23 个触碰 GL 的单元里那 90+ 个 `AssertRenderThread` 调用点原封未动。
 - **global-module 类型是被共享、而非被复制。** GLAD/GLM 实体坐在每个单元的 global
-  module fragment 里（经 `src/gfx/gmf.hpp`），所以 `GLuint`、`glm::vec3`、
-  `std::mutex`… 在 `gfx` 里和在 `main.cpp` 里是同一批 global-module 类型——不存在
+  module fragment 里（经 `src/gldx/gmf.hpp`），所以 `GLuint`、`glm::vec3`、
+  `std::mutex`… 在 `gldx` 里和在 `main.cpp` 里是同一批 global-module 类型——不存在
   第二份可能失同步的模块局部定义。
 
 ---

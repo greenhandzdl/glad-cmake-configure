@@ -1,46 +1,53 @@
 # 🟢 ① 核心骨架：窗口、渲染线程、Renderer
 
-前提：已完成 [入门](1-getting-started.md)（项目能构建、demo 窗口能弹出来）。这一章教你用**最少的代码**把 `gfx` 接进自己的 `main.cpp`：建窗口、声明渲染线程、初始化 `Renderer`。只讲骨架，几何/材质/资源/光照分别在 [②](3-geometry-scene.md)/[③](4-assets-loading.md)/[④](5-lighting-ubo.md)。
+前提：已完成 [入门](1-getting-started.md)（项目能构建、demo 窗口能弹出来）。这一章教你用**最少的代码**把 `gldx` 接进自己的 `main.cpp`：建窗口、声明渲染线程、初始化 `Renderer`。只讲骨架，几何/材质/资源/光照分别在 [②](3-geometry-scene.md)/[③](4-assets-loading.md)/[④](5-lighting-ubo.md)。
 
 > 涉及线程与 GL 对象生命周期的硬规则见 [../developer/thread-safety.md](../developer/thread-safety.md)；"为什么这样设计"见 [../developer/design.md](../developer/design.md)。
 
 ---
 
-## 1. 两行引入，一个骨架
+## 1. 三行引入，一个骨架
 
-引擎以单一 C++20 named module `gfx` 交付，你的 `main.cpp` 只需两行引入：
+引擎 `gldx`、窗口库 `gldxwin`、命令行库 `gldxcli` 都是 **C++20 named module**。一个最小 `main.cpp`：
 
 ```cpp
-#include "gfx/core/Platform.h"   // 文本 include：GLAD-before-GLFW 顺序 + GLFW_PLATFORM_* 宏 + 窗口常量
-import gfx;                      // 整个引擎；无需再 #include 任何 gfx/** 头
+#include "gldx/core/Platform.h"   // 文本 include：GLAD-before-GLFW 顺序 + GLFW_PLATFORM_* 宏（自己调 glfw* 才需要）
+import gldx;                      // 整个引擎；无需再 #include 任何 gldx/** 头
+import gldxwin;                   // gldx::win::App / Window：建窗 + GL 上下文 + 帧循环
+import gldxcli;                   // （可选）gldx::cli::Flags：命令行开关
 
-int main() {
-    if (!glfwInit()) return 1;
-    GLFWwindow* win = glfwCreateWindow(gfx::kWindowWidth, gfx::kWindowHeight, gfx::kWindowTitle, nullptr, nullptr);
-    glfwMakeContextCurrent(win);
-    gladLoadGL(reinterpret_cast<GLADloadfunc>(glfwGetProcAddress));
+int main(int argc, char** argv) {
+    const gldx::cli::Flags flags(argc, argv, {}, {}, "my_app");
 
-    gfx::RenderContext::MarkAsRenderThread();   // 声明：本线程是唯一渲染线程
+    gldx::win::WindowDesc desc;              // 尺寸/标题（缺省 800×600 / "gldx"）
+    desc.title = "my app";
+    gldx::win::Window window(desc);          // 构造即：建窗 + MakeContextCurrent + gladLoadGL
+    if (!window.Ok()) return 1;              // 建不出窗就干净退出，不崩
 
-    gfx::Renderer renderer;
+    gldx::RenderContext::MarkAsRenderThread();   // 声明：本线程是唯一渲染线程
+
+    gldx::Renderer renderer;                 // GL 资源 owner 声明在 window 之后 → 先于 window 析构
     renderer.Init();
     renderer.BuildPbrPipeline();                // 装全套演示链 Shadow→Geometry→Skybox→PostProcess→DebugHud
     // renderer.BuildMinimalPipeline();         // 或极简 Geometry→DebugHud：不申请后处理/阴影/天空盒也能出图
-    // ... 建资源（②③④章）、每帧组装 RenderFrame、renderer.Render(frame) ...
+
+    window.OnFrame([&](const gldx::win::FrameInfo& info) {
+        gldx::RenderFrame frame;               // 每帧：填 fb 尺寸 + 相机/场景/光照等（见 §4）
+        frame.fbWidth  = info.fbWidth;
+        frame.fbHeight = info.fbHeight;
+        // ... 建资源（②③④章）、组装 frame ...
+        renderer.Render(frame);
+    });
+
+    return gldx::win::App::Get().Run({flags.quitAfter()});   // 帧循环；Esc 或 --quit-after 到点即退出
 }
 ```
 
-macOS 上建窗口还差一个 hint（Core Profile 必需，否则拿不到上下文）：
-
-```cpp
-#if GLFW_PLATFORM_MACOS
-glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-#endif
-```
+窗口怎么建、GL 4.1 上下文怎么来、`glfwInit`/`glfwTerminate` 的时序，全在 `gldxwin` 里统一处理——包括 macOS Core Profile 必需的 `GLFW_OPENGL_FORWARD_COMPAT` hint，你不必再手写任何 `glfwWindowHint`。想要更细的建/拆时机（多窗口、显式释放 GL 资源），用 `window.OnCreate(...)` / `window.OnDestroy(...)` 钩子（骨架细则见 [agents 手册](../agents/author-program.md) §3）。
 
 ## 2. 为什么 `Platform.h` 是 `#include` 而不是 `import`
 
-预处理宏（`GLFW_PLATFORM_MACOS`、`GL_VERSION` 等）与 `<GLFW/glfw3.h>` **无法跨模块边界传递**，`#if` 在预处理阶段求值早于 `import`。同理，`glm::vec3` / `GLuint` 这些出现在 `gfx` 接口里的类型属于 global module，你的代码要用它们时也得**自行文本 include** `<glm/...>`。完整取舍见 [../developer/design.md](../developer/design.md) §7。
+预处理宏（`GLFW_PLATFORM_MACOS`、`GL_VERSION` 等）与 `<GLFW/glfw3.h>` **无法跨模块边界传递**，`#if` 在预处理阶段求值早于 `import`。同理，`glm::vec3` / `GLuint` 这些出现在 `gldx` 接口里的类型属于 global module，你的代码要用它们时也得**自行文本 include** `<glm/...>`。完整取舍见 [../developer/design.md](../developer/design.md) §7。
 
 ## 3. 为什么 `MarkAsRenderThread()` 必须有
 

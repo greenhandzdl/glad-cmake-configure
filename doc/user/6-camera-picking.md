@@ -1,13 +1,13 @@
 # 🟢 ⑤ 相机与拾取
 
-前提：已完成 [④ 光照与 UBO](5-lighting-ubo.md)。相机（`gfx::Camera`）与拾取（`gfx::Picking.h`）都是**纯数学、无 GL** 的类，因此可以随便在 worker 线程读、在渲染线程改——这一章给出两套现成控制模型和"鼠标点中物体"的三步用法。
+前提：已完成 [④ 光照与 UBO](5-lighting-ubo.md)。相机（`gldx::Camera`）与拾取（`gldx::Picking.h`）都是**纯数学、无 GL** 的类，因此可以随便在 worker 线程读、在渲染线程改——这一章给出两套现成控制模型和"鼠标点中物体"的三步用法。
 
 ---
 
 ## 1. 一台相机、两种控制模型
 
 ```cpp
-gfx::Camera cam;
+gldx::Camera cam;
 cam.SetPerspective(45.0f, aspect, 0.1f, 200.0f);   // 透视：fov(度)/宽高比/near/far
 cam.SetViewportAspect(aspect);                      // 窗口 resize 时更新
 ```
@@ -28,7 +28,7 @@ auto p = cam.ToggleProjection();                        // 运行期互切（dem
 ## 3. 视锥剔除：`Frustum`
 
 ```cpp
-gfx::Frustum frustum;
+gldx::Frustum frustum;
 frustum.Extract(cam.ViewProjection());          // 每帧一次，从列主序 viewProj 提取六个平面
 if (frustum.SphereVisible(center, radius)) { /* 画 */ }
 ```
@@ -40,11 +40,11 @@ if (frustum.SphereVisible(center, radius)) { /* 画 */ }
 ```cpp
 // ① 屏幕像素 → 世界射线。注意先把 GLFW 光标(窗口坐标)换算成 framebuffer 像素：
 //    Retina 缩放窗口下两个坐标系差一个 scale。
-gfx::Ray ray = gfx::PickRay(cursorX * xscale, cursorY * yscale, fbW, fbH,
+gldx::Ray ray = gldx::PickRay(cursorX * xscale, cursorY * yscale, fbW, fbH,
                             cam.InverseViewProjection());
 // ② 与候选包围球求交：每个候选一对 (球心, 半径)，按"从前往后"取最近命中
 std::vector<std::pair<glm::vec3, float>> spheres = /* 各物体的包围球 */;
-int hit = gfx::PickNearest(ray, spheres);       // 无命中返回 -1；单球测试用 RaySphere
+int hit = gldx::PickNearest(ray, spheres);       // 无命中返回 -1；单球测试用 RaySphere
 ```
 
 ③ 把 `spheres[i]` 映射回你的节点、选中、换材质参数——这步是你的应用逻辑（demo 里选中后高亮 `metallic`）。`PickRay` 用近/远两平面反投影构造射线，**与投影类型无关**：透视给出 eye→远点方向，正交得到正确的过像素垂线；射线含非有限分量时下游按 miss 处理（不崩）。

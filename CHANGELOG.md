@@ -1,9 +1,22 @@
 # 更新日志 / Changelog
 
-本文件记录 `GLFW_Template`（`gfx` 引擎 + 演示应用）各版本的变更。
+本文件记录 `GLFW_Template`（`gldx` 引擎（旧名 `gfx`）+ 演示应用）各版本的变更。历史条目保留当时的 `gfx` 旧称不改写；Unreleased 顶部起用 `gldx`。
 版本标签遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
 ## Unreleased
+
+### 破坏性变更 / 重构（引擎改名 `gfx` → `gldx` + 抽取 `gldxwin`/`gldxcli` + CMake 分模块拆分）
+
+把“引擎 + 窗口 + CLI”拆成三个独立的 C++20 named module，并把引擎从 `gfx` 更名为 `gldx`：
+
+- **引擎改名 `gfx` → `gldx`**：named module 名、`namespace gfx`→`namespace gldx`、源码目录 `src/gfx/`→`src/gldx/`（`gfx.cppm`→`gldx.cppm`）、`#include "gfx/..."`→`"gldx/..."`、`import gfx;`→`import gldx;`、CMake target `gfx`→`gldx`、option `GFX_ENABLE_ASSIMP`→`GLDX_ENABLE_ASSIMP`、宏 `GFX_NO_ASSIMP`→`GLDX_NO_ASSIMP`。OpenGL 4.1 基线、单渲染线程、GL 资源在 `glfwTerminate` 前析构的约定、主可执行 `GLFW_Template` 名与 CI 制品 `GLFW_Template-<platform>` 均**不变**；引擎公共接口面除名字外不变。
+  - ⚠️ **破坏性**：外部若按名引用 `gfx` target / `-DGFX_ENABLE_ASSIMP` / `namespace gfx` / `#include "gfx/..."` 需同步改名为 `gldx`。
+- **新增窗口库 `gldxwin`**（`namespace gldx::win`，静态库 + named module）：引擎无关的 GLFW 窗口库——`App` Meyers 单例（`glfwInit`/`glfwTerminate` + GL 4.1 core hints（含 macOS forward-compat）+ 多窗口帧循环 `Run`）、`Window`（构造即建窗 + `MakeContextCurrent` + `gladLoadGL`，`OnCreate`/`OnFrame`/`OnDestroy` 钩子 + `SetCloseOnEsc` + `UserData` 槽）、`WindowDesc`/`FrameInfo`/`RunOptions`。仅链 `glfw` + GLAD，**不** import 任何 `gldx` 类型；`RenderContext::MarkAsRenderThread()` 由 demo 在 `OnCreate` 首行自调。
+- **新增 CLI 库 `gldxcli`**（`namespace gldx::cli::Flags`，静态库 + named module）：原 header-only `src/demo/demo_cli.h` 的 `Flags` 整体迁入（`--off/--on/--quit-after/--help` + `number/integer/real/string` 域夹范围逻辑全保留）；纯标准库、零链接依赖。
+- **全部 demo + `src/main.cpp` 改为 `import gldx; import gldxwin; import gldxcli;`**：删除 `src/demo/demo_app.h`、`src/demo/demo_cli.h`；13 个单功能 demo 与 `GLFW_Template` 用 `App::Get().Run()` + 一个 `Window`（`OnFrame`）驱动；`pbr_showcase`/`voxel_terrain` 的手写生命周期迁到 `App`/`Window` 钩子，逐帧行为保持一致（画面零回退）。应用标识常量 `kAppName`/`kAppVersion`/`kWindowTitle`/`kWindowWidth`/`kWindowHeight` 从 `Platform.h` 下沉到各 demo 本地 `constexpr`；`Platform.h` 现在只留 `GLFW_PLATFORM_*` 宏与 GLAD-before-GLFW 顺序。
+- **CMake 分模块递归拆分**：根 `CMakeLists.txt` 瘦身为 orchestrator（`project`/标准/`option` → `include(cmake/Dependencies.cmake)` 做 GLFW/GLAD/GLM/stb 探测 + `include(cmake/Assimp.cmake)` → `add_subdirectory(src)` → 脚本生成 + Summary）；`src/CMakeLists.txt` 逐个 `add_subdirectory(gldx/gldxwin/gldxcli)` 并定义 `GLFW_Template` 与 `demo`，每个库/可执行各持 `CMakeLists.txt`；`add_gfx_demo`→`add_gldx_demo`（链 `gldx gldxwin gldxcli`）。目标名与产物目录不变。
+- **修复**：`gldxwin::App` 构造内把 `glfwInit()` 提到 GL hints 之前（先前提交误将 `glfwInit` 放在 `glfwWindowHint*` 之后，属运行期顺序 bug）。
+- **验证**：`GLDX_ENABLE_ASSIMP=ON` 全量构建（gldx+gldxwin+gldxcli+`GLFW_Template`+15 demo，376 targets）、`OFF` 树配置+构建（160 targets，`model_loading` 优雅降级）；自有代码 `-Wall -Wextra -Werror` 零告警（仅 vendored stb 两类降级）；16 个可执行逐个 `--quit-after` 无头 exit 0、过滤系统噪声后 stderr 为空；`pbr_showcase`/`voxel_terrain` 回归画面零回退（`--freeze-at` 两次跑流式生成/网格计数完全一致）。
 
 ### 新增（演示重构：`src/main.cpp` 最小化 + `src/demo/{feature}` 分功能入门演示）
 

@@ -1,6 +1,6 @@
 # 开发者文档 / Developer Docs
 
-面向要**理解并修改 `gfx` 引擎本身**的贡献者。使用者教程（怎么跑、怎么接）在 [../user/README.md](../user/README.md)；这里讲**为什么这样设计**与**必须遵守的不变量**。
+面向要**理解并修改 `gldx` 引擎本身**的贡献者。使用者教程（怎么跑、怎么接）在 [../user/README.md](../user/README.md)；这里讲**为什么这样设计**与**必须遵守的不变量**。
 
 | 文档 | 讲什么 |
 | --- | --- |
@@ -12,12 +12,12 @@
 1. 先跑通 [../user/1-getting-started.md](../user/1-getting-started.md)，确认工具链（macOS 必须 Homebrew LLVM，见 [../user/9-troubleshooting.md](../user/9-troubleshooting.md)）。
 2. 读 [design.md](design.md) §1 的分层图，搞清楚你要改的东西在哪一层、依赖允许朝向哪里。
 3. **只要新增/修改会拥有或调用 GL 的代码，先读 [thread-safety.md](thread-safety.md)**，对照其末尾检查清单。
-4. 改 GLSL 记得只有 `src/gfx/shader/*Shaders.h` 是真源（`src/assets/shaders/` 是镜像，不加载）。
+4. 改 GLSL 记得只有 `src/gldx/shader/*Shaders.h` 是真源（`src/assets/shaders/` 是镜像，不加载）。
 
 ## 验证一次改动是否 OK
 
 ```bash
-cmake --build build 2>&1 | grep -E 'src/(main|gfx)' | grep -iE 'warning|error'   # 期望：无（自有代码零告警，Homebrew clang 基线）
+cmake --build build 2>&1 | grep -E 'src/(main|gldx)' | grep -iE 'warning|error'   # 期望：无（自有代码零告警，Homebrew clang 基线）
 ./output/GLFW_Template >/tmp/o 2>/tmp/e & p=$!; sleep 6; kill $p 2>/dev/null; wc -c /tmp/e   # 期望：stderr 0 字节
 ```
 

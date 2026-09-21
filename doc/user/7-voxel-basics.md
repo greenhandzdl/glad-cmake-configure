@@ -7,7 +7,7 @@
 ## 1. 方块表：`BlockRegistry`
 
 ```cpp
-gfx::BlockRegistry blocks;                  // 内置 9 种：kAir/kGrass/kDirt/kStone/kSand/kWood/kLeaves/kWater/kSnow
+gldx::BlockRegistry blocks;                  // 内置 9 种：kAir/kGrass/kDirt/kStone/kSand/kWood/kLeaves/kWater/kSnow
 std::uint16_t gravel = blocks.Add({"gravel", 9, true, false, false, false});  // BlockDef{name, texLayer, solid, cutout, transparent, emissive}
 ```
 
@@ -18,12 +18,12 @@ std::uint16_t gravel = blocks.Add({"gravel", 9, true, false, false, false});  //
 ## 2. 数据：`Chunk` + `Noise`
 
 ```cpp
-gfx::Chunk chunk({0, 0, 0});                       // 16^3 cells（kChunkSize=16），origin 为世界坐标
-gfx::Noise terrain(20260919u);                     // 固定种子 => 同一 seed 永远同一地形（回归截图依赖这点）
+gldx::Chunk chunk({0, 0, 0});                       // 16^3 cells（kChunkSize=16），origin 为世界坐标
+gldx::Noise terrain(20260919u);                     // 固定种子 => 同一 seed 永远同一地形（回归截图依赖这点）
 for (int x = 0; x < 16; ++x) for (int z = 0; z < 16; ++z) {
     double h = terrain.ToUnit(terrain.Fbm2(x * 0.12, z * 0.12, 4)) * 8.0;   // [-1,1]→[0,1] 后拉伸
     for (int y = 0; y <= static_cast<int>(h); ++y)
-        chunk.Set(x, y, z, y == static_cast<int>(h) ? gfx::BlockRegistry::kGrass : gfx::BlockRegistry::kStone);
+        chunk.Set(x, y, z, y == static_cast<int>(h) ? gldx::BlockRegistry::kGrass : gldx::BlockRegistry::kStone);
 }
 ```
 
@@ -32,8 +32,8 @@ for (int x = 0; x < 16; ++x) for (int z = 0; z < 16; ++z) {
 ## 3. 成块网格：`ChunkMesher`（纯 CPU，可并行）
 
 ```cpp
-gfx::ChunkMesher mesher(blocks);
-gfx::VoxelChunkMesh cm = mesher.Build(chunkCellsPtr, chunkOrigin, worldSource);  // opaque + transparent 两份 MeshData
+gldx::ChunkMesher mesher(blocks);
+gldx::VoxelChunkMesh cm = mesher.Build(chunkCellsPtr, chunkOrigin, worldSource);  // opaque + transparent 两份 MeshData
 ```
 
 - 只输出"与不透明邻居相邻"的面（面剔除），水/叶等透明与 cutout 几何分在 `cm.transparent`。
@@ -42,15 +42,15 @@ gfx::VoxelChunkMesh cm = mesher.Build(chunkCellsPtr, chunkOrigin, worldSource); 
 ## 4. 上传与绘制（渲染线程）
 
 ```cpp
-gfx::Texture2DArray atlas;                          // 所有方块切片的图集
+gldx::Texture2DArray atlas;                          // 所有方块切片的图集
 atlas.Upload({.width = 16, .height = 16, .layers = n, .channels = 4, .srgb = true, .pixels = rgbaBytes});
 
-gfx::VoxelMesh opaque;                              // 每个 chunk 一对；重mesh用 Update() 复用缓冲
+gldx::VoxelMesh opaque;                              // 每个 chunk 一对；重mesh用 Update() 复用缓冲
 opaque.Upload(std::move(cm.opaque));
 
-gfx::VoxelPipeline vx;                              // 把"这一帧要画什么"打包成一个结构
+gldx::VoxelPipeline vx;                              // 把"这一帧要画什么"打包成一个结构
 vx.prog = &voxelProg;  vx.atlas = &atlas;  vx.chunks = &chunkList;   // ready() 三缺一不画
-auto opaquePass = std::make_unique<gfx::VoxelOpaquePass>();
+auto opaquePass = std::make_unique<gldx::VoxelOpaquePass>();
 opaquePass->SetPipeline(vx);                        // VoxelTransparentPass 同款，多按视距从远到近排序
 ```
 
@@ -59,8 +59,8 @@ opaquePass->SetPipeline(vx);                        // VoxelTransparentPass 同�
 ## 5. 交互：`RaycastVoxel`（DDA，纯 CPU）
 
 ```cpp
-gfx::Ray ray = gfx::PickRay(cursorX * xscale, cursorY * yscale, fbW, fbH, cam.InverseViewProjection());
-if (auto hit = gfx::RaycastVoxel(ray, {0, 0, 0}, worldMaxCell,
+gldx::Ray ray = gldx::PickRay(cursorX * xscale, cursorY * yscale, fbW, fbH, cam.InverseViewProjection());
+if (auto hit = gldx::RaycastVoxel(ray, {0, 0, 0}, worldMaxCell,
         [&](glm::ivec3 c) { return world.Pickable(c); }, /*maxDist=*/6.0f)) {
     world.Edit(hit->position, airId);                  // 挖掉命中格（世界格坐标；demo 的 World::Edit，内部负责落到对应 chunk）
     world.Edit(hit->position + hit->normal, placeId);  // 或沿命中面法线在相邻格放置
@@ -72,7 +72,7 @@ if (auto hit = gfx::RaycastVoxel(ray, {0, 0, 0}, worldMaxCell,
 ## 6. 点缀：`ParticleBatch`
 
 ```cpp
-gfx::ParticleBatch particles;   // Init() 渲染线程；容量 2048 硬上限（粒子是装饰，满了 Spawn 返回 false）
+gldx::ParticleBatch particles;   // Init() 渲染线程；容量 2048 硬上限（粒子是装饰，满了 Spawn 返回 false）
 particles.Spawn(pos, vel, {1, 0.8f, 0.4f, 1}, 0.9f /*life 秒*/, 0.12f /*世界直径*/, 9.8f /*重力*/);
 particles.Update(dt);           // 每帧一次
 particles.Draw(frame.viewProj, cam.Position(), pixelScale);   // 透明地形之后画：深度测试开、写入关、互不遮挡
@@ -83,9 +83,9 @@ particles.Draw(frame.viewProj, cam.Position(), pixelScale);   // 透明地形之
 射线回答“眼睛看到了哪个格子”，碰撞回答“身体允许走到哪”。把玩家建模成以**脚底中心**为锚的轴对齐盒，逐帧提出位移让它落地、贴墙滑行：
 
 ```cpp
-const gfx::VoxelBody player{0.3f, 1.9f};        // 半径(XZ半宽) + 身高(脚→头)
+const gldx::VoxelBody player{0.3f, 1.9f};        // 半径(XZ半宽) + 身高(脚→头)
 glm::vec3 feet = cam.Position(); feet.y -= kEyeHeight;   // 眼睛在脚上方
-gfx::VoxelMoveResult r = gfx::MoveVoxelAabb(feet, player, delta,
+gldx::VoxelMoveResult r = gldx::MoveVoxelAabb(feet, player, delta,
         [&](glm::ivec3 c){ return world.Pickable(c); }); // 谓词=什么格挡得住人
 // r.grounded 告诉你这帧踩到了地面（下落被拦），交给重力/跳跃决定
 ```

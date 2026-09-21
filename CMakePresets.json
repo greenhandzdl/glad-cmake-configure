@@ -16,7 +16,7 @@
     {
       "name": "Debug",
       "displayName": "Debug (Homebrew clang, C++20 modules)",
-      "description": "Pins the compiler to Homebrew LLVM clang. The engine is a real C++20 named module (gfx); building it needs clang-scan-deps, which Apple's /usr/bin/clang does not ship, so the default Apple-clang profile fails to configure. Named 'Debug' to match CLion's default build profile.",
+      "description": "Pins the compiler to Homebrew LLVM clang. The engine is a real C++20 named module (gldx); building it needs clang-scan-deps, which Apple's /usr/bin/clang does not ship, so the default Apple-clang profile fails to configure. Named 'Debug' to match CLion's default build profile.",
       "inherits": "llvm-base",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     },

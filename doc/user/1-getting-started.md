@@ -108,7 +108,7 @@ CLion 会自动导入 `CMakePresets.json`。**macOS 上唯一要做的**：在 `
 
 ## 5. 运行效果与操作
 
-`src/main.cpp`（目标 `GLFW_Template`）是最小实现基线：一个 800×600 窗口里只画一个三角形——自定义 `RenderPass` + 内联 GLSL + `glDrawArrays(3)`，不建任何引擎子系统。看到它，就说明工具链、GL 4.1 上下文与 `import gfx;` 全通了。
+`src/main.cpp`（目标 `GLFW_Template`）是最小实现基线：一个 800×600 窗口里只画一个三角形——自定义 `RenderPass` + 内联 GLSL + `glDrawArrays(3)`，不建任何引擎子系统。看到它，就说明工具链、GL 4.1 上下文与 `import gldx;` 全通了。
 
 完整的交互式 PBR 演示现在在 `pbr_showcase`（`./scripts/run.sh pbr_showcase`）：纹理地面 + 5×5 金属/粗糙球阵、纹理立方体、一个旋转的子层级（carousel，演示场景变换传播），配合级联阴影、IBL 环境光、HDR + Bloom + ACES 后期、天空盒，以及精灵批次文本 HUD。下表是其键位：
 
@@ -129,6 +129,6 @@ CLion 会自动导入 `CMakePresets.json`。**macOS 上唯一要做的**：在 `
 
 ## 下一步
 
-- 想在自己的程序里用 `gfx` → [🟢 ① 核心骨架](2-core-setup.md)，后续 API 章（几何/资源/光照/相机/体素）见 [user 目录](README.md)
+- 想在自己的程序里用 `gldx` → [🟢 ① 核心骨架](2-core-setup.md)，后续 API 章（几何/资源/光照/相机/体素）见 [user 目录](README.md)
 - 想知道"为什么全黑 / 为什么 CLion 没配置" → [🧰 排错](9-troubleshooting.md)
 - 想理解引擎为什么这样设计 → [../developer/design.md](../developer/design.md)

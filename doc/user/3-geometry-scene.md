@@ -7,8 +7,8 @@
 ## 1. 造一个网格
 
 ```cpp
-gfx::Mesh mesh;                              // move-only RAII，拥有 VAO/VBO/IBO
-gfx::MeshData data = gfx::GeometryFactory::Sphere(0.5f, 48, 32);
+gldx::Mesh mesh;                              // move-only RAII，拥有 VAO/VBO/IBO
+gldx::MeshData data = gldx::GeometryFactory::Sphere(0.5f, 48, 32);
 mesh.Upload(std::move(data));                // Stage B：只能在渲染线程调用
 ```
 
@@ -18,7 +18,7 @@ mesh.Upload(std::move(data));                // Stage B：只能在渲染线程�
 ## 2. 给一个材质
 
 ```cpp
-gfx::PbrMaterial mat;
+gldx::PbrMaterial mat;
 mat.baseColor  = glm::vec4(0.9f, 0.5f, 0.25f, 1.0f);
 mat.metallic   = 0.6f;
 mat.roughness  = 0.3f;
@@ -29,8 +29,8 @@ PBR 走金属/粗糙工作流；没有贴图时这几个标量就足够出画面
 ## 3. 挂进场景层级
 
 ```cpp
-gfx::Transform t; t.translation = glm::vec3(0, 0.5f, 0);
-gfx::SceneNode& node = scene.CreateRoot(t);
+gldx::Transform t; t.translation = glm::vec3(0, 0.5f, 0);
+gldx::SceneNode& node = scene.CreateRoot(t);
 node.SetRenderable(&mesh, &mat);             // 节点持"非拥有"指针：mesh/mat 的生命周期归你
 ```
 
@@ -42,11 +42,11 @@ node.SetRenderable(&mesh, &mat);             // 节点持"非拥有"指针：mes
 
 ## 4. 批量的同一网格：实例化
 
-同一个 `MeshData` 画几百份、每份不同变换/颜色，用 `gfx::InstancedMesh`，别建几百个 `SceneNode`：
+同一个 `MeshData` 画几百份、每份不同变换/颜色，用 `gldx::InstancedMesh`，别建几百个 `SceneNode`：
 
 ```cpp
-gfx::InstancedMesh field;
-field.Create(std::move(geo), std::move(instances));   // 返回 bool；gfx::Instance{model, color}
+gldx::InstancedMesh field;
+field.Create(std::move(geo), std::move(instances));   // 返回 bool；gldx::Instance{model, color}
 ```
 
 ---

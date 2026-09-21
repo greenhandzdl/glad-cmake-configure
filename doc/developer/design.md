@@ -1,11 +1,11 @@
 # 设计
 
-本文说明 `gfx` 这一层是如何组织、以及为什么这样组织。文中引用的文件名与符号
-都真实存在于 `src/gfx/**`。
+本文说明 `gldx` 这一层是如何组织、以及为什么这样组织。文中引用的文件名与符号
+都真实存在于 `src/gldx/**`。
 
 ## 1. 分层的子系统
 
-引擎是 `src/gfx/` 下的一组小子系统，每个只负责一个概念。依赖方向**只向下**——
+引擎是 `src/gldx/` 下的一组小子系统，每个只负责一个概念。依赖方向**只向下**——
 上层可以用下层，反过来绝不行。
 
 ```
@@ -31,7 +31,7 @@
   独立测试。
 - **render/** 是唯一逐帧编排 GL 的地方。
 
-## 2. 场景图（`src/gfx/scene/`）
+## 2. 场景图（`src/gldx/scene/`）
 
 一个轻量的变换层级，刻意**不是** ECS。
 
@@ -53,7 +53,7 @@
 `src/main.cpp`）；节点只是引用它们。这始终把 GL 对象的所有权留在渲染线程、
 留在 CPU 层级之外。见 [thread-safety.md](thread-safety.md) §4。
 
-## 3. 渲染管线（`src/gfx/render/`）
+## 3. 渲染管线（`src/gldx/render/`）
 
 一条**线性 pass 链**，不是完整的 render graph。
 
@@ -97,7 +97,7 @@ pass。手写这个顺序更短、更好调，也契合 GL 状态的实际用法
 光照与阴影状态通过 **uniform buffer block** 共享：
 
 - `LightingBlock` → 绑定点 **1**，`ShadowBlock` → 绑定点 **2**（分别由
-  `src/gfx/light` 与 `src/gfx/shadow` 下的 `LightBuffer` 和 `CascadedShadowMap`
+  `src/gldx/light` 与 `src/gldx/shadow` 下的 `LightBuffer` 和 `CascadedShadowMap`
   管理）。
 - block 用 `layout(std140)`；C++ 侧的镜像结构体按同样布局打包。
 - **GLSL 4.10 不支持在 uniform *block* 上写 `layout(binding=N)`**（那是更晚的
@@ -109,7 +109,7 @@ pass。手写这个顺序更短、更好调，也契合 GL 状态的实际用法
 标量回退，绘制前把自己作为 uniform 应用一遍；PBR 程序从已绑定的 block 读取
 光照与阴影，所以材质只设每对象的纹理/uniform 状态。
 
-## 5. 两阶段资源管线（`src/gfx/assets/`）
+## 5. 两阶段资源管线（`src/gldx/assets/`）
 
 资源加载被拆成两阶段，使任何 GL 调用都不会离开渲染线程：
 
@@ -125,7 +125,7 @@ pass。手写这个顺序更短、更好调，也契合 GL 状态的实际用法
 不会看到一个半成品 GL 资源。完整保证与确切的同步原语见
 [thread-safety.md](thread-safety.md)。
 
-## 6. HDR 后期链（`src/gfx/render/` + `PostProcessShaders.h`）
+## 6. HDR 后期链（`src/gldx/render/` + `PostProcessShaders.h`）
 
 几何/天空盒/实例化这些绘制把**线性 HDR** 输出到一个 RGBA16F、经 MSAA resolve 的
 target。色调映射与 gamma **不在** PBR 着色器里——它们活在那唯一的一次 composite
@@ -143,31 +143,44 @@ pass 中，从而让整帧（场景*与*自发光*与*天空盒）被一致地�
 
 ## 7. 以 C++20 named module 交付
 
-整个引擎是一个 C++20 **named module `gfx`**，以静态库构建
-（`add_library(gfx STATIC)`）。应用对它的唯一耦合，就是 `src/main.cpp` 里的
-`import gfx;`——不再逐个 `#include` `gfx/**` 头。这取代了早先的布局：那时
+整个引擎是一个 C++20 **named module `gldx`**，以静态库构建
+（`add_library(gldx STATIC)`）。应用对它的唯一耦合，就是 `src/main.cpp` 里的
+`import gldx;`——不再逐个 `#include` `gldx/**` 头。这取代了早先的布局：那时
 `main.cpp` 文本包含约 27 个引擎头，所有东西直接编进一个可执行文件。
 
-- **主接口** —— `src/gfx/gfx.cppm`：用 `export { #include "..." }` 把每个公共引擎
+- **主接口** —— `src/gldx/gldx.cppm`：用 `export { #include "..." }` 把每个公共引擎
   头各包一次，于是模块再导出了完整的 API。用单一接口单元（而非每个子系统一个
   partition）契合这套以头为中心的代码库，并避开了跨厂商的 partition 排序隐患。
-- **实现单元** —— 那 31 个 `src/gfx/**/*.cpp` 各是一个 `module gfx;` 单元。它们
+- **实现单元** —— 那 31 个 `src/gldx/**/*.cpp` 各是一个 `module gldx;` 单元。它们
   通过对主接口的隐式 import 看到全部引擎声明，因此**不带**任何
-  `#include "gfx/…"`。
-- **global module fragment** —— GLAD、GLM 和常用标准库头都收在 `src/gfx/gmf.hpp`
+  `#include "gldx/…"`。
+- **global module fragment** —— GLAD、GLM 和常用标准库头都收在 `src/gldx/gmf.hpp`
   里，在每个单元 `module;` 片段的顶部被文本包含。这把 `GLuint` / `glm::vec3`
-  等附到*global module*（而非 `gfx`）上，于是导出的签名引用的是 global-module
+  等附到*global module*（而非 `gldx`）上，于是导出的签名引用的是 global-module
   类型，而文本包含同样这些头的 `main.cpp` 解析到的也是一模一样的实体，不会撞上
   一个冲突的模块作用域重复声明。
 - **第三方策略** —— GLAD + GLM 泄漏进了公共 API，所以它们是 global fragment 的
   include（绝不作为实体被 `export`）。**STB 与 Assimp 仅存在于实现**：它们留在
   各单元自己的片段里（如 `ModelLoader.cpp`、`third_party/stb_image_impl.cpp` 这个
   TU），从不出现在模块接口上。引擎头也不再 `#include` 它们分毫。
-- **窗口部分留在模块之外** —— `src/gfx/core/Platform.h`（GLAD-before-GLFW 顺序、
-  `GLFW_PLATFORM_*` 宏、`gfx::kApp*`/`kWindow*` 常量）刻意只是给 `main.cpp` 用的
-  普通文本 include，因为 `<GLFW/glfw3.h>` 和 `#if` 可见的宏没法干净地跨过模块
-  边界。
+- **窗口部分留在模块之外** —— `src/gldx/core/Platform.h`（GLAD-before-GLFW 顺序、
+  `GLFW_PLATFORM_*` 宏）刻意只是普通文本 include，因为 `<GLFW/glfw3.h>` 和 `#if` 可见的
+  宏没法干净地跨过模块边界。它**不再携带任何窗口/应用常量**（`kApp*`/`kWindow*` 已下沉到各
+  demo 自己定义）；引擎自身不建窗。
+
+## 8. 引擎之外的两个应用侧 named module
+
+与引擎同层、但彼此独立的还有两个 named module：`gldxwin`（`namespace gldx::win`，引擎无关
+的 GLFW 窗口/帧循环：`App` 单例 + 多窗口 `Window` + `OnCreate`/`OnFrame`/`OnDestroy` 钩子，仅
+链 glfw+GLAD，**不** import 任何 `gldx` 类型）与 `gldxcli`（`namespace gldx::cli::Flags`，纯标准
+库、零链接依赖）。它们取代了旧的 `src/demo/demo_app.h`/`demo_cli.h` 头文件脚手架。因为
+`gldxwin` 引擎无关，`RenderContext::MarkAsRenderThread()` 由 demo 在 `OnCreate` 首行自己调。
+
+构建上，根 `CMakeLists.txt` 只留 orchestrator（project/标准/option → `include(cmake/Dependencies.cmake)`
+与 `include(cmake/Assimp.cmake)` 做依赖探测 → `add_subdirectory(src)`）；`src/CMakeLists.txt` 再逐个
+`add_subdirectory(gldx/gldxwin/gldxcli)` 并定义 `GLFW_Template` 与 `demo`，每个库/可执行有自己的
+`CMakeLists.txt`（递归拆分，目标名不变）。
 
 因为较新的标准库不再传递性地带上 `<ostream>`/`<cstdint>` 这类头，内置的 Assimp
-构建会被强制包含其遗留 contrib 源码所缺的那几个头（见 `CMakeLists.txt` 里的
+构建会被强制包含其遗留 contrib 源码所缺的那几个头（见 `cmake/Assimp.cmake` 里的
 `assimp` 块）——我们自己的源码则保持诚实、显式的 include。

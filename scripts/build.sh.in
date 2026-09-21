@@ -43,7 +43,7 @@ mkdir -p "$BUILD_DIR"
 # Navigate to build directory
 cd "$BUILD_DIR"
 
-# Module gfx is C++20 modules, which needs two things that the macOS defaults do
+# The gldx/gldxwin/gldxcli named modules are C++20 modules, which need two things that the macOS defaults do
 # not provide: a generator with a module scanner (Ninja, not Unix Makefiles) and
 # a clang that can run that scanner (Homebrew LLVM, not AppleClang). CI installs
 # both, so do the same here - unless the caller already chose a compiler.

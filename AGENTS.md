@@ -6,23 +6,23 @@
 
 需要完整、可照做的步骤时读这两篇（本文件是它们的浓缩索引）：
 - **替用户搭环境** → [`doc/agents/setup-environment.md`](doc/agents/setup-environment.md)：幂等的 检测→安装→配置构建→验证 流程，每步带成功判据与失败分支。
-- **替用户写/改程序** → [`doc/agents/author-program.md`](doc/agents/author-program.md)：消费 `gfx` 的 CMake/代码接线、**子系统按需装配（`GeometryPass` 只硬依赖 camera/lights/pbr/scene；天空盒/阴影/IBL/泛光均为可选记录，`post` 可空、`BuildMinimalPipeline()` 可只 Geometry→DebugHud 直渲出图）**、已验证 API 速查、异步加载、交付自检。
+- **替用户写/改程序** → [`doc/agents/author-program.md`](doc/agents/author-program.md)：消费 `gldx` 的 CMake/代码接线、**子系统按需装配（`GeometryPass` 只硬依赖 camera/lights/pbr/scene；天空盒/阴影/IBL/泛光均为可选记录，`post` 可空、`BuildMinimalPipeline()` 可只 Geometry→DebugHud 直渲出图）**、已验证 API 速查、异步加载、交付自检。
 
 ## TL;DR 关键事实
 
-- 项目：跨平台 **OpenGL 4.1 Core / PBR 图形引擎**（`gfx`）+ 按功能拆分的演示。仓库名 `glad-cmake-configure`：`src/main.cpp` 只留**最裸 hello-triangle**（目标 `GLFW_Template`，最小实现基线），其余一个功能一个 demo 在 `src/demo/{feature}/main.cpp`（成品演示 `pbr_showcase` PBR 场景、`voxel_terrain` 体素世界，另 ~13 个单功能 demo）。
-- 语言：**C++23**；引擎以 **C++20 named module `gfx`** 交付（静态库）。
+- 项目：跨平台 **OpenGL 4.1 Core / PBR 图形引擎**（`gldx`）+ 按功能拆分的演示。仓库名 `glad-cmake-configure`：`src/main.cpp` 只留**最裸 hello-triangle**（目标 `GLFW_Template`，最小实现基线），其余一个功能一个 demo 在 `src/demo/{feature}/main.cpp`（成品演示 `pbr_showcase` PBR 场景、`voxel_terrain` 体素世界，另 ~13 个单功能 demo）。
+- 语言：**C++23**；引擎以 **C++20 named module `gldx`** 交付（静态库）。
 - 构建：**CMake ≥ 3.28 + Ninja**。产物落 `output/`：`GLFW_Template`（hello-triangle）+ 每个 `src/demo/{feature}` 一个可执行（`pbr_showcase`、`voxel_terrain`…共 15 个）（Win 加 `.exe`）。
 - 平台：Windows / macOS / Linux。
-- 依赖：GLFW（系统包）、GLAD（系统优先/子模块回退）、GLM（header-only）、STB（git 子模块内置）、Assimp（git 子模块，可选：`GFX_ENABLE_ASSIMP` 默认 `ON`）。
+- 依赖：GLFW（系统包）、GLAD（系统优先/子模块回退）、GLM（header-only）、STB（git 子模块内置）、Assimp（git 子模块，可选：`GLDX_ENABLE_ASSIMP` 默认 `ON`）。
 - 子模块：`third_party/glad`、`third_party/stb`、`third_party/assimp`。
 - 许可证：见 `LICENSE`。当前正式版 tag：`v1.3.1`。
 
 ## 硬性前提（先检查，否则必失败）
 
 - **编译器必须支持 named modules 且带依赖扫描器**：Clang ≥ 19 / GCC ≥ 14 / 新 MSVC。
-- **macOS 不能用 AppleClang**：`/usr/bin/clang` 无 `clang-scan-deps`，配置 `gfx` 模块会失败。必须用 **Homebrew LLVM**：`brew install llvm`，编译器 `/opt/homebrew/opt/llvm/bin/clang{,++}`。
-- **必须先拉子模块**（`--recursive` 或 `git submodule update --init --recursive`），否则 glad/stb/assimp 缺失（用 `-DGFX_ENABLE_ASSIMP=OFF` 时 assimp 可不拉）。
+- **macOS 不能用 AppleClang**：`/usr/bin/clang` 无 `clang-scan-deps`，配置 `gldx` 模块会失败。必须用 **Homebrew LLVM**：`brew install llvm`，编译器 `/opt/homebrew/opt/llvm/bin/clang{,++}`。
+- **必须先拉子模块**（`--recursive` 或 `git submodule update --init --recursive`），否则 glad/stb/assimp 缺失（用 `-DGLDX_ENABLE_ASSIMP=OFF` 时 assimp 可不拉）。
 
 ## 安装
 
@@ -57,7 +57,7 @@ cmake --preset Debug && cmake --build --preset Debug
 ## 验证一次改动是否 OK（推荐流程）
 
 ```bash
-cmake --build build 2>&1 | grep -E 'src/(main|demo|gfx)' | grep -iE 'warning|error'   # 期望：无（自有代码零告警；third_party 告警不计）
+cmake --build build 2>&1 | grep -E 'src/(main|demo|gldx)' | grep -iE 'warning|error'   # 期望：无（自有代码零告警；third_party 告警不计）
 ./output/GLFW_Template --quit-after 3 >/tmp/o 2>/tmp/e; echo "exit=$?"; grep -v 'UNSUPPORTED (log once)' /tmp/e   # 期望：exit 0、过滤后 stderr 空
 ./output/pbr_showcase  --quit-after 3 >/tmp/o 2>/tmp/e; echo "exit=$?"; grep -v 'UNSUPPORTED (log once)' /tmp/e   # 换任一个受影响 demo 同样跑（无头自检靠 --quit-after，不用 kill）
 ```
@@ -65,7 +65,7 @@ cmake --build build 2>&1 | grep -E 'src/(main|demo|gfx)' | grep -iE 'warning|err
 ### 验证一个渲染开关是否真的还生效
 
 `kill` 只能证明"没崩"，证明不了"画面变了"。各 demo 的每个渲染特性都能用命令行开关
-（`src/demo/demo_cli.h`，`--help` 看全表），配合 `--freeze-at SEC` 可脚本化取证：
+（`gldx::cli::Flags`，`import gldxcli`；`--help` 看全表），配合 `--freeze-at SEC` 可脚本化取证：
 
 ```bash
 ./output/voxel_terrain --freeze-at 8 --auto-break 25 --pitch -1.5 --rise -1 --quit-after 20  # 基准帧
@@ -93,7 +93,7 @@ cmake -S . -B cmake-build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g -O1 -fno-sanitize-recover=undefined"
 ```
 
-两个坑：① 探针必须写成 `import gfx;` 的模块消费者，文本 `#include` 同一批头文件链不上
+两个坑：① 探针必须写成 `import gldx;` 的模块消费者，文本 `#include` 同一批头文件链不上
 （定义在 module 实现单元里的实体带着模块附着，如 `__ZN3gfxW3gfx5NoiseC1Ej`），所以得临时挂一个
 `add_executable` 目标、跑完立刻 `git checkout CMakeLists.txt`；include 目录沿用 `-I src` + glad 生成头 +
 `-isystem /opt/homebrew/include`，并和 libgfx 用同一份 `-fsanitize=` flags。② 带 `-fno-sanitize-recover`
@@ -125,39 +125,44 @@ cmake -S . -B cmake-build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
 ## 文件地图
 
 ```
-src/main.cpp                 最裸 hello-triangle：自定义 RenderPass + 内联 GLSL 直渲窗口，#include "demo/demo_app.h"（内含 import gfx;）；目标 GLFW_Template，不碰任何引擎子系统
-src/gfx/gfx.cppm             模块 primary interface：export { #include } 聚合全部公共头
-src/gfx/gmf.hpp              共享 global module fragment（GLAD/GLM/std 预包含；GLuint/glm::vec3 挂 global module）
-src/gfx/core/                Platform.h(窗口/GLFW/宏/常量) · RenderContext(线程亲和) · GLBuffer · VertexArray · UniformBuffer · Sampler · Framebuffer
-src/gfx/geometry/            Mesh · InstancedMesh · GeometryFactory(Cube/Sphere/Plane)
-src/gfx/texture/             Texture2D · Texture2DArray · TextureCubeMap · RenderTexture
-src/gfx/voxel/               BlockRegistry · Chunk · ChunkMesher（纯 CPU 网格化）· VoxelMeshGpu
-src/gfx/util/                Noise（Perlin 2D/3D + fBm，seeded、无全局状态）
-src/gfx/material/            PbrMaterial
-src/gfx/shader/              ShaderProgram + 内嵌 GLSL（ShaderLib.h / PostProcessShaders.h / IblShaders.h，单一真源）
-src/gfx/camera|light|shadow/ Camera(orbit+飞行)·Frustum·Picking·VoxelRay(DDA) / LightBuffer(UBO) / CascadedShadowMap·EnvironmentMap
-src/gfx/scene/               Scene · SceneNode · Transform（纯 CPU 层级）
-src/gfx/render/              Renderer · RenderPass · RenderFrame · RenderPasses(含 Voxel 两 pass) · PostProcessChain · SpriteBatch · TextRenderer · ParticleBatch
-src/gfx/text|assets|debug/   Font / AssetManager·ThreadPool·ModelLoader·ImageLoader / DebugDraw·Profiler
-src/gfx/third_party/         stb_image_impl.cpp（唯一第三方实现 TU，非模块接口）
-src/demo/pbr_showcase/       成品 PBR 场景演示（原 src/main.cpp）：HDR/PBR/CSM/IBL/Bloom/天空盒/实例化/HUD
-src/demo/voxel_terrain/      体素演示入口（原 src/voxel_main.cpp）：chunk 流式生成/网格化 + 方块编辑
-src/demo/{feature}/          单功能入门 demo：只装配它演示的那个子系统，其余留缺省（验证按需装配）；新增一个目录免改 CMake
-src/demo/CMakeLists.txt      add_gfx_demo(<name>)：d_<name>→OUTPUT_NAME=<name>→link gfx；GLOB(CONFIGURE_DEPENDS) 遍历含 main.cpp 的子目录
-src/demo/demo_app.h          共享脚手架（非模块）：demo::Run 拥有窗口/GL 4.1 context/渲染线程断言/析构顺序，demo::Ctx::Loop 拥有帧循环（每帧建空 RenderFrame、Esc/quit-after 退出、fps 窗口平均）；内含 import gfx; 故 demo TU 只需 include 它
-src/demo/demo_cli.h          各 demo 共用的命令行开关（--off/--on/--quit-after/--help + 数值/字符串选项）；header-only，不进 module gfx
+src/CMakeLists.txt           编排：add_subdirectory(gldx/gldxwin/gldxcli) + add_executable(GLFW_Template main.cpp)（link gldx/gldxwin/gldxcli）+ add_subdirectory(demo)
+src/main.cpp                 最裸 hello-triangle：自定义 RenderPass + 内联 GLSL 直渲窗口，import gldx/gldxwin/gldxcli，由 gldx::win::App + 一个 Window（OnFrame 驱动）；目标 GLFW_Template，不碰任何可选子系统
+cmake/Dependencies.cmake     GLFW find_package · GLAD（系统优先→子模块生成，含 uv venv 回退）· GLM find_path · stb INTERFACE（产出 GLAD_TARGET/GLM_INCLUDE_DIR）
+cmake/Assimp.cmake           受 GLDX_ENABLE_ASSIMP 控制的 assimp 子项目块（含 macOS fdopen 修复）
+src/gldx/CMakeLists.txt        add_library(gldx STATIC) + FILE_SET CXX_MODULES(gldx.cppm)；PUBLIC glfw/GLAD/src/GLM，PRIVATE stb·assimp，OFF 时定义 GLDX_NO_ASSIMP
+src/gldx/gldx.cppm             模块 primary interface：export { #include } 聚合全部公共头
+src/gldx/gmf.hpp              共享 global module fragment（GLAD/GLM/std 预包含；GLuint/glm::vec3 挂 global module）
+src/gldx/core/                Platform.h(GLFW_PLATFORM_* 宏) · RenderContext(线程亲和) · GLBuffer · VertexArray · UniformBuffer · Sampler · Framebuffer
+src/gldx/geometry/            Mesh · InstancedMesh · GeometryFactory(Cube/Sphere/Plane)
+src/gldx/texture/             Texture2D · Texture2DArray · TextureCubeMap · RenderTexture
+src/gldx/voxel/               BlockRegistry · Chunk · ChunkMesher（纯 CPU 网格化）· VoxelMeshGpu
+src/gldx/util/                Noise（Perlin 2D/3D + fBm，seeded、无全局状态）
+src/gldx/material/            PbrMaterial
+src/gldx/shader/              ShaderProgram + 内嵌 GLSL（ShaderLib.h / PostProcessShaders.h / IblShaders.h，单一真源）
+src/gldx/camera|light|shadow/ Camera(orbit+飞行)·Frustum·Picking·VoxelRay(DDA) / LightBuffer(UBO) / CascadedShadowMap·EnvironmentMap
+src/gldx/scene/               Scene · SceneNode · Transform（纯 CPU 层级）
+src/gldx/render/              Renderer · RenderPass · RenderFrame · RenderPasses(含 Voxel 两 pass) · PostProcessChain · SpriteBatch · TextRenderer · ParticleBatch
+src/gldx/text|assets|debug/   Font / AssetManager·ThreadPool·ModelLoader·ImageLoader / DebugDraw·Profiler
+src/gldx/third_party/         stb_image_impl.cpp（唯一第三方实现 TU，非模块接口）
+src/gldxwin/gldxwin.cppm      引擎无关窗口库 primary interface（namespace gldx::win）：App 单例（glfwInit/Terminate + GL 4.1 core hints + 多窗口帧循环 Run）、Window（建窗+MakeContextCurrent+gladLoadGL，OnCreate/OnFrame/OnDestroy 钩子 + SetCloseOnEsc + UserData 槽）、WindowDesc/FrameInfo/RunOptions。仅链 glfw+GLAD，import 不到任何 gldx 类型
+src/gldxwin/App.cpp|Window.cpp  App::Run 帧循环实现 + Window 生命周期；gmf.hpp 挂 glad/glfw 到 global module
+src/gldxcli/gldxcli.cppm      CLI 开关库 primary interface（namespace gldx::cli::Flags）：--off/--on/--quit-after/--help + number/integer/real/string（域夹范围）；纯标准库、零链接依赖（原 header-only demo_cli.h 迁入）
+src/demo/pbr_showcase/       成品 PBR 场景演示（原 src/main.cpp）：HDR/PBR/CSM/IBL/Bloom/天空盒/实例化/HUD，import 三库 + 手写生命周期迁到 App/Window 钩子
+src/demo/voxel_terrain/      体素演示入口（原 src/voxel_main.cpp）：chunk 流式生成/网格化 + 方块编辑（保留本地时钟保帧序，仅换窗口生命周期）
+src/demo/{feature}/          单功能入门 demo：import gldx/gldxwin/gldxcli，用 gldx::win::App+Window 钩子（OnCreate 建 Renderer/MarkAsRenderThread，OnFrame 填 RenderFrame+Render）+ gldx::cli::Flags；只装配它演示的那个子系统；新增一个目录免改 CMake
+src/demo/CMakeLists.txt      add_gldx_demo(<name>)：d_<name>→OUTPUT_NAME=<name>→link gldx/gldxwin/gldxcli；GLOB(CONFIGURE_DEPENDS) 遍历含 main.cpp 的子目录
 src/assets/                  运行期内容（不编译）：models/ 投放目录 · shaders/ 只读参考镜像（不加载）
 third_party/                 glad · stb · assimp（子模块）
 scripts/                     build.sh.in / run.sh.in / clean.sh.in（CMake 配置期生成 .sh）
 .github/workflows/           release.yml（手动触发的三平台构建+发布）
-CMakeLists.txt · CMakePresets.json
+CMakeLists.txt（根，~60 行 orchestrator：project/标准/option → include(cmake/) → add_subdirectory(src) → 脚本生成 + Summary） · CMakePresets.json
 doc/                         README(入口) · user/(入门 + API 分章: 骨架/几何场景/资源加载/光照UBO/相机拾取/体素 + 进阶 + 排错) · developer/(design + thread-safety) · agents/(setup-environment + author-program)
 AGENTS.md                    本文件（agent 速查，留在仓库根便于自动发现）
 ```
 
 ## 硬约束 / 不变量（改代码前必读）
 
-1. **所有 GL 调用（含创建与删除）只在渲染线程**。`RenderContext::MarkAsRenderThread()` 在 `demo::Run`（`src/demo/demo_app.h`）里调一次；每个拥有/驱动 GL 的类在公有入口与析构里调 `AssertRenderThread(...)`（错线程即 `abort`）。
+1. **所有 GL 调用（含创建与删除）只在渲染线程**。`RenderContext::MarkAsRenderThread()` 由 demo 在 `Window::OnCreate` 首行调一次（`gldxwin` 故意引擎无关，不代劳）；每个拥有/驱动 GL 的类在公有入口与析构里调 `AssertRenderThread(...)`（错线程即 `abort`）。GL 资源在 `OnCreate` 建、`OnDestroy` 拆（后者在 `glfwDestroyWindow` 前、上下文仍当前时回调）。
 2. **两阶段资源管线**：Stage A（工作线程，仅 CPU 解码，产出 `LoadedModelData`/`Texture2DDesc`）→ Stage B（渲染线程 `AssetManager::ProcessUploads()` 才建 GL 对象）。工作线程里绝不 `gl*`。
 3. **move-only RAII**：GL 包装与 `ThreadPool`/`AssetManager`/`RenderPass` 等 delete 拷贝，只能 `std::move`/`unique_ptr`。一个 GL id 只有一个 owner。
 4. **错误用 `std::expected<T,E>`，不跨线程抛异常**。（`ThreadPool::WorkerMain` 顶层有 `try/catch` 兜底，防逃逸出 `std::thread` 触发 `std::terminate`。）
@@ -167,11 +172,11 @@ AGENTS.md                    本文件（agent 速查，留在仓库根便于自
 
 ## 常见任务 how-to
 
-- **加一个渲染 pass**：继承 `gfx::RenderPass`，`void Execute(gfx::RenderFrame&) override`，`renderer.AddPass(std::make_unique<...>())`。GL 工作在渲染线程执行（`Renderer::Render` 保证）。
-- **加几何**：`gfx::GeometryFactory::Cube/Sphere/Plane` 或自填 `gfx::MeshData` → `Mesh::Upload(std::move(data))`（渲染线程）。
+- **加一个渲染 pass**：继承 `gldx::RenderPass`，`void Execute(gldx::RenderFrame&) override`，`renderer.AddPass(std::make_unique<...>())`。GL 工作在渲染线程执行（`Renderer::Render` 保证）。
+- **加几何**：`gldx::GeometryFactory::Cube/Sphere/Plane` 或自填 `gldx::MeshData` → `Mesh::Upload(std::move(data))`（渲染线程）。
 - **加载模型/贴图**：`AssetManager::RequestModel/RequestTexture(key, path)`（key 由调用方命名，重复 key 被忽略），每帧 `ProcessUploads()`，就绪前 `Get*` 返回 `nullptr`。纹理引用必须落在模型目录内、图片边长≤`kMaxTextureSide`（16384，解码前校验），两条越界都会被拒。
-- **改 GLSL**：改 `src/gfx/shader/*Shaders.h`（单一真源），**不要**改 `src/assets/shaders/`（那只是镜像）。
-- **UBO 绑定**：`ShaderProgram::SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding)` 等，链接后设一次。
+- **改 GLSL**：改 `src/gldx/shader/*Shaders.h`（单一真源），**不要**改 `src/assets/shaders/`（那只是镜像）。
+- **UBO 绑定**：`ShaderProgram::SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding)` 等，链接后设一次。
 
 ## 报错 → 修复
 
@@ -179,7 +184,7 @@ AGENTS.md                    本文件（agent 速查，留在仓库根便于自
 | --- | --- | --- |
 | `...may use modules, but the compiler...cannot scan`（`cmake-cxxmodules(7)`） | 用了 AppleClang，缺 `clang-scan-deps` | 换 Homebrew clang：`cmake --preset Debug` 或 `-DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++` |
 | CLion 无运行配置 / "此文件不属于任何项目目标" | CLion 默认工具链是 AppleClang，且注入 `-DCMAKE_CXX_COMPILER` 覆盖预设 | Toolchains 加 Homebrew LLVM 并设为 Debug profile 工具链，Reset Cache and Reload |
-| 场景全黑、无 GL 报错 | 忘了给 uniform block 绑定（GLSL 4.10 无 `layout(binding=N)` on blocks） | `SetBlockBinding(...)`；采样器 `Set("uShadowMap", (int)gfx::texunit::...)` |
+| 场景全黑、无 GL 报错 | 忘了给 uniform block 绑定（GLSL 4.10 无 `layout(binding=N)` on blocks） | `SetBlockBinding(...)`；采样器 `Set("uShadowMap", (int)gldx::texunit::...)` |
 | macOS 建窗失败 / 上下文为空 | 未开 forward-compat | `glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE)`（`#if GLFW_PLATFORM_MACOS`） |
 | 找不到 glad/stb/assimp 头 | 子模块未初始化 | `git submodule update --init --recursive` |
 | GLAD 生成报错 | 缺 Python/jinja2 | `brew install uv` 或 `pip install jinja2` |

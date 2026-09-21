@@ -9,10 +9,10 @@
 引擎提供两个现成的 stage 顺序：`BuildPbrPipeline()` 装全套演示链 `Shadow → Geometry → Skybox → PostProcess → DebugHud`；`BuildMinimalPipeline()` 只装 `Geometry → DebugHud`——不申请后处理链时 `RenderFrame.post` 置空，几何 pass 会直接绑定默认帧缓冲、自行 clear 后渲到窗口，证明阴影/天空盒/泛光都不是出图的前提。你可以 `AddPass()` 插入自己的 pass，或干脆不调任一个 builder 完全自定义顺序。
 
 ```cpp
-class MyPass : public gfx::RenderPass {
+class MyPass : public gldx::RenderPass {
 public:
-    MyPass() : gfx::RenderPass("MyPass") {}
-    void Execute(gfx::RenderFrame& f) override {   // f 里能拿到 camera/scene/post/... 每帧输入
+    MyPass() : gldx::RenderPass("MyPass") {}
+    void Execute(gldx::RenderFrame& f) override {   // f 里能拿到 camera/scene/post/... 每帧输入
         // 这里做的任何 GL 调用都在渲染线程上（Renderer::Render 已保证）
     }
 };
@@ -44,7 +44,7 @@ HDR 后期是一条固定链：主场景渲染进**线性 HDR target** → brigh
 
 ## 3. 改 GLSL：只有一个真源
 
-着色器 GLSL **内嵌**在 `src/gfx/shader/*Shaders.h`（`ShaderLib.h` / `PostProcessShaders.h` / `IblShaders.h`），这是**单一真源**，随 `gfx` 模块一起编译进去。
+着色器 GLSL **内嵌**在 `src/gldx/shader/*Shaders.h`（`ShaderLib.h` / `PostProcessShaders.h` / `IblShaders.h`），这是**单一真源**，随 `gldx` 模块一起编译进去。
 
 - ⚠️ `src/assets/shaders/` 里的 `.glsl/.vert/.frag` **只是只读参考镜像，不被编译、也不被加载**。改它**不影响运行**。
 - 要改着色器，改 `*Shaders.h`。理由：以 C++20 named module 交付时把 GLSL 作为字符串内联，避免运行期依赖磁盘路径/工作目录。详见 [../developer/design.md](../developer/design.md) §7。
@@ -53,7 +53,7 @@ HDR 后期是一条固定链：主场景渲染进**线性 HDR target** → brigh
 
 ## 4. 资源投放与产物目录约定
 
-- **运行期内容**放 [`../../src/assets/`](../../src/assets/)（与 `src/gfx` 代码同级）：`src/assets/models/` 是 FBX/OBJ/glTF 投放目录，经 `AssetManager` 异步加载；材质里的纹理引用必须落在模型自己目录内，图片边长上限 `kMaxTextureSide`（16384）在解码前校验，约定细则见 [`../../src/assets/models/README.md`](../../src/assets/models/README.md)。
+- **运行期内容**放 [`../../src/assets/`](../../src/assets/)（与 `src/gldx` 代码同级）：`src/assets/models/` 是 FBX/OBJ/glTF 投放目录，经 `AssetManager` 异步加载；材质里的纹理引用必须落在模型自己目录内，图片边长上限 `kMaxTextureSide`（16384）在解码前校验，约定细则见 [`../../src/assets/models/README.md`](../../src/assets/models/README.md)。
 - **可执行文件**固定输出到 `output/`（被 gitignore）。
 - **构建目录** `build/`、`cmake-build-*/`（CLion/预设用）均已 gitignore，可放心删。
 

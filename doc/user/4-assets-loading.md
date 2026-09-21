@@ -1,13 +1,13 @@
 # 🟡 ③ 贴图与模型加载（异步两阶段）
 
-前提：已完成 [② 几何与场景](3-geometry-scene.md)。这一章解决"把磁盘上的 PNG/FBX/OBJ/glTF 变成能画的东西"：慢的解码在后台线程，GL 上传留在渲染线程，两者由 `gfx::AssetManager` 隔开。
+前提：已完成 [② 几何与场景](3-geometry-scene.md)。这一章解决"把磁盘上的 PNG/FBX/OBJ/glTF 变成能画的东西"：慢的解码在后台线程，GL 上传留在渲染线程，两者由 `gldx::AssetManager` 隔开。
 
 ---
 
 ## 1. 基础用法：请求 → 每帧处理 → 取用
 
 ```cpp
-gfx::AssetManager assets;                          // 内含线程池
+gldx::AssetManager assets;                          // 内含线程池
 // Request* 是 (key, path) 两个参数：key 由调用方命名，重复的 key 会被忽略
 assets.RequestTexture("robot.albedo", "src/assets/models/robot/albedo.png");
 assets.RequestModel  ("robot",       "src/assets/models/robot.fbx");
@@ -41,12 +41,12 @@ while (running) {
 
 投放目录约定见 [`src/assets/models/README.md`](../../src/assets/models/README.md)；对应症状的速查在 [🧰 排错 §6](9-troubleshooting.md#6-报错--修复速查表)。
 
-## 4. 模型导入是可选依赖（`GFX_ENABLE_ASSIMP`）
+## 4. 模型导入是可选依赖（`GLDX_ENABLE_ASSIMP`）
 
-整条模型导入路径背后只有一个重依赖：assimp。它由 CMake 选项 `GFX_ENABLE_ASSIMP`（默认 `ON`）控制。用 `-DGFX_ENABLE_ASSIMP=OFF` 配置时，assimp 子模块根本不拉取/不构建，`gfx` 链接时不带 assimp：
+整条模型导入路径背后只有一个重依赖：assimp。它由 CMake 选项 `GLDX_ENABLE_ASSIMP`（默认 `ON`）控制。用 `-DGLDX_ENABLE_ASSIMP=OFF` 配置时，assimp 子模块根本不拉取/不构建，`gldx` 链接时不带 assimp：
 
-- 导出的 `gfx` 模块接口不变，`ModelLoader::Load` / `AssetManager::RequestModel` 签名照旧，故你的代码无需改一行就能在两种构建下编译。
-- 但 `RequestModel` 拿到的会是空结果：`ModelLoader::Load` 返回一个 `std::unexpected("gfx built without Assimp: model import unavailable")` 并在 stderr 打一行 `[ModelLoader] <path>: model import is unavailable ...`，`GetModel(key)` 永远返回空。**纹理/图片加载（stb）不受影响**，体素、程序化几何、PBR 也完全照常。
+- 导出的 `gldx` 模块接口不变，`ModelLoader::Load` / `AssetManager::RequestModel` 签名照旧，故你的代码无需改一行就能在两种构建下编译。
+- 但 `RequestModel` 拿到的会是空结果：`ModelLoader::Load` 返回一个 `std::unexpected("gldx built without Assimp: model import unavailable")` 并在 stderr 打一行 `[ModelLoader] <path>: model import is unavailable ...`，`GetModel(key)` 永远返回空。**纹理/图片加载（stb）不受影响**，体素、程序化几何、PBR 也完全照常。
 - 换句话说：不要模型的纯体素/程序化产品可以关掉这个选项省掉一次重型子模块构建；要导 FBX/OBJ/glTF 就保持默认 `ON`。
 
 ---
@@ -54,4 +54,4 @@ while (running) {
 ## 下一步
 
 - 加载好的贴图怎么"亮起来"（接 PBR 材质、光照） → [🟡 ④ 光照与 UBO 绑定](5-lighting-ubo.md)
-- 想直接手写 `Texture2D` 上传（不经 AssetManager） → `Texture2D::Upload(desc)` 同样受上面的长度/尺寸先验约束，契约见 `src/gfx/texture/Texture2D.h`
+- 想直接手写 `Texture2D` 上传（不经 AssetManager） → `Texture2D::Upload(desc)` 同样受上面的长度/尺寸先验约束，契约见 `src/gldx/texture/Texture2D.h`

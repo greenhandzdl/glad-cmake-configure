@@ -43,11 +43,11 @@
 GLSL 4.10 **不支持在 uniform block 上写 `layout(binding=N)`**，绑定必须在 C++ 侧显式做：
 
 ```cpp
-pbr->SetBlockBinding("LightingBlock", gfx::LightBuffer::kBinding);             // binding 1
-pbr->SetBlockBinding("ShadowBlock",   gfx::CascadedShadowMap::kShadowBinding); // binding 2
+pbr->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding);             // binding 1
+pbr->SetBlockBinding("ShadowBlock",   gldx::CascadedShadowMap::kShadowBinding); // binding 2
 ```
 
-漏掉这步是经典的"场景全黑但没有 GL 错误"。程序链接后设一次即可（采样器 uniform 同理，用 `Set("uShadowMap", (int)gfx::texunit::shadowArray)` 等设一次）。用法背景见 [④ 光照与 UBO](5-lighting-ubo.md#2-灌进-ubo-并绑定黑屏第一课)。
+漏掉这步是经典的"场景全黑但没有 GL 错误"。程序链接后设一次即可（采样器 uniform 同理，用 `Set("uShadowMap", (int)gldx::texunit::shadowArray)` 等设一次）。用法背景见 [④ 光照与 UBO](5-lighting-ubo.md#2-灌进-ubo-并绑定黑屏第一课)。
 
 ---
 
@@ -67,7 +67,7 @@ glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
 ## §5 资源投放：改 `src/assets/shaders/` 没反应
 
-`src/assets/shaders/` 里的 `.glsl/.vert/.frag` **只是内嵌 GLSL 的只读参考镜像，不被编译、不被加载**。真正的着色器在 `src/gfx/shader/*Shaders.h` 单一真源里。要改着色效果，改 `*Shaders.h`；别指望动 `shaders/` 影响运行，也别把要加载的模型丢进 `shaders/`。
+`src/assets/shaders/` 里的 `.glsl/.vert/.frag` **只是内嵌 GLSL 的只读参考镜像，不被编译、不被加载**。真正的着色器在 `src/gldx/shader/*Shaders.h` 单一真源里。要改着色效果，改 `*Shaders.h`；别指望动 `shaders/` 影响运行，也别把要加载的模型丢进 `shaders/`。
 
 - 运行期**模型/贴图**投放目录是 `src/assets/models/`。
 
@@ -80,11 +80,11 @@ glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 | `...may use modules, but the compiler...cannot scan`（`cmake-cxxmodules(7)`） | 用了 AppleClang，缺 `clang-scan-deps` | 换 Homebrew clang：`cmake --preset Debug` 或 `-DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++`（详 [§1](#1-macos--clion必须用-homebrew-llvm-工具链)） |
 | CLion 无运行配置 / "此文件不属于任何项目目标" | CLion 默认工具链是 AppleClang，且注入 `-DCMAKE_CXX_COMPILER` 覆盖预设 | 见 [§1](#1-macos--clion必须用-homebrew-llvm-工具链)：Toolchains 加 Homebrew LLVM 并设为 Debug profile 工具链，Reset Cache and Reload |
 | 删 `.idea` 后配置丢失 / 退回系统 clang | 新 profile 取工具链列表首位（=AppleClang） | 见 [§2](#2-删了-idea-会重新生成但可能退回-appleclang)：把 Homebrew LLVM 置首位 |
-| 场景全黑、无 GL 报错 | 忘了给 uniform block 绑定（GLSL 4.10 无 `layout(binding=N)` on blocks） | 见 [§3](#3-黑屏且无任何报错忘了给-ubouniform-block-绑定)：`SetBlockBinding(...)`；采样器 `Set("uShadowMap", (int)gfx::texunit::...)` |
+| 场景全黑、无 GL 报错 | 忘了给 uniform block 绑定（GLSL 4.10 无 `layout(binding=N)` on blocks） | 见 [§3](#3-黑屏且无任何报错忘了给-ubouniform-block-绑定)：`SetBlockBinding(...)`；采样器 `Set("uShadowMap", (int)gldx::texunit::...)` |
 | macOS 建窗失败 / 上下文为空 | 未开 forward-compat | 见 [§4](#4-macos-建窗要开-forward-compat)：`glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE)`（`#if GLFW_PLATFORM_MACOS`） |
 | 找不到 glad/stb/assimp 头 | 子模块未初始化 | `git submodule update --init --recursive` |
 | GLAD 生成报错 | 缺 Python/jinja2 | `brew install uv` 或 `pip install jinja2` |
-| 改了 `src/assets/shaders/*.glsl` 画面没变 | 那只是镜像，真源在 `*Shaders.h` | 见 [§5](#5-资源投放改-srcassetsshaders-没反应)：改 `src/gfx/shader/*Shaders.h` |
+| 改了 `src/assets/shaders/*.glsl` 画面没变 | 那只是镜像，真源在 `*Shaders.h` | 见 [§5](#5-资源投放改-srcassetsshaders-没反应)：改 `src/gldx/shader/*Shaders.h` |
 | `glad/gl.h file not found`（仅 IDE 静态分析报） | include 路径在构建期由 CMake 提供 | 忽略；以真实 `cmake --build` 为准 |
 | 请求模型/贴图后马上取却是空 | 异步加载尚未完成 | 每帧 `ProcessUploads()`，就绪前 `Get*` 返回 `nullptr`，按可能为空写代码（[③ 贴图与模型加载](4-assets-loading.md)） |
 | 模型加载成功但没有贴图 | 材质里的纹理引用用了绝对路径或 `..` 走出模型目录，被 `ModelLoader` 拒收 | 把贴图放模型同目录（或其子目录），材质里用相对引用；stderr 有 `[ModelLoader] ... names a path outside the model's own directory` 诊断行 |
