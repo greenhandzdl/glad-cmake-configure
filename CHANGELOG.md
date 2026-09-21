@@ -3,7 +3,24 @@
 本文件记录 `GLFW_Template`（`gldx` 引擎（旧名 `gfx`）+ 演示应用）各版本的变更。历史条目保留当时的 `gfx` 旧称不改写；Unreleased 顶部起用 `gldx`。
 版本标签遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## Unreleased
+## v1.4.0
+
+### 精简与安全验证（发布前体检）
+
+- **精简**：删除 `InstancedMesh::UploadInstances()` 的私有声明——无定义、无调用方（上传逻辑早已内联进 `Create`/`SetInstances` 的历史遗留；若被引用会是链接错误，删之零风险、接口面不变）。对 gldx 全部公共头 + `gldxwin`/`gldxcli` 接口做了系统性死代码扫描：除此之外无死代码；`Window` 的 `UserData` 槽、`Chunk::SetOrigin` 等为有意保留的对称公共 API，GLSL 内联函数与头内 inline 均证实有消费者。
+- **安全测试**：ASan+UBSan 构建下 11 组无头跑全净（含体素流式生成/网格化、脚本挖掘+放水、占位纹理修复路径、两条截图回读）；17 组畸形 argv 对抗输入（`inf`/`nan`/`1e300`/负数/空串/`--`/吞值/拼错功能名）全部正常退出、零 sanitizer 报错；TSan 下体素 demo 空闲 30s + 挖掘压力 25s 零数据竞争。
+- **发布制品**：确认 CI 三平台均为全量 `cmake --build` + 整 `output/` 目录打包，zip 内含主可执行与全部 15 个 demo；清理了本地遗留的 pre-refactor `voxel_demo` 产物。
+- **验证**：精简后全量重建干净，`pbr_showcase`/`instancing`/`voxel_terrain` 截图复验无回退（nonclear 像素 93.0% / 30.4% / 96.7%；instancing 正是被删声明所属类的使用者）。
+
+### 修复（PBR 空场景根因）+ 截图验证钩子 + 两个成品 demo 的小项目化拆分
+
+一轮“给每个 demo 真出图、逐张看像素”的验证带出的修复与工具（此前只凭 `--quit-after` 退出码判“零回退”不足为证——空窗口和满画面都 `return 0`）：
+
+- **修复：`GeometryPass` 为未装配的 shadow / IBL 采样器补 1×1 占位纹理**（`EnsureSamplerPlaceholders()`）：PBR 着色器把 `uShadowMap`/`uIrradiance`/`uPrefilter`/`uBrdfLut` 静态声明为活跃采样器，当 demo 未装配 CSM / IBL 子系统时这些纹理单元悬空，Apple 驱动在 draw 时把整个 draw call 判为 INVALID_OPERATION 吞掉——表现为“场景全空、只剩天空/清屏色”。现在 `Execute` 在绑定真实子系统之前，先把这些采样器指向各自专用纹理单元并用类型正确的 1×1 stand-in（depth array / cube / 2D 白图，GL 4.1 无 `glTexStorage` 故用 `glTexImage*` 真实写入一个 texel 使纹理 complete）兜底；真实子系统随后紧接重绑同一单元，因此仅在其缺席时生效。这是本轮“PBR 场景全是空的”的真因。
+- **新增 `gldx::CaptureScreenshot(path)`**（`src/gldx/util/Screenshot.h/.cpp`）：在帧末、swap 之前、context 存活时把默认帧缓冲回读为 RGB PNG，按当前 `GL_VIEWPORT` 取尺寸（含 Retina 缩放）。纯验证辅助，不属于任何 pass。
+- **新增 `gldxwin` 环境变量截图钩子**（`App.cpp`，全部在 `GLDX_SNAPSHOT` 之后、未设即死代码）：`GLDX_SNAPSHOT=<路径>` 令 `App::Run` 在窗口 BMP 回读一帧（`GLDX_SNAPSHOT_AT=<秒>`，默认 2.0s）后自动 `Close`，给无头回归一个不依赖 demo 主动调用的取证通道。
+- **两个成品 demo 拆为小 C++ 项目结构**（不再是单文件数百行、类定义全塞一处）：`pbr_showcase` 把输入回调拆到 `Input.{h,cpp}`、场景构建与资源拥有拆到 `Scene.{h,cpp}`（`ShowcaseScene`/`BuildInstancedField`），`voxel_terrain` 把世界常量与 `World`/`WaterSim` 拆到 `World.{h,cpp}`、输入拆到 `Input.{h,cpp}`、HUD pass 拆到 `Hud.{h,cpp}`；两处 `main.cpp` 只留窗口/帧循环装配。`add_gldx_demo` 已用 `file(GLOB_RECURSE CONFIGURE_DEPENDS)` 收子目录内全部 `.cpp`，新增文件免改 CMake。GPU 资源仍由 `main.cpp` 的栈式生命周期在 `glfwTerminate` 前析构（契约不变）。
+- **验证**：`pbr_showcase`/`voxel_terrain` 拆分后各自重建（多 `.cpp` 编译链接通过、`GLOB mismatch` 自动重配）、出图肉眼核对无回退（棋盘地面+球阵+天空+HUD / 起伏地形+树+雾+准星）；全量 52 目标构建干净；本文件所述空场景修复经截图证实——修复前 PBR demo 只剩天空，修复后场景实体正常呈现。
 
 ### 破坏性变更 / 重构（引擎改名 `gfx` → `gldx` + 抽取 `gldxwin`/`gldxcli` + CMake 分模块拆分）
 

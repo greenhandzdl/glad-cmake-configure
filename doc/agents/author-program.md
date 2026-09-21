@@ -147,6 +147,7 @@ int main(int argc, char** argv) {
 | 光照 | `gldx::LightBuffer lb; lb.Init(); gldx::LightSetup s; s.sun.{direction,color,intensity}; s.ambient; lb.Update(s, camPos);` | |
 | 实例化 | `gldx::InstancedMesh im; if (!im.Create(std::move(geo), std::move(insts))) {...}` | **成员函数非静态**，返回 `bool`；`gldx::Instance{model(mat4),color(vec4)}` |
 | 拾取 | `gldx::PickRay(px,py,fbw,fbh,invViewProj)` → `gldx::Ray`；`gldx::PickNearest(ray, spheres)`→index | 像素是 framebuffer 坐标（Retina 下先从 GLFW 窗口坐标乘 scale）；`spheres: vector<pair<vec3,float>>`，取自 `scene.PickTargets()` |
+| 截图取证 | `gldx::CaptureScreenshot(path)` → `bool` | 帧末、swap 前、context 存活时把默认帧缓冲回读为 RGB PNG（按 `GL_VIEWPORT` 取尺寸）；证明“真出图”而非仅退出码 0。无头回归也可用 gldxwin 的 `GLDX_SNAPSHOT`/`GLDX_SNAPSHOT_AT` 环境变量钩子，无需改 demo |
 | 体素碰撞 | `gldx::VoxelMoveResult r = gldx::MoveVoxelAabb(feet, gldx::VoxelBody{radius,height}, delta, solidFn)` | 纯 CPU。`feet`=脚底中心（盒占 `x±radius × [y, y+height] × z±radius`）；逐轴解算→贴墙滑行；`r.grounded`=下落被拦。**单帧 delta 别过一格**，否则调用方子步进（见 `src/demo/voxel_terrain/main.cpp` 按 ≤ 0.5 格切）；`VoxelAabbSolid(pos,body,fn)` 做纯包含测试 |
 | 窗口 | `gldx::win::WindowDesc{width,height,title,resizable}`（缺省 800×600/"gldx"/true）；`Window(desc)` 后 `Ok()`/`Handle()`/`OnCreate`/`OnFrame`/`OnDestroy`/`SetCloseOnEsc`；`App::Get().Run({quitAfterSeconds})` | 来自 `gldxwin`；引擎不再提供任何窗口/应用常量（`Platform.h` 只剩 `GLFW_PLATFORM_*` 宏），尺寸/标题写进 `WindowDesc`，应用身份串由各 demo 自己定 |
 
@@ -182,9 +183,14 @@ GLSL **内嵌**在 `src/gldx/shader/*Shaders.h`（`ShaderLib.h`/`PostProcessShad
 ```bash
 cmake --build build 2>&1 | grep -E 'src/(main|gldx)' | grep -iE 'warning|error'   # 期望：空（自有代码零告警）
 ./output/<你的可执行> >/tmp/o 2>/tmp/e & p=$!; sleep 6; kill $p 2>/dev/null; wc -c /tmp/e   # 期望：stderr 0 字节
+# 光看退出码不够——空窗口和满画面都 return 0，必须真出图看像素：
+GLDX_SNAPSHOT=/tmp/shot.bmp GLDX_SNAPSHOT_AT=2.0 ./output/<gldxwin 驱动的 demo> --quit-after 8   # 回读一帧 BMP 后自动关窗
+sips -s format png /tmp/shot.bmp --out /tmp/shot.png                                  # 转 PNG 后肉眼核对
 ```
 
+- **退出码不是证据**：`--quit-after` 到点 `return 0` 只能证明没崩，证明不了场景出了内容；必须用 `GLDX_SNAPSHOT`（gldxwin 钩子，无需改 demo）或 demo 内主动调 `gldx::CaptureScreenshot(path)`（帧末、swap 前）拿回真实像素再看。
 - 全黑且无报错 → 十有八九漏了 §4 的 `SetBlockBinding`。
+- 只剩天空/清屏色、实体全空、无报错 → shadow/IBL 采样器未装配时悬空被 Apple 驱动吞掉整个 draw（`GeometryPass` 已自动兜底；自建 pass 需自备占位纹理，见 [⑨ 排错](../user/9-troubleshooting.md)速查表）。
 - 崩在 `AssertRenderThread` → 你在非渲染线程碰了 GL（或 owner 在 `glfwTerminate` 后才析构）。
 - 建不出窗（`window.Ok()` 为 false）→ 多为 `glfwInit` 失败或拿不到 GL 4.1 core 上下文；GL 4.1 core hints + macOS forward-compat 已由 `gldxwin` 的 `App` 统一设好，无需自设（§3）。
 

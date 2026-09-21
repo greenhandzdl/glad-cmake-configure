@@ -81,6 +81,7 @@ glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 | CLion 无运行配置 / "此文件不属于任何项目目标" | CLion 默认工具链是 AppleClang，且注入 `-DCMAKE_CXX_COMPILER` 覆盖预设 | 见 [§1](#1-macos--clion必须用-homebrew-llvm-工具链)：Toolchains 加 Homebrew LLVM 并设为 Debug profile 工具链，Reset Cache and Reload |
 | 删 `.idea` 后配置丢失 / 退回系统 clang | 新 profile 取工具链列表首位（=AppleClang） | 见 [§2](#2-删了-idea-会重新生成但可能退回-appleclang)：把 Homebrew LLVM 置首位 |
 | 场景全黑、无 GL 报错 | 忘了给 uniform block 绑定（GLSL 4.10 无 `layout(binding=N)` on blocks） | 见 [§3](#3-黑屏且无任何报错忘了给-ubouniform-block-绑定)：`SetBlockBinding(...)`；采样器 `Set("uShadowMap", (int)gldx::texunit::...)` |
+| PBR 场景全空、只剩天空/清屏色、无 GL 报错 | 着色器静态声明的 shadow/IBL 采样器在未装配对应子系统时悬空，Apple 驱动把整个 draw 判为 INVALID_OPERATION 吞掉 | 引擎侧已由 `GeometryPass::EnsureSamplerPlaceholders()` 用 1×1 类型正确占位纹理自动兜底（真实子系统随后重绑）；若自建 pass 命中此症，自行把采样器 uniform 指向一个已 complete 的 stand-in |
 | macOS 建窗失败 / 上下文为空 | 未开 forward-compat | 见 [§4](#4-macos-建窗要开-forward-compat)：`glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE)`（`#if GLFW_PLATFORM_MACOS`） |
 | 找不到 glad/stb/assimp 头 | 子模块未初始化 | `git submodule update --init --recursive` |
 | GLAD 生成报错 | 缺 Python/jinja2 | `brew install uv` 或 `pip install jinja2` |

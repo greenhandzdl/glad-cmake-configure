@@ -71,6 +71,10 @@
   2. `GeometryPass` —— 把 HDR 场景渲进 MSAA target（无 post 链时直渲窗口）：绑定
      UBO/阴影/环境，绘制经视锥剔除的可渲染物（对被拾取节点套一层高亮材质），可选
      的实例化场。打开的场景目标一直留到 `PostProcessPass` 才关，故天空盒能接在其后。
+     注：PBR 着色器静态声明的 shadow/IBL 采样器即使对应子系统未装配仍是活跃的，一个
+     活跃但未绑定（或不 complete）的采样器会在 draw 时毒化整个调用（Apple 驱动尤甚），
+     故 `EnsureSamplerPlaceholders()` 在 draw 前给这些纹理单元各兜上一个类型正确的 1×1
+     stand-in；真实子系统随后重绑同一单元，所以仅在其缺席时生效。
   3. `SkyboxPass`（可选） —— 用 LEQUAL 深度技巧以 HDR 环境立方填上没被不透明几何
      覆盖的像素；不装配它就完全不触碰 `SkyboxRenderer`/`EnvironmentMap`。
   4. `PostProcessPass` —— resolve MSAA，可选的 bright/blur bloom，然后把 ACES

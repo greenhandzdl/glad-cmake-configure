@@ -47,8 +47,8 @@
 │   │   ├── gldxcli.cppm / gldxcli.cpp
 │   ├── demo/                 # 一个功能一个入门 demo；每个含 main.cpp 的子目录被 add_subdirectory 自动收为一个可执行（import gldx/gldxwin/gldxcli）
 │   │   ├── CMakeLists.txt    #   add_gldx_demo(<name>) + GLOB 遍历含 main.cpp 的子目录（新增 demo 免改 CMake）
-│   │   ├── pbr_showcase/     #   成品演示：HDR/PBR/CSM/IBL/Bloom/天空盒/实例化/HUD 全开的交互场景
-│   │   ├── voxel_terrain/    #   成品演示：可玩体素世界（chunk 流式网格化 + 方块编辑，世界层在 demo 侧）
+│   │   ├── pbr_showcase/     #   成品演示：HDR/PBR/CSM/IBL/Bloom/天空盒/实例化/HUD 全开的交互场景（main + Input.{h,cpp} + Scene.{h,cpp}）
+│   │   ├── voxel_terrain/    #   成品演示：可玩体素世界（main + World.{h,cpp} + Input.{h,cpp} + Hud.{h,cpp}，世界层在 demo 侧）
 │   │   ├── pbr_lighting/ shadow_csm/ ibl_environment/ postprocess_bloom/ skybox/   # 各渲染子系统单功能 demo
 │   │   ├── instancing/ particles/ text_hud/ camera_picking/ debug_draw/            # 各能力单功能 demo
 │   │   └── geometry_upload/ texture_samplers/ model_loading/                       # 几何上传 / 采样器 / 异步模型 demo
@@ -125,7 +125,7 @@ cmake --build build
 配置结束会打印依赖解析摘要，便于确认 GLAD 的来源：
 
 ```
--- GLFW_Template 1.3.1 configuration:
+-- GLFW_Template 1.4.0 configuration:
 --   GLAD        : submodule (OpenGL 4.1 Core)   # 或 system
 --   Assimp      : submodule (static, bundled zlib)   # 或 DISABLED (GLDX_ENABLE_ASSIMP=OFF)
 ```
@@ -192,7 +192,7 @@ AddressSanitizer + UndefinedBehaviorSanitizer 的对抗输入自检（NaN / inf 
 
 **操作**（pbr_showcase）：拖拽轨道旋转 / 滚轮缩放；`A`·`D` 太阳方位、`W`·`S` 太阳高度；右键拾取高亮；`1` 阴影、`2` IBL、`3` Bloom、`4` 线框、`5` 实例化、`6` 天空盒、`Tab` 透视/正交；`Esc` 退出。
 
-**体素演示 `voxel_terrain`**（`./scripts/run.sh voxel_terrain`）是体素原语的验收场：fBm 高度场地形 + 沙滩 + 湖泊 + 树冠，worker 线程生成与网格化、渲染线程限量上传，雾随距离收掉视距边缘。世界层（chunk 网格、流式策略、地形生成、编辑规则、HUD）全部写在 `src/demo/voxel_terrain/main.cpp`，引擎只提供原语、不含任何世界概念。**操作**：鼠标转向（指针捕获）；`W`/`A`/`S`/`D` 飞行、`Space`/`Ctrl` 上下（`Shift` 减速）；左键破坏、右键放置；`1`–`8` 选方块；`F` 切换飞行/轨道相机；`[`/`]` 太阳方位、`-`/`=` 太阳高度；`P` 粒子；`Tab` 透视/正交；`X` 退出。
+**体素演示 `voxel_terrain`**（`./scripts/run.sh voxel_terrain`）是体素原语的验收场：fBm 高度场地形 + 沙滩 + 湖泊 + 树冠，worker 线程生成与网格化、渲染线程限量上传，雾随距离收掉视距边缘。世界层（chunk 网格、流式策略、地形生成在 `World.{h,cpp}`，输入回调在 `Input.{h,cpp}`，HUD pass 在 `Hud.{h,cpp}`）全部写在 `src/demo/voxel_terrain/` 内（`main.cpp` 只留窗口/帧循环装配），引擎只提供原语、不含任何世界概念。**操作**：鼠标转向（指针捕获）；`W`/`A`/`S`/`D` 飞行、`Space`/`Ctrl` 上下（`Shift` 减速）；左键破坏、右键放置；`1`–`8` 选方块；`F` 切换飞行/轨道相机；`[`/`]` 太阳方位、`-`/`=` 太阳高度；`P` 粒子；`Tab` 透视/正交；`X` 退出。
 
 ### Demo 索引
 
@@ -248,7 +248,7 @@ GLFW_Template-macos-arm64.zip
 GLFW_Template-windows-x64.zip
 ```
 
-当前正式版：**[v1.3.1](https://github.com/greenhandzdl/glad-cmake-configure/releases/tag/v1.3.1)**
+当前正式版：**[v1.4.0](https://github.com/greenhandzdl/glad-cmake-configure/releases/tag/v1.4.0)**
 
 ## 平台说明
 

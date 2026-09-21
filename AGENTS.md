@@ -16,7 +16,7 @@
 - 平台：Windows / macOS / Linux。
 - 依赖：GLFW（系统包）、GLAD（系统优先/子模块回退）、GLM（header-only）、STB（git 子模块内置）、Assimp（git 子模块，可选：`GLDX_ENABLE_ASSIMP` 默认 `ON`）。
 - 子模块：`third_party/glad`、`third_party/stb`、`third_party/assimp`。
-- 许可证：见 `LICENSE`。当前正式版 tag：`v1.3.1`。
+- 许可证：见 `LICENSE`。当前正式版 tag：`v1.4.0`。
 
 ## 硬性前提（先检查，否则必失败）
 
@@ -60,6 +60,13 @@ cmake --preset Debug && cmake --build --preset Debug
 cmake --build build 2>&1 | grep -E 'src/(main|demo|gldx)' | grep -iE 'warning|error'   # 期望：无（自有代码零告警；third_party 告警不计）
 ./output/GLFW_Template --quit-after 3 >/tmp/o 2>/tmp/e; echo "exit=$?"; grep -v 'UNSUPPORTED (log once)' /tmp/e   # 期望：exit 0、过滤后 stderr 空
 ./output/pbr_showcase  --quit-after 3 >/tmp/o 2>/tmp/e; echo "exit=$?"; grep -v 'UNSUPPORTED (log once)' /tmp/e   # 换任一个受影响 demo 同样跑（无头自检靠 --quit-after，不用 kill）
+```
+
+⚠️ **退出码不是“画面正常”的证据**：空窗口和满画面都 `return 0`。要证明“真出图”，用环境变量钩子回读一帧（无需改 demo，gldxwin `App` 内置）：
+
+```bash
+GLDX_SNAPSHOT=/tmp/shot.bmp GLDX_SNAPSHOT_AT=2.0 ./output/pbr_showcase --quit-after 8   # 回读一帧 BMP 后自动关窗
+sips -s format png /tmp/shot.bmp --out /tmp/shot.png                                    # 转 PNG 肉眼核对（或 python 数 nonclear 像素比例）
 ```
 
 ### 验证一个渲染开关是否真的还生效
@@ -147,8 +154,8 @@ src/gldx/third_party/         stb_image_impl.cpp（唯一第三方实现 TU，�
 src/gldxwin/gldxwin.cppm      引擎无关窗口库 primary interface（namespace gldx::win）：App 单例（glfwInit/Terminate + GL 4.1 core hints + 多窗口帧循环 Run）、Window（建窗+MakeContextCurrent+gladLoadGL，OnCreate/OnFrame/OnDestroy 钩子 + SetCloseOnEsc + UserData 槽）、WindowDesc/FrameInfo/RunOptions。仅链 glfw+GLAD，import 不到任何 gldx 类型
 src/gldxwin/App.cpp|Window.cpp  App::Run 帧循环实现 + Window 生命周期；gmf.hpp 挂 glad/glfw 到 global module
 src/gldxcli/gldxcli.cppm      CLI 开关库 primary interface（namespace gldx::cli::Flags）：--off/--on/--quit-after/--help + number/integer/real/string（域夹范围）；纯标准库、零链接依赖（原 header-only demo_cli.h 迁入）
-src/demo/pbr_showcase/       成品 PBR 场景演示（原 src/main.cpp）：HDR/PBR/CSM/IBL/Bloom/天空盒/实例化/HUD，import 三库 + 手写生命周期迁到 App/Window 钩子
-src/demo/voxel_terrain/      体素演示入口（原 src/voxel_main.cpp）：chunk 流式生成/网格化 + 方块编辑（保留本地时钟保帧序，仅换窗口生命周期）
+src/demo/pbr_showcase/       成品 PBR 场景演示（原 src/main.cpp）：HDR/PBR/CSM/IBL/Bloom/天空盒/实例化/HUD，import 三库 + 手写生命周期迁到 App/Window 钩子；拆为 `main.cpp`（装配）+ `Input.{h,cpp}`（回调）+ `Scene.{h,cpp}`（`ShowcaseScene`/`BuildInstancedField`）
+src/demo/voxel_terrain/      体素演示入口（原 src/voxel_main.cpp）：chunk 流式生成/网格化 + 方块编辑（保留本地时钟保帧序，仅换窗口生命周期）；拆为 `main.cpp`（装配+帧循环）+ `World.{h,cpp}`（常量/`World`/`WaterSim`/`GenerateChunk`）+ `Input.{h,cpp}` + `Hud.{h,cpp}`（`VoxelHudPass`）
 src/demo/{feature}/          单功能入门 demo：import gldx/gldxwin/gldxcli，用 gldx::win::App+Window 钩子（OnCreate 建 Renderer/MarkAsRenderThread，OnFrame 填 RenderFrame+Render）+ gldx::cli::Flags；只装配它演示的那个子系统；新增一个目录免改 CMake
 src/demo/CMakeLists.txt      add_gldx_demo(<name>)：d_<name>→OUTPUT_NAME=<name>→link gldx/gldxwin/gldxcli；GLOB(CONFIGURE_DEPENDS) 遍历含 main.cpp 的子目录
 src/assets/                  运行期内容（不编译）：models/ 投放目录 · shaders/ 只读参考镜像（不加载）
