@@ -56,6 +56,11 @@ struct VoxelPipeline {
     float waterAlpha = 0.55f;   // uOverrideAlpha for the blended pass
     float leafCutoff = 0.45f;   // uAlphaCutoff for the cutout geometry
     float time = 0.0f;          // seconds; drives the water uv scroll
+    // When true the opaque pass skips back-face culling so solid geometry draws
+    // two-sided. Off by default (culling a closed mesher surface is a free
+    // ~half-triangle win); on reveals a chunk interior when the camera is inside
+    // or below terrain, where exposed bottom faces would otherwise be culled.
+    bool doubleSided = false;
 
     [[nodiscard]] bool ready() const noexcept {
         return prog && atlas && atlas->valid() && chunks && !chunks->empty();

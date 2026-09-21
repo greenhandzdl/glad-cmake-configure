@@ -54,7 +54,7 @@ auto opaquePass = std::make_unique<gfx::VoxelOpaquePass>();
 opaquePass->SetPipeline(vx);                        // VoxelTransparentPass 同款，多按视距从远到近排序
 ```
 
-两个 pass 挂进 `Renderer` 链（顺序：`... → VoxelOpaque → VoxelTransparent → PostProcess → HUD`），`waterAlpha`/`leafCutoff`/`time`（水面 uv 流动）也在 `VoxelPipeline` 上调。HUD 字体是 demo 侧同步 `Font::LoadFromFile` 加载的系统 TTF，找不到只禁用文字叠加。
+两个 pass 挂进 `Renderer` 链（顺序：`... → VoxelOpaque → VoxelTransparent → PostProcess → HUD`），`waterAlpha`/`leafCutoff`/`time`（水面 uv 流动）也在 `VoxelPipeline` 上调。`doubleSided`（默认 `false`）关掉不透明 pass 的背面剔除：站在挖开的腔体里从下往上看时，被剔掉的底面会“看穿”，打开它就能看到腔壁。HUD 字体是 demo 侧同步 `Font::LoadFromFile` 加载的系统 TTF，找不到只禁用文字叠加。
 
 ## 5. 交互：`RaycastVoxel`（DDA，纯 CPU）
 
@@ -77,6 +77,22 @@ particles.Spawn(pos, vel, {1, 0.8f, 0.4f, 1}, 0.9f /*life 秒*/, 0.12f /*世界�
 particles.Update(dt);           // 每帧一次
 particles.Draw(frame.viewProj, cam.Position(), pixelScale);   // 透明地形之后画：深度测试开、写入关、互不遮挡
 ```
+
+## 7. 站立与滑行：`MoveVoxelAabb`（纯 CPU）
+
+射线回答“眼睛看到了哪个格子”，碰撞回答“身体允许走到哪”。把玩家建模成以**脚底中心**为锚的轴对齐盒，逐帧提出位移让它落地、贴墙滑行：
+
+```cpp
+const gfx::VoxelBody player{0.3f, 1.9f};        // 半径(XZ半宽) + 身高(脚→头)
+glm::vec3 feet = cam.Position(); feet.y -= kEyeHeight;   // 眼睛在脚上方
+gfx::VoxelMoveResult r = gfx::MoveVoxelAabb(feet, player, delta,
+        [&](glm::ivec3 c){ return world.Pickable(c); }); // 谓词=什么格挡得住人
+// r.grounded 告诉你这帧踩到了地面（下落被拦），交给重力/跳跃决定
+```
+
+- `pos` 传的是**脚底**（不是中心），盒子占 `[pos.x±r] × [pos.y, pos.y+height] × [pos.z±r]`；`VoxelAabbSolid` 单列出来给“出生点是否卡进几何体”这类纯查询用。
+- 逐轴解算：撞墙只取消被挡那一轴，另一轴照常推进，这就是贴着墙走能滑行的由来。
+- **单帧位移别超过一格**：快速移动/传送要调用方自己子步进（demo 把每帧位移按 ≤ 0.5 格切开再解），否则可能停在薄墙前而非穿过去。
 
 ---
 

@@ -120,6 +120,7 @@ int main() {
 | 光照 | `gfx::LightBuffer lb; lb.Init(); gfx::LightSetup s; s.sun.{direction,color,intensity}; s.ambient; lb.Update(s, camPos);` | |
 | 实例化 | `gfx::InstancedMesh im; if (!im.Create(std::move(geo), std::move(insts))) {...}` | **成员函数非静态**，返回 `bool`；`gfx::Instance{model(mat4),color(vec4)}` |
 | 拾取 | `gfx::PickRay(px,py,fbw,fbh,invViewProj)` → `gfx::Ray`；`gfx::PickNearest(ray, spheres)`→index | 像素是 framebuffer 坐标（Retina 下先从 GLFW 窗口坐标乘 scale）；`spheres: vector<pair<vec3,float>>`，取自 `scene.PickTargets()` |
+| 体素碰撞 | `gfx::VoxelMoveResult r = gfx::MoveVoxelAabb(feet, gfx::VoxelBody{radius,height}, delta, solidFn)` | 纯 CPU。`feet`=脚底中心（盒占 `x±radius × [y, y+height] × z±radius`）；逐轴解算→贴墙滑行；`r.grounded`=下落被拦。**单帧 delta 别过一格**，否则调用方子步进（见 `voxel_main.cpp` 按 ≤ 0.5 格切）；`VoxelAabbSolid(pos,body,fn)` 做纯包含测试 |
 | 常量 | `gfx::kWindowWidth/kWindowHeight/kWindowTitle/kAppName/kAppVersion` | 来自 `Platform.h` |
 
 ---

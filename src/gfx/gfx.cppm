@@ -122,5 +122,6 @@ export {
 #include "gfx/voxel/BlockRegistry.h"
 #include "gfx/voxel/Chunk.h"
 #include "gfx/voxel/ChunkMesher.h"
+#include "gfx/voxel/Collision.h"
 #include "gfx/voxel/VoxelMeshGpu.h"
 }

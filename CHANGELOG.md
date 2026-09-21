@@ -3,6 +3,27 @@
 本文件记录 `GLFW_Template`（`gfx` 引擎 + 演示应用）各版本的变更。
 版本标签遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## Unreleased
+
+体素 demo 三个体验问题的根因修复：碰撞缺失、水不流、从下往上看丢面。
+
+### 新增
+
+- **`Collision.h`（`src/gfx/voxel/`）**：纯 CPU 的 AABB 体素碰撞求解 `gfx::MoveVoxelAabb` / `gfx::VoxelAabbSolid`。把玩家/刚体建模成以脚底中心为锚的轴对齐盒
+  （`VoxelBody{radius, height}`），逐轴移动并吸附到被穿过的格面，天然产生“贴墙滑行”；返回 `VoxelMoveResult{hitX,hitY,hitZ,grounded}`。按 solidity
+  谓词模板化，无 GL、无全局状态、可任意线程调用；已随 `gfx` 模块导出。单帧位移超过一格需调用方子步进（快速移动/传送时）。
+- **`VoxelPipeline.doubleSided`**（默认 `false`，行为不变）：打开后体素不透明 pass 跳过背面剔除，从下方/腔体内看地形不再丢面。
+
+### 变更（demo）
+
+- **飞行相机改为真实碰撞**：去掉“低于海平面且脚下非空就把相机弹回 `kSeaLevel+2`”的启发式（正是“y 到某个高度下不去”的元凶），改用
+  `gfx::MoveVoxelAabb` 逐帧解算脚底 AABB（眼睛在脚上方 `kEyeHeight`）：能沿墙滑行、能下到刚挖开的竖井底部；每帧位移按 ≤ 0.5 格子步进防穿透。
+- **下落式水流**：新增 demo 侧 `WaterSim`（非库）。挖开水面正下方的方块后，上方的水按每 tick 下落一格的速度填充（守恒体积、到底即停、不横向
+  不回流）；由每次编辑标脏的局部工作集驱动，不扫全图。`B` 键或 `--on double-sided` 切双面。
+- **验证**：`Collision.h` 与水流规则各自写了纯 CPU 探针（在 `-fsanitize=address,undefined` 下跑过落地/滑行/下竖井/不穿透，与水的下落/守恒/不漂移）；
+  三个改动的 TU（`gfx.cppm`/`RenderPasses.cpp`/`voxel_main.cpp`）在 `-Wall -Wextra -Werror` 下零告警；体素 demo 无头多帧跑（含 `--auto-break` 脚本挖掘与
+  `--on double-sided`）无 GL 报错。
+
 ## v1.3.1
 
 一轮“把每个开关都亲手关掉再打开、拿截图对比”的验证带出来的东西。验证方法本身也进了仓库（`src/demo_cli.h`）。

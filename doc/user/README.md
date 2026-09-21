@@ -12,7 +12,7 @@
 | 🟡 **③ 贴图与模型加载** | [4-assets-loading.md](4-assets-loading.md) | `AssetManager` 异步两阶段：`Request*` → `ProcessUploads` → `Get*`，以及三条资产拒收规则 |
 | 🟡 **④ 光照与 UBO** | [5-lighting-ubo.md](5-lighting-ubo.md) | `LightSetup`/雾、灌 UBO 并绑定（黑屏第一课）、采样器、IBL 环境图 |
 | 🟢 **⑤ 相机与拾取** | [6-camera-picking.md](6-camera-picking.md) | orbit/fly 双控制模型、透视⇄正交、视锥剔除、鼠标点中物体三步 |
-| 🟢 **⑥ 体素世界** | [7-voxel-basics.md](7-voxel-basics.md) | 方块表→噪声地形→成块网格→上传绘制→射线挖方块→粒子点缀 |
+| 🟢 **⑥ 体素世界** | [7-voxel-basics.md](7-voxel-basics.md) | 方块表→噪声地形→成块网格→上传绘制→射线挖方块→AABB 碰撞站立→粒子点缀 |
 | 🔴 **进阶** | [8-advanced.md](8-advanced.md) | 自定义渲染 pass、后期链与运行期开关、GLSL 单一真源、投放目录约定 |
 | 🧰 **排错** | [9-troubleshooting.md](9-troubleshooting.md) | 遇到黑屏 / CLion 无配置 / `clang-scan-deps` 缺失等坑时，按"症状→根因→修复"速查 |
 

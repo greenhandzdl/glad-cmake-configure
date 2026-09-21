@@ -131,8 +131,12 @@ void VoxelOpaquePass::Execute(RenderFrame& f) {
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
+    // The mesher emits each face once with outward winding, so a closed chunk
+    // culls its own backs for free. doubleSided turns that off so a camera that
+    // gets inside or under terrain still sees the far walls of the cavity
+    // instead of looking through culled faces into nothing.
+    if (vx_ && vx_->doubleSided) glDisable(GL_CULL_FACE);
+    else { glEnable(GL_CULL_FACE); glCullFace(GL_BACK); }
 
     if (vx_ && vx_->ready()) {
         // Cutout (leaves) resolves in the same submission as solid blocks: the

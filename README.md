@@ -9,7 +9,7 @@
 
 **已实现的图形能力**：PBR 金属/粗糙工作流、级联阴影（CSM + PCF）、基于图像的照明（IBL：辐照度/预滤波/BRDF LUT）、HDR + MSAA + Bloom + ACES 色调映射、精灵批次 + 位图字体 HUD、实例化绘制、视锥剔除、调试线框、CPU 拾取、帧性能分析、两阶段异步资源管线，以及场景层级（`Scene`/`SceneNode`/`Transform`）+ 渲染管线（`Renderer`/`RenderPass`）。
 
-**体素 / 世界层原语**（v1.3）：`Chunk` + `ChunkMesher`（面剔除 + 逐顶点 AO，产出 opaque / transparent 两份网格）、`BlockRegistry`、`Texture2DArray`（一方块一纹理层）、`VoxelOpaquePass` / `VoxelTransparentPass`（视距排序 + 球剔除 + 混合）、`VoxelShaders`（sampler2DArray + 平行光近似 + alpha cutoff）、`RaycastVoxel`（DDA 逐格拾取，返回命中格与进入面法向）、`Camera` 飞行接口、`Noise`（Perlin + fBm，seeded 且 worker 线程安全）、`ParticleBatch`（挖掘碎屑）、`Mesh::Update`（chunk remesh 整缓冲重传）、线性距离雾。
+**体素 / 世界层原语**（v1.3）：`Chunk` + `ChunkMesher`（面剔除 + 逐顶点 AO，产出 opaque / transparent 两份网格）、`BlockRegistry`、`Texture2DArray`（一方块一纹理层）、`VoxelOpaquePass` / `VoxelTransparentPass`（视距排序 + 球剔除 + 混合，`VoxelPipeline.doubleSided` 可控不透明背面剔除）、`VoxelShaders`（sampler2DArray + 平行光近似 + alpha cutoff）、`RaycastVoxel`（DDA 逐格拾取，返回命中格与进入面法向）、`Camera` 飞行接口、`Collision`（`MoveVoxelAabb`：以脚底为锚的 AABB 逐轴碰撞 + 贴墙滑行，纯 CPU）、`Noise`（Perlin + fBm，seeded 且 worker 线程安全）、`ParticleBatch`（挖掘碎屑）、`Mesh::Update`（chunk remesh 整缓冲重传）、线性距离雾。
 
 文档按读者角色分三条路径，入口见 **[doc/](doc/README.md)**：使用者请看 [`doc/user/`](doc/user/README.md)（入门 + 一章一个 API 主题的基础系列：骨架/几何场景/资源加载/光照 UBO/相机拾取/体素世界，再加进阶与排错），开发者请看 [`doc/developer/`](doc/developer/README.md)（[design](doc/developer/design.md) + [thread-safety](doc/developer/thread-safety.md)），AI agent 速查见根目录 [AGENTS.md](AGENTS.md)。
 
@@ -143,7 +143,7 @@ cmake --build build --target clean-project
 
 | 开关 | 作用 |
 |------|------|
-| `--off a,b` / `--on a,b` | 关闭/打开列出的功能（PBR：`shadow,ibl,bloom,debug,instances,sky,ortho`；体素：`particles,fog,water,sky,ortho`） |
+| `--off a,b` / `--on a,b` | 关闭/打开列出的功能（PBR：`shadow,ibl,bloom,debug,instances,sky,ortho`；体素：`particles,fog,water,sky,ortho,double-sided`） |
 | `--quit-after SEC` | SEC 秒后自行退出 |
 | `--freeze-at SEC` | 把动画/物理时钟停在启动后 SEC 秒：两次同参数运行逐像素相同，截图才可对比（并且不捕获指针，视角停在 `--yaw/--pitch` 处） |
 | `--yaw/--pitch/--radius` | 设定 PBR 轨道相机朝向（实例化场在 +x 方向，默认视角看不到它，也看不到地平线） |

@@ -29,6 +29,8 @@
  *                  quits while orbiting)       X : quit
  *   [ / ]        : sun azimuth                - / = : sun elevation
  *   P            : toggle the debris particles
+ *   B            : toggle two-sided terrain (skips back-face culling, so the
+ *                  far walls of a dig stay visible when you look from below)
  *   Tab          : toggle perspective / orthographic projection
  *   scroll       : zoom the orbit camera (orbit mode)
  *
@@ -39,7 +41,10 @@
  * aim and lift the fly camera: at the spawn tilt the crosshair ray lands past
  * the interaction reach, so scripted mining needs a steeper pitch, and
  * --auto-place N with --select 7 builds the water a water test cannot find on
- * its own in this part of the world. --freeze-at also leaves the pointer alone:
+ * its own in this part of the world. --on double-sided mirrors the B key. The
+ * fly camera now collides with terrain (a dug shaft can be descended to its
+ * floor, and water above a broken cell pours down to fill it). --freeze-at also
+ * leaves the pointer alone:
  * a captured pointer lets whoever is moving the mouse next to the window rewrite
  * --yaw / --pitch, and the scripted edit counts with it.
  *
@@ -64,6 +69,7 @@
 #include <memory>
 #include <shared_mutex>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -93,6 +99,8 @@ constexpr std::size_t kMaxGenInFlight = 64;
 constexpr std::size_t kMaxMeshInFlight = 16;
 constexpr std::size_t kMaxUploadsPerFrame = 6;
 constexpr float kReach = 6.0f;          // block interaction distance (blocks)
+constexpr float kEyeHeight = 1.62f;     // fly camera eye above the feet (blocks)
+constexpr double kWaterTick = 1.0 / 8.0; // seconds between water-flow steps
 
 // A handful of cheap integer hashes: terrain, tree placement and the texture
 // jitter must be reproducible on every platform, so they are derived from
@@ -255,8 +263,10 @@ struct World final : gfx::IVoxelSource {
         return ch ? ch->Get(c.x & (kChunk - 1), c.y & (kChunk - 1), c.z & (kChunk - 1)) : 0;
     }
 
-    // Blocks the crosshair ray: everything but air and water (mining water is
-    // out of scope: the demo has no fluid simulation to refill a hole).
+    // Blocks the crosshair ray: everything but air and water. Water still is not
+    // minable, but it now flows: WaterSim drops water into any air dug beneath
+    // it, so opening a hole under a lake fills the hole rather than leaving the
+    // water hanging in mid-air.
     bool Pickable(glm::ivec3 c) const {
         const BlockId id = Sample(c);
         return id != 0 && id != Block::kWater;
@@ -327,6 +337,83 @@ struct World final : gfx::IVoxelSource {
         ch->Set(cell.x & (kChunk - 1), cell.y & (kChunk - 1), cell.z & (kChunk - 1), id);
         return true;
     }
+};
+
+// A deliberately small falling-water update for the demo. The mesher and block
+// registry already know water is transparent, but nothing in the library moves
+// it, so before this a lake resting on a just-mined block hung in mid-air. The
+// rule set is the gravity half of a cellular fluid and nothing more: water with
+// air directly beneath it descends one cell per tick (volume is conserved, so
+// the surface recedes as a shaft fills), and cells never spread sideways or rise.
+// That answers "I dug under the water, why didn't it fall?" without the flow
+// levels / source bookkeeping a full simulation needs. It is driven from a
+// per-edit work set on the render thread, so a change costs a bounded number of
+// cell reads instead of a whole-world scan.
+struct WaterSim final {
+    // Pack a world cell into a work-set key. The grid is far under 2^31, so one
+    // int suffices and keeps the set cheap.
+    static int Pack(glm::ivec3 c) { return (c.y * kWorldZ + c.z) * kWorldX + c.x; }
+    static glm::ivec3 Unpack(int k) {
+        const int x = k % kWorldX; k /= kWorldX;
+        const int z = k % kWorldZ; k /= kWorldZ;
+        return {x, k, z};
+    }
+
+    // Queue a cell, its six neighbours and the one above (the usual feeder) for
+    // the next step. Called after any block edit; cells that are neither water
+    // nor sitting under water do nothing when evaluated.
+    void schedule(glm::ivec3 c) {
+        insert(c);
+        insert(c + glm::ivec3(0, 1, 0));
+        insert(c + glm::ivec3(0, -1, 0));
+        insert(c + glm::ivec3(1, 0, 0));
+        insert(c + glm::ivec3(-1, 0, 0));
+        insert(c + glm::ivec3(0, 0, 1));
+        insert(c + glm::ivec3(0, 0, -1));
+    }
+
+    // Advance by dt seconds, stepping at most once per kWaterTick so a pour reads
+    // as falling liquid rather than a teleport. Reads run under a shared lock and
+    // are applied afterwards (World::Edit takes the exclusive lock itself). A
+    // falling source and a fall target can never collide in one tick: sources are
+    // water (their below is air), targets are air, and "below" is injective.
+    void step(World& world, float dt) {
+        timer += dt;
+        if (timer < kWaterTick) return;
+        timer = 0.0;
+        if (active.empty()) return;
+        std::unordered_set<int> cur;
+        cur.swap(active);
+
+        std::vector<std::pair<glm::ivec3, glm::ivec3>> moves;
+        {
+            std::shared_lock<std::shared_mutex> lk(world.mx);
+            for (int key : cur) {
+                const glm::ivec3 c = Unpack(key);
+                if (world.Sample(c) != Block::kWater) continue;
+                const glm::ivec3 below = c - glm::ivec3(0, 1, 0);
+                if (below.y < 0) continue;                        // world floor: nowhere to fall
+                if (world.Sample(below) == 0) moves.emplace_back(c, below);
+            }
+        }
+        for (const auto& [src, dst] : moves) {
+            world.Edit(dst, Block::kWater);
+            world.Edit(src, 0);
+            // Keep the stream going: the destination may itself have air below,
+            // and the now-empty source should pull whatever feeds it from above.
+            schedule(dst);
+            schedule(src + glm::ivec3(0, 1, 0));
+        }
+    }
+
+private:
+    void insert(glm::ivec3 c) {
+        if (c.x < 0 || c.y < 0 || c.z < 0
+            || c.x >= kWorldX || c.y >= kWorldY || c.z >= kWorldZ) return;
+        active.insert(Pack(c));
+    }
+    std::unordered_set<int> active;
+    double timer = 0.0;
 };
 
 // Fill one chunk: terrain columns + trees. Pure function of the grid coord, so
@@ -428,6 +515,7 @@ struct Input {
     bool showSky = true;
     bool showFog = true;
     float waterAlpha = 0.85f;
+    bool doubleSided = false;                 // B: draw terrain two-sided (no back cull)
 };
 
 const char* const kFontCandidates[] = {
@@ -531,7 +619,7 @@ void VoxelHudPass::Execute(gfx::RenderFrame& f) {
 
 int main(int argc, char** argv) {
     const demo::Flags flags(argc, argv,
-                            {"particles", "fog", "water", "sky", "ortho"},
+                            {"particles", "fog", "water", "sky", "ortho", "double-sided"},
                             {"auto-break", "auto-place", "freeze-at", "yaw", "pitch", "rise",
                              "select"}, "voxel_demo");
     if (flags.wantsHelp()) {
@@ -582,6 +670,7 @@ int main(int argc, char** argv) {
     // and the two switches have to stay independent.
     input.waterAlpha = flags.on("water") ? 0.85f : 0.0f;
     input.ortho = flags.on("ortho", false);
+    input.doubleSided = flags.on("double-sided", false);
     // Which block --auto-place builds with; the sweep uses 7 (water) to put a
     // transparent sheet in the frame without needing a lake to be nearby.
     input.selected = std::clamp(flags.integer("select", input.selected),
@@ -685,6 +774,7 @@ int main(int argc, char** argv) {
 
         // ---- world + streaming state ---------------------------------------
         World world;
+        WaterSim water;
         {
             // Spawn above the terrain at the world's centre. The fly camera is
             // the position authority, so the seed has to be pushed into it -
@@ -971,6 +1061,7 @@ int main(int argc, char** argv) {
                 return false;
             };
             static bool flyArmed = true, escArmed = true, partArmed = true, orthoArmed = true;
+            static bool bsArmed = true;
             if (edge(glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS, flyArmed)) {
                 input.cam = (input.cam == Input::Cam::Fly) ? Input::Cam::Orbit
                                                             : Input::Cam::Fly;
@@ -1001,6 +1092,8 @@ int main(int argc, char** argv) {
                 input.ortho = camera.ToggleProjection()
                               == gfx::Camera::Projection::Orthographic;
             }
+            if (edge(glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS, bsArmed))
+                input.doubleSided = !input.doubleSided;
 
             const double now = glfwGetTime();
             // --freeze-at S parks the demo clock S seconds after start: dt falls to
@@ -1071,27 +1164,44 @@ int main(int argc, char** argv) {
             const float step = input.speed * (boost ? 0.35f : 1.0f) * dt;
             if (input.cam == Input::Cam::Fly) {
                 camera.SetYawPitch(input.yaw, input.pitch);
-                if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camera.MoveForward(step);
-                if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) camera.MoveForward(-step);
-                if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) camera.MoveRight(-step);
-                if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) camera.MoveRight(step);
-                if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) camera.MoveUp(step);
-                if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
-                    camera.MoveUp(-step);
-                // Stay inside the world box, and never fall below the surface.
-                glm::vec3 p = camera.Position();
+                // Build the intended displacement from the camera basis instead
+                // of moving the eye directly, so it can be resolved against the
+                // world: the same Forward/Right/Up axes MoveForward et al use.
+                glm::vec3 delta(0.0f);
+                if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) delta += camera.Forward();
+                if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) delta -= camera.Forward();
+                if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) delta -= camera.Right();
+                if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) delta += camera.Right();
+                if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) delta += camera.Up();
+                if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) delta -= camera.Up();
+                delta *= step;
+
+                // The eye sits kEyeHeight above the feet; the collider moves the
+                // feet, so terrain under the player is what stops the descent (a
+                // real floor) rather than the old sea-level teleport that made
+                // the camera refuse to go down below the water line.
+                const gfx::VoxelBody playerBody{0.3f, 1.9f};
+                glm::vec3 feet = camera.Position();
+                feet.y -= kEyeHeight;
+                // Sub-step so one resolve never advances the body past half a
+                // cell: a stalled frame's dt clamp would otherwise let a full
+                // step several cells long tunnel thin walls (see Collision.h).
+                const float len = glm::length(delta);
+                const int segs = len > 0.5f ? static_cast<int>(std::ceil(len / 0.5f)) : 1;
+                const glm::vec3 seg = delta / static_cast<float>(segs);
                 {
                     std::shared_lock<std::shared_mutex> lk(world.mx);
-                    const glm::ivec3 cell{static_cast<int>(p.x), static_cast<int>(p.y) - 1,
-                                          static_cast<int>(p.z)};
-                    if (world.Sample(cell) && p.y < kSeaLevel - 2.0f) p.y = kSeaLevel + 2.0f;
+                    for (int s = 0; s < segs; ++s)
+                        gfx::MoveVoxelAabb(feet, playerBody, seg,
+                                           [&world](glm::ivec3 c) { return world.Pickable(c); });
                 }
-                p.x = std::clamp(p.x, 1.0f, static_cast<float>(kWorldX) - 1.0f);
-                p.z = std::clamp(p.z, 1.0f, static_cast<float>(kWorldZ) - 1.0f);
-                p.y = std::clamp(p.y, 1.0f, static_cast<float>(kWorldY) - 2.0f);
-                // Clamping the position is all that is left: the moves above
-                // never touched the orientation, so SetYawPitch already holds.
-                camera.Translate(p - camera.Position());
+                feet.y += kEyeHeight;
+                // Keep the eye inside the world box even where chunks are not
+                // streamed in yet (there the collider sees air and cannot stop).
+                feet.x = std::clamp(feet.x, 1.0f, static_cast<float>(kWorldX) - 1.0f);
+                feet.z = std::clamp(feet.z, 1.0f, static_cast<float>(kWorldZ) - 1.0f);
+                feet.y = std::clamp(feet.y, 1.0f + kEyeHeight, static_cast<float>(kWorldY) - 2.0f);
+                camera.Translate(feet - camera.Position());
             } else {
                 const float cp = std::cos(input.orbitPitch);
                 const glm::vec3 eye(
@@ -1140,6 +1250,7 @@ int main(int argc, char** argv) {
                     if (input.wantBreak) {
                         ++breaks;   // reported at exit: proves the scripted sweep mined
                         world.Edit(hit->position, 0);
+                        water.schedule(hit->position);   // water above may pour in
                         // Debris: a short outward burst, tinted by the block's
                         // own slice colour so the puff reads as "that material".
                         const glm::vec3 tint = BlockTint(broken);
@@ -1171,8 +1282,10 @@ int main(int argc, char** argv) {
                                                  static_cast<int>(camera.Position().y),
                                                  static_cast<int>(camera.Position().z)};
                         if (std::abs(target.x - eyeCell.x) + std::abs(target.y - eyeCell.y)
-                                + std::abs(target.z - eyeCell.z) > 1)
+                                + std::abs(target.z - eyeCell.z) > 1) {
                             world.Edit(target, static_cast<BlockId>(input.selected));
+                            water.schedule(target);
+                        }
                     }
                 }
                 input.wantBreak = input.wantPlace = false;
@@ -1184,6 +1297,7 @@ int main(int argc, char** argv) {
             }
 
             streamChunks(camera.Position());
+            water.step(world, dt);
 
             // ---- lighting + fog ---------------------------------------------
             const glm::vec3 towardSun = SunToward(input);
@@ -1207,6 +1321,7 @@ int main(int argc, char** argv) {
             frustum.Extract(viewProj);
 
             vx.time = static_cast<float>(elapsed);
+            vx.doubleSided = input.doubleSided;
 
             char line[512];
             std::snprintf(line, sizeof(line),
@@ -1214,7 +1329,7 @@ int main(int argc, char** argv) {
                           "%.0f fps   CPU %.2f ms  GPU %.2f ms   chunks %d (meshed %d)  pos %.0f %.0f %.0f\n"
                           "streaming gen %zu mesh %zu   particles %zu   visible %d/%d\n"
                           "picked: %s   (WASD fly, space/ctrl up/down, shift slow, LMB break, RMB place)\n"
-                          "F camera %s   ESC pointer %s   P particles %s   [ ] - = sun   X quit",
+                          "F camera %s   ESC pointer %s   P particles %s   B 2-sided %s   [ ] - = sun   X quit",
                           gfx::kAppVersion,
                           input.cam == Input::Cam::Fly ? "FLY" : "ORBIT",
                           smoothedFps,
@@ -1226,7 +1341,8 @@ int main(int argc, char** argv) {
                           kBlockKeys[std::min(input.selected, 8)],
                           input.cam == Input::Cam::Fly ? "-> orbit" : "-> fly",
                           input.captured ? "captured" : "free",
-                          input.showParticles ? "on" : "off");
+                          input.showParticles ? "on" : "off",
+                          input.doubleSided ? "on" : "off");
             hudRaw->text = line;
             hudRaw->crosshair = (input.cam == Input::Cam::Fly);
 
