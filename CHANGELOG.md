@@ -12,6 +12,12 @@
 - **审慎评估后不动**：`ShaderProgram::Set` 热路径的字符串 hash（名多走 SSO、改动仅省栈上临时对象，ROI 极低且触碰导出 API）、RAII 类的 move/析构样板与 `Bind` 的 `glActiveTexture`（target 枚举各异，强行基类化/参数化即项目警告的透传包装反模式）。
 - **验证**：全量重建零告警（模块扫描器只重编纹理 2 个 TU 并重链 `libgldx.a`）；23 个可执行 `--quit-after 3` 回归 pass=23/fail=0（`voxel_terrain` 覆盖 `Texture2DArray`、`model_loading`/`pbr_showcase`/`texture_samplers` 覆盖 `Texture2D` 新路径）。
 
+### 跨平台 CI 修复（v1.4.0 之后累积提交首次过三平台）
+
+- **Linux 链接修复**：`gldxwin` 的 `Window.cpp` 跨静态库引用引擎侧 GMF hook `gldx::EncodeScreenshot`，但各可执行的 `target_link_libraries` 按 `gldx gldxwin gldxcli` 排序——GNU ld 单趟扫描下扫到 `gldxwin` 时 `gldx.a` 已过、无法回头解析，报 `undefined reference`（Apple ld 多趟扫描故 macOS 侥幸通过）。把提供方 `gldx` 移到链接行**末位**（`gldxwin gldxcli gldx`）：gldx 是引擎底层、不反向依赖 gldxwin/gldxcli，且 MSVC/macOS 对静态库顺序不敏感，故改动仅修 Linux、他平台无副作用。
+- **Windows 编译修复**：`multi_viewport`/`multi_window_levels` 的 `View.cpp` 直接文本 `#include <glm/gtc/quaternion.hpp>` 并使用 `glm::quat`/`angleAxis`，与 `import gldx` 经 GMF 附到 global module 的 `glm::qua` 在 MSVC 下重定义（`C2953 'glm::qua' already defined`）。改为不再在 demo TU 命名 `glm::quat`：赋值旋转走引擎已导出的 `gldx::Transform::SetAxisAngle(axis, radians)`，island 线框的顶点旋转改用 quaternion-free 的 `glm::mat3(glm::rotate(...))`（`matrix_transform.hpp` 其余 demo 均在 Windows 正常编译）。
+- **验证**：macOS 本机重配+全量重编零告警，`multi_viewport`/`multi_window_levels`/`GLFW_Template` `--quit-after 3` 均 rc=0；Linux/Windows 侧改动由 draft CI 复验。
+
 ### 清理 `src/assets/shaders/`：镜像废除、demo 自带着色器就近归位
 
 - **背景**：`src/assets/shaders/` 顶层的 8 个 `.glsl` 长期作为内嵌 GLSL 的“可浏览镜像”，但镜像与单一真源（`src/gldx/shader/*Shaders.h` 的 `gldx::shaders::k*` raw string）极易漂移，维护成本高且从不被编译/加载；而真正**从磁盘加载**的 `file_demo/` 着色器混在镜像目录里，语义不亲。

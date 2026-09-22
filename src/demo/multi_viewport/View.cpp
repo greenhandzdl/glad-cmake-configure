@@ -7,7 +7,6 @@
 #include <cstdio>
 
 #include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/quaternion.hpp>
 
 namespace multi_viewport {
 
@@ -146,7 +145,8 @@ void View::Frame(const gldx::win::FrameInfo& info) {
     // atomic, so the cube's orientation is identical across windows.
     const float phase = static_cast<float>(state->phase.load(std::memory_order_relaxed));
     if (spinner) {
-        spinner->local().rotation = glm::angleAxis(phase, glm::normalize(glm::vec3(0.3f, 1.0f, 0.15f)));
+        spinner->local().SetAxisAngle(glm::normalize(glm::vec3(0.3f, 1.0f, 0.15f)),
+                                      static_cast<float>(phase));
         spinner->local().translation = glm::vec3(0.0f, 2.6f + 0.4f * std::sin(phase * 0.5f), 0.0f);
     }
 

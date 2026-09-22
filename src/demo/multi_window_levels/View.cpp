@@ -7,7 +7,6 @@
 #include <cstdio>
 
 #include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/quaternion.hpp>
 
 namespace multi_window_levels {
 
@@ -161,12 +160,17 @@ void View::Frame(const gldx::win::FrameInfo& info) {
 
         debug->Clear();
         debug->PushAxes(glm::vec3(0.0f), 1.6f);
-        const glm::quat q = glm::angleAxis(static_cast<float>(phase),
-                                           glm::normalize(glm::vec3(0.3f, 1.0f, 0.15f)));
+        // Rotate the wireframe on the CPU. Naming glm::quat here would collide
+        // on MSVC with the global-module glm reached through `import gldx`, so
+        // build a quaternion-free axis-angle rotation matrix with glm::rotate
+        // (matrix_transform.hpp) and rotate the corners with mat3 * vec3.
+        const glm::mat3 rot = glm::mat3(glm::rotate(
+            glm::mat4(1.0f), static_cast<float>(phase),
+            glm::normalize(glm::vec3(0.3f, 1.0f, 0.15f))));
         const glm::vec4 col(profile.tint, 1.0f);
         for (const auto& e : kCubeEdges) {
-            const glm::vec3 a = q * (kCubeCorners[e[0]] * 2.0f);
-            const glm::vec3 b = q * (kCubeCorners[e[1]] * 2.0f);
+            const glm::vec3 a = rot * (kCubeCorners[e[0]] * 2.0f);
+            const glm::vec3 b = rot * (kCubeCorners[e[1]] * 2.0f);
             debug->PushLine(a, b, col);
         }
         debug->Draw(camera.ViewProjection());
@@ -186,8 +190,8 @@ void View::Frame(const gldx::win::FrameInfo& info) {
     camera.LookAt(eye, target, glm::vec3(0, 1, 0));
 
     if (spinner) {
-        spinner->local().rotation = glm::angleAxis(static_cast<float>(phase),
-                                                   glm::normalize(glm::vec3(0.3f, 1.0f, 0.15f)));
+        spinner->local().SetAxisAngle(glm::normalize(glm::vec3(0.3f, 1.0f, 0.15f)),
+                                      static_cast<float>(phase));
         spinner->local().translation = glm::vec3(0.0f, 3.0f + 0.5f * std::sin(phase * 0.5f), 0.0f);
     }
 

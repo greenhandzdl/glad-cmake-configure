@@ -24,7 +24,7 @@ function(add_gldx_demo name)
     file(GLOB_RECURSE demo_sources CONFIGURE_DEPENDS
          ${CMAKE_CURRENT_SOURCE_DIR}/${name}/*.cpp)
     add_executable(d_${name} ${demo_sources})
-    target_link_libraries(d_${name} PRIVATE gldx gldxwin gldxcli)
+    target_link_libraries(d_${name} PRIVATE gldxwin gldxcli gldx)
     # Put the demo's own directory on the include path so split-out headers are
     # included by a stable path ("Scene.h" or "terrain/Chunk.h") regardless of
     # which .cpp in the demo pulls them in.

@@ -25,7 +25,7 @@ add_subdirectory(gldxcli)
 # with the sources. TARGET_NAME is set in the root CMakeLists.
 add_executable(${TARGET_NAME} main.cpp)
 
-target_link_libraries(${TARGET_NAME} PRIVATE gldx gldxwin gldxcli)
+target_link_libraries(${TARGET_NAME} PRIVATE gldxwin gldxcli gldx)
 
 set_target_properties(${TARGET_NAME} PROPERTIES
     OUTPUT_NAME ${TARGET_NAME}
