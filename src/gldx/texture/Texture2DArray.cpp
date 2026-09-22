@@ -1,6 +1,7 @@
 module;
 
 #include "gldx/gmf.hpp"
+#include "gldx/texture/TextureFormat.h"
 
 module gldx;
 
@@ -11,31 +12,6 @@ namespace {
 // path and the image loader use. Layers get their own bound, and the total
 // byte count is still checked with division below rather than by multiplying.
 constexpr int kMaxTextureLayers = 4096;
-GLenum ArrayDataFormat(int channels) {
-    switch (channels) {
-        case 1: return GL_RED;
-        case 2: return GL_RG;
-        case 3: return GL_RGB;
-        default: return GL_RGBA;
-    }
-}
-GLenum ArrayInternalFormat(int channels, bool srgb) {
-    // Mirrors Texture2D's table: there is no sRGB single/two-channel format.
-    if (srgb) {
-        switch (channels) {
-            case 1: return GL_R8;
-            case 2: return GL_RG8;
-            case 3: return GL_SRGB8;
-            default: return GL_SRGB8_ALPHA8;
-        }
-    }
-    switch (channels) {
-        case 1: return GL_R8;
-        case 2: return GL_RG8;
-        case 3: return GL_RGB8;
-        default: return GL_RGBA8;
-    }
-}
 } // namespace
 
 Texture2DArray::~Texture2DArray() {
@@ -94,10 +70,12 @@ void Texture2DArray::Upload(const Texture2DArrayDesc& desc) {
     layers_ = desc.layers;
 
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    // Format tables are shared with Texture2D (see TextureFormat.h): the channel
+    // -> GL_ENUM mapping is identical for the array path.
     glTexImage3D(GL_TEXTURE_2D_ARRAY, 0,
-                 ArrayInternalFormat(desc.channels, desc.srgb),
+                 detail::InternalFormat(desc.channels, desc.srgb),
                  desc.width, desc.height, desc.layers, 0,
-                 ArrayDataFormat(desc.channels), GL_UNSIGNED_BYTE,
+                 detail::DataFormat(desc.channels), GL_UNSIGNED_BYTE,
                  desc.pixels.data());
 
     // Full mipmap chain: voxel terrain lives at odd distances from the camera,

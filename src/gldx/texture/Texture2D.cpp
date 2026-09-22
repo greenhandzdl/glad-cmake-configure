@@ -1,39 +1,11 @@
 module;
 
 #include "gldx/gmf.hpp"
+#include "gldx/texture/TextureFormat.h"
 
 module gldx;
 
 namespace gldx {
-
-namespace {
-// The bound itself is kMaxTextureSide in Texture2D.h: the image loader has to
-// apply it before decoding, so it cannot live in here.
-GLenum DataFormat(int channels) {
-    switch (channels) {
-        case 1: return GL_RED;
-        case 2: return GL_RG;
-        case 3: return GL_RGB;
-        default: return GL_RGBA;
-    }
-}
-GLenum InternalFormat(int channels, bool srgb) {
-    if (srgb) {
-        switch (channels) {
-            case 1: return GL_R8;                 // no sRGB single channel
-            case 2: return GL_RG8;                // no sRGB two channel
-            case 3: return GL_SRGB8;
-            default: return GL_SRGB8_ALPHA8;
-        }
-    }
-    switch (channels) {
-        case 1: return GL_R8;
-        case 2: return GL_RG8;
-        case 3: return GL_RGB8;
-        default: return GL_RGBA8;
-    }
-}
-} // namespace
 
 Texture2D::~Texture2D() {
     if (id_ != 0) {
@@ -68,9 +40,9 @@ void Texture2D::Upload(const Texture2DDesc& desc) {
     // Same contract as Texture2DArray::Upload: glTexImage2D is handed
     // desc.pixels.data() and reads width*height*channels bytes from it, so the
     // vector has to be proven at least that long first. The channel bounds are
-    // part of the check because DataFormat() maps anything else onto RGBA, and
-    // the side bound keeps the byte product far away from wrapping (no desktop
-    // GL of the 4.1 era samples a larger texture either).
+    // part of the check because detail::DataFormat() maps anything else onto
+    // RGBA, and the side bound keeps the byte product far away from wrapping
+    // (no desktop GL of the 4.1 era samples a larger texture either).
     if (desc.width <= 0 || desc.height <= 0 || desc.channels < 1 || desc.channels > 4
         || desc.width > kMaxTextureSide || desc.height > kMaxTextureSide) {
         return;
@@ -85,8 +57,8 @@ void Texture2D::Upload(const Texture2DDesc& desc) {
     height_ = desc.height;
 
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    const GLenum format = DataFormat(desc.channels);
-    const GLenum internal = InternalFormat(desc.channels, desc.srgb);
+    const GLenum format = detail::DataFormat(desc.channels);
+    const GLenum internal = detail::InternalFormat(desc.channels, desc.srgb);
     glTexImage2D(GL_TEXTURE_2D, 0, internal, desc.width, desc.height, 0,
                  format, GL_UNSIGNED_BYTE, desc.pixels.data());
 
