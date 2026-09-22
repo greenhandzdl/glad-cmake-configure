@@ -3,6 +3,28 @@
 本文件记录 `GLFW_Template`（`gldx` 引擎（旧名 `gfx`）+ 演示应用）各版本的变更。历史条目保留当时的 `gfx` 旧称不改写；Unreleased 顶部起用 `gldx`。
 版本标签遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## Unreleased
+
+### 新增 `multi_viewport` demo + gldxwin 多窗口契约修复
+
+- **修复（gldxwin 契约）**：`App::Run` 主循环现在每帧先 `glfwMakeContextCurrent(该窗 handle)` 再触发 `OnFrame`——此前单窗口循环恰好运行在"最后一个被 makeCurrent 的 context"上，多窗口循环则会把所有窗口的绘制全部堆进同一个 context。gldxwin 的头注释一直承诺 OnCreate/OnDestroy 在"该窗口 context current"下运行，本次把同样的保证补齐到 OnFrame（单窗口下该调用是幂等 no-op，零行为变化）。
+- **新增 demo `multi_viewport`**（`src/demo/multi_viewport/`，`--windows N` 默认 3）：N 个 GLFW 窗口 = N 个互不共享的 GL context，同一场景以不同角度同步呈现。每个窗口的全部 GL 资源（PBR program、网格 VAO/VBO、字体纹理、LightBuffer UBO、Renderer/pass 链）在各自 `OnCreate` 里用**同一段确定性代码**在自己的 context 上独立创建、`OnDestroy` 里独立销毁；共享的只有 CPU 侧真值——一个 `SharedState`（`std::atomic` 的动画时钟/轨道角/心跳计数）由**后台 worker 线程**持续推进、渲染线程逐帧采样，三窗口截图的 phase/ticks 完全一致而视角各差 120°。任一窗口拖拽改变共享轨道角，所有窗口同步摆动；每帧断言"当前 context == 本窗口 context + 仍在唯一渲染线程"。
+- **验证**：TSan 下 3 窗口 + worker 连跑 30s 零数据竞争；ASan+UBSan 12 组（1/3/6 窗口、截图连拍、`--windows 0/-5/999/abc`、`--shot-at nan/inf`、`--` 裸分隔）全部 exit 0 零报错；`--shot-at SEC --shot-prefix PATH` 连拍取证先冻结共享时钟再逐窗 `CaptureScreenshot`，三张 PNG 场景状态逐像素同源。gldxwin 修复后全量重建零告警，`pbr_lighting`/`debug_draw`/`camera_picking` 截图回归无回退。
+
+### gldxwin 输入面加厚 + demo 全面去 GLFW 直调 + 巨型 main 拆分
+
+- **新增（gldxwin 输入面）**：`Window` 从「窗口生命周期 + 帧回调」加厚为完整的**输入 proxy**——portable 词汇 `Key`/`KeyAction`/`MouseButton`/`Vec2d`（不暴露任何 GLFW 类型、不依赖 glm），5 个事件订阅 `OnKey`/`OnChar`/`OnMouseButton`/`OnCursor`/`OnScroll`，轮询态 `KeyIsDown`/`MouseIsDown`/`CursorPos`/`SetCursorPos`/`SetCursorVisible`/`SetCursorCaptured`/`SetRawMouseInput`，窗口查询动作 `Pos`/`SetPos`/`Size`/`FramebufferSize`/`Focus`/`SetTitle`/`ContextIsCurrent`，以及 `App::Now()`（glfwGetTime 的薄封装）。gldxwin 自行安装 GLFW trampoline 并**保留 GLFW user-pointer**：demo 不得再调 `glfwSetWindowUserPointer`/`glfwSet*Callback`，改用 `Window::SetUserData` 或在回调 lambda 里捕获。封装边界规则沉淀为「高频重复且代理后不露 GLFW 类型 → 收进 `Window`；稀有/窗口系统专属（raw mouse、clipboard、joystick、file drop）→ 保留 `Handle()` 逃生舱直调」。
+- **新增（截图收口）**：`Window::CaptureScreenshot(path)`（gldxwin：makeCurrent + viewport 读回 + 翻转）把 PNG 编码交给 `gldx::EncodeScreenshot`（gldx 全局模块片段，stb_image_write 仍是引擎私有依赖）——两侧 GMF 声明同一 hook 避免模块界 mangling 不匹配。纯 viewport 读回的 `gldx::CaptureScreenshot(path)` 保留可用。
+- **重构（demo 去 GLFW 直调）**：13 个含 `glfwGetKey`/`glfwSet*Callback`/`glfwGetTime`/裸 `GLFW_KEY_*` 的 demo 全部迁到 gldxwin 输入面；`texture_samplers` 的手写 VAO/VBO/EBO（`glGen*`/`glVertexAttribPointer`/`glDelete*`）改用引擎既有 RAII `gldx::VertexArray`/`gldx::GLBuffer`/`gldx::Sampler`（`glViewport`/`glBindFramebuffer`/`glDrawElements` 等 pass 作者合法底层操作不代理）。至此 demo 代码中再无 GLFW 常量/函数直调（`Handle()` 逃生舱外）。
+- **重构（巨型 main 拆分）**：按「一个 main 别太巨大」把大 demo 拆成多文件小项目——`multi_viewport`（433 行）拆出 `SharedState.{h,cpp}`（原子共享态 + 后台 worker）与 `View.{h,cpp}`（每窗 context-private 资源与逐帧绘制），main 只留接线（→146 行）；`texture_samplers`（221 行）拆出 `SamplerPass.{h,cpp}`（两采样器渲染 pass），main 精简到接线（→58 行）；`voxel_terrain`（873 行）抽出 `Streaming.{h,cpp}`（线程池 + 生成/网格化双队列 + 上传 drain 的整块流式加载），main →681 行。拆分均不改行为，靠 demo 目录 `GLOB_RECURSE` 自动收集新增 `.cpp`，无需改 CMake。
+- **验证**：全量重建 61 目标零告警零错误；`multi_viewport` TSan 3 窗口 + worker 连跑零数据竞争、三窗截图连拍正常；`pbr_showcase`/`multi_viewport`/`texture_samplers` 截图回归无回退。
+
+### 新增 `ShaderProgram::CreateFromFiles`（可选的外部 GLSL 加载）
+
+- **新增（gldx 着色器）**：`ShaderProgram` 补一个 opt-in 静态工厂 `CreateFromFiles(vertexPath, fragmentPath)`——读两个磁盘上的 `.glsl`（顶点 + 片元）再转发给既有的 `CreateFromSource`。读文件走 `std::ifstream`（沿用 `Font::LoadFromFile` 的姿态：先量大小、带 4 MB sanity 上限防超大/畸形文件驱动无界分配），打不开 / 读失败 / 超限一律返回 `std::unexpected`、不抛异常，在渲染线程执行（要链接 program）。**这是纯增量能力**：引擎自带着色器的单一真源仍是 `src/gldx/shader/*Shaders.h` 的内嵌 raw string，`src/assets/shaders/*.glsl` 依旧是不被读取的镜像——普通构建保持「运行期零路径 / 工作目录依赖」的 CI 安全保证不变，新 API 只留给 demo 或用户自行热加载的外部着色器。VAO/VBO/UBO/Sampler/FBO 的 RAII 封装（`gldx::VertexArray`/`GLBuffer`/`UniformBuffer`/`Sampler`/`Framebuffer`）此前已齐备，demo 亦无裸调，本轮无需再动。
+- **新增 demo `shader_file`**（`src/demo/shader_file/`）：端到端跑通 `CreateFromFiles`。从 `--vert`/`--frag` 指定的文件加载并链接程序，画一个纯由 `gl_VertexID` 生成（无顶点缓冲）的全屏三角，用暖色斜渐变证明“确实有着色器在跑”而非 clear 色。语义上可脚本验证：不传路径时退回与文件等价的**内嵌**源仍能开窗口；传了路径却加载失败则 **exit 1**（“exit 0 + 非空截图”即文件路径真跑通的证据）。配套的真·被加载着色器放在 `src/assets/shaders/file_demo/triangle.{vert,frag}`（镜像目录的例外，README 已标注）。
+- **仓库卫生（models 目录）**：`src/assets/models/` 新增局部 `.gitignore` 把投放内容**全量忽略**（只留 README + 这份 .gitignore 撑住目录），删除冗余的 `.gitkeep`；仓库根新增 `.gitattributes`，用**注释掉**的 `*.glb filter=lfs ...` 规则 + 步骤说明写清“将来若要版本化大模型资产，怎么开 Git LFS”（默认仍关闭，不影响三平台“克隆即可构建”）。
+
 ## v1.4.0
 
 ### 精简与安全验证（发布前体检）

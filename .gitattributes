@@ -1,0 +1,34 @@
+# .gitattributes
+#
+# Git LFS is intentionally NOT enabled in this repository right now. The only
+# place large binary assets would land - src/assets/models/ - is fully
+# gitignored, so nothing binary is versioned to begin with and there is nothing
+# for LFS to intercept yet.
+#
+# If you later want to version big model / image assets, turn LFS on deliberately:
+#
+#   1) install git-lfs            brew install git-lfs   (macOS)
+#                               winget install GitHub.GitLFS (Windows)
+#                               apt install git-lfs      (Linux)
+#   2) git lfs install            (once, per clone; sets up the filters)
+#   3) git lfs track "*.glb"      (writes a rule like the commented ones below,
+#                                  and can be edited by hand as shown)
+#   4) un-ignore the assets you want by removing the matching lines from
+#      src/assets/models/.gitignore, then `git add` the assets AND this file.
+#
+# The rules below are left commented so enabling LFS is an explicit edit rather
+# than a silent default. Once uncommented, matching files are stored as small LFS
+# pointer files inside git while the real blobs live in LFS storage; the -text
+# attribute stops git's newline normalisation from corrupting binary files.
+#
+# --- model formats (Assimp imports) ---
+# *.glb   filter=lfs diff=lfs merge=lfs -text
+# *.gltf  filter=lfs diff=lfs merge=lfs -text
+# *.fbx   filter=lfs diff=lfs merge=lfs -text
+# *.obj   filter=lfs diff=lfs merge=lfs -text
+# *.dae   filter=lfs diff=lfs merge=lfs -text
+#
+# --- textures / baked images, if you ever commit them ---
+# *.png   filter=lfs diff=lfs merge=lfs -text
+# *.jpg   filter=lfs diff=lfs merge=lfs -text
+# *.ktx2  filter=lfs diff=lfs merge=lfs -text

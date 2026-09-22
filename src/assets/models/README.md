@@ -1,8 +1,9 @@
 # 模型投放目录
 
 把网格资产放在这里——**FBX / OBJ / glTF / GLB**（[Assimp][assimp] v5.4.x
-能导入的任意格式均可）。本目录在仓库中通过 `.gitkeep` 刻意保持为空；真实文件按你的常规工作流
-加入（体积大，建议 Git LFS，或参考文末的仓库卫生约定）。
+能导入的任意格式均可）。本目录的**内容已被 `src/assets/models/.gitignore` 全量忽略**（只留下本 README 和那份
+`.gitignore` 让目录存在）；真实模型按你的常规工作流自行管理（体积大，若要入库请启用 Git LFS，步骤见仓库根
+`.gitattributes`，或参考文末的仓库卫生约定）。
 
 [assimp]: https://assimp.org
 
@@ -42,5 +43,6 @@
 
 ## 仓库卫生
 
-大型二进制默认不入库。若要加入重量级资产，请扩展 `.gitignore`（或启用 Git LFS），
-不要直接提交——引擎与 `main.cpp` 必须保持三平台 CI "克隆即可构建"。
+大型二进制默认不入库——本目录的 `.gitignore` 已把投放进来的东西全量忽略。若要正式版本化重量级资产，
+按仓库根 `.gitattributes` 里注释好的步骤启用 Git LFS（`git lfs install` + `git lfs track` + 放开对应的
+忽略规则），不要直接裸提交——引擎与 `main.cpp` 必须保持三平台 CI “克隆即可构建”。

@@ -5,7 +5,7 @@
 - 语言标准：C++23；引擎以 **C++20 named module `gldx`** 交付（静态库），另有两个应用侧 named module 库：`gldxwin`（引擎无关的 GLFW 窗口/帧循环：`App` 单例 + 多窗口 `Window`）与 `gldxcli`（命令行开关 `Flags`）。消费者统一 `import gldx; import gldxwin; import gldxcli;`
 - OpenGL：**4.1 Core Profile**（GLSL `#version 410 core`；macOS 对应 "4.1 Metal"）
 - 构建系统：CMake ≥ 3.28（配合 Ninja），需支持 named modules 的编译器（Clang ≥ 19 / GCC ≥ 14 / 最新 MSVC）
-- 产物：`output/GLFW_Template`（来自 `src/main.cpp` 的 hello-triangle 最小演示）+ `src/demo/` 下每个 feature demo（`output/pbr_showcase`、`output/voxel_terrain` 等，共 15 个）；Windows 加 `.exe`
+- 产物：`output/GLFW_Template`（来自 `src/main.cpp` 的 hello-triangle 最小演示）+ `src/demo/` 下每个 feature demo（`output/pbr_showcase`、`output/voxel_terrain` 等，共 16 个）；Windows 加 `.exe`
 
 **已实现的图形能力**：PBR 金属/粗糙工作流、级联阴影（CSM + PCF）、基于图像的照明（IBL：辐照度/预滤波/BRDF LUT）、HDR + MSAA + Bloom + ACES 色调映射、精灵批次 + 位图字体 HUD、实例化绘制、视锥剔除、调试线框、CPU 拾取、帧性能分析、两阶段异步资源管线，以及场景层级（`Scene`/`SceneNode`/`Transform`）+ 渲染管线（`Renderer`/`RenderPass`）。
 
@@ -48,10 +48,12 @@
 │   ├── demo/                 # 一个功能一个入门 demo；每个含 main.cpp 的子目录被 add_subdirectory 自动收为一个可执行（import gldx/gldxwin/gldxcli）
 │   │   ├── CMakeLists.txt    #   add_gldx_demo(<name>) + GLOB 遍历含 main.cpp 的子目录（新增 demo 免改 CMake）
 │   │   ├── pbr_showcase/     #   成品演示：HDR/PBR/CSM/IBL/Bloom/天空盒/实例化/HUD 全开的交互场景（main + Input.{h,cpp} + Scene.{h,cpp}）
-│   │   ├── voxel_terrain/    #   成品演示：可玩体素世界（main + World.{h,cpp} + Input.{h,cpp} + Hud.{h,cpp}，世界层在 demo 侧）
+│   │   ├── voxel_terrain/    #   成品演示：可玩体素世界（main + World.{h,cpp} + Input.{h,cpp} + Hud.{h,cpp} + Streaming.{h,cpp}，世界层在 demo 侧）
 │   │   ├── pbr_lighting/ shadow_csm/ ibl_environment/ postprocess_bloom/ skybox/   # 各渲染子系统单功能 demo
 │   │   ├── instancing/ particles/ text_hud/ camera_picking/ debug_draw/            # 各能力单功能 demo
-│   │   └── geometry_upload/ texture_samplers/ model_loading/                       # 几何上传 / 采样器 / 异步模型 demo
+│   │   ├── geometry_upload/ model_loading/                                       # 几何上传 / 异步模型 demo
+│   │   ├── texture_samplers/ #   采样器 demo（main + SamplerPass.{h,cpp}：VertexArray/GLBuffer/Sampler RAII，无裸 GL 脚手架）
+│   │   └── multi_viewport/ #   多窗口同步视图：每窗独立 context 串行重渲同一场景（main 接线 + SharedState.{h,cpp} + View.{h,cpp}，atomic 共享态 + 后台 worker，线程/上下文安全验收场）
 │   └── assets/               # 内容资源（不被编译）：GLSL 参考镜像 + 模型投放目录，与 gldx 代码同级
 │       ├── shaders/          #   内嵌 GLSL 的只读参考镜像（不被编译/加载）
 │       └── models/           #   FBX/OBJ/glTF 投放目录（运行期经 AssetManager 异步加载）
@@ -215,6 +217,7 @@ AddressSanitizer + UndefinedBehaviorSanitizer 的对抗输入自检（NaN / inf 
 | `geometry_upload` | GeometryFactory → MeshData → Mesh::Upload（无光照纯色） | `./scripts/run.sh geometry_upload` |
 | `texture_samplers` | Texture2D + Sampler（NEAREST vs LINEAR 对照） | `./scripts/run.sh texture_samplers` |
 | `model_loading` | AssetManager 异步 + GLDX_ENABLE_ASSIMP=OFF 优雅降级 | `./scripts/run.sh model_loading` |
+| `multi_viewport` | 多窗口同步视图：每窗独立 context 各自上传、单线程串行重渲、原子共享时钟/轨道（拖任一窗全窗同步） | `./scripts/run.sh multi_viewport` |
 
 > 最小实现基线不在表内：`./scripts/run.sh`（默认目标 `GLFW_Template`）即 `src/main.cpp` 的 hello-triangle。
 

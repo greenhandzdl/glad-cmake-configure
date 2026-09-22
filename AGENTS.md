@@ -12,7 +12,7 @@
 
 - 项目：跨平台 **OpenGL 4.1 Core / PBR 图形引擎**（`gldx`）+ 按功能拆分的演示。仓库名 `glad-cmake-configure`：`src/main.cpp` 只留**最裸 hello-triangle**（目标 `GLFW_Template`，最小实现基线），其余一个功能一个 demo 在 `src/demo/{feature}/main.cpp`（成品演示 `pbr_showcase` PBR 场景、`voxel_terrain` 体素世界，另 ~13 个单功能 demo）。
 - 语言：**C++23**；引擎以 **C++20 named module `gldx`** 交付（静态库）。
-- 构建：**CMake ≥ 3.28 + Ninja**。产物落 `output/`：`GLFW_Template`（hello-triangle）+ 每个 `src/demo/{feature}` 一个可执行（`pbr_showcase`、`voxel_terrain`…共 15 个）（Win 加 `.exe`）。
+- 构建：**CMake ≥ 3.28 + Ninja**。产物落 `output/`：`GLFW_Template`（hello-triangle）+ 每个 `src/demo/{feature}` 一个可执行（`pbr_showcase`、`voxel_terrain`…共 16 个）（Win 加 `.exe`）。
 - 平台：Windows / macOS / Linux。
 - 依赖：GLFW（系统包）、GLAD（系统优先/子模块回退）、GLM（header-only）、STB（git 子模块内置）、Assimp（git 子模块，可选：`GLDX_ENABLE_ASSIMP` 默认 `ON`）。
 - 子模块：`third_party/glad`、`third_party/stb`、`third_party/assimp`。
@@ -84,8 +84,8 @@ sips -s format png /tmp/shot.bmp --out /tmp/shot.png                            
 120 Hz 步长、脚本节拍锁在绝对步数边界上、动画时钟用"距启动秒数"而非 `glfwGetTime()` 绝对值。
 新增任何时间驱动的东西都要遵守这条，否则截图对比失效。另外：被测特性必须在默认画面里可见，
 否则量到的只是 0（实例化场偏 +x、雾/天空需要远景视角，都得靠 `--yaw/--pitch/--rise` 把镜头转过去）。
-还有一条同样致命的前提：脚本化验证跑起来时程序不能拥有指针。Fly 相机原本无条件 `GLFW_CURSOR_DISABLED`，
-而 `MouseCallback` 把鼠标增量写进 `yaw/pitch`——同机的人动一下鼠标，准星就离开 `--yaw/--pitch` 放的位置，
+还有一条同样致命的前提：脚本化验证跑起来时程序不能拥有指针。Fly 相机原本无条件 `GLFW_CURSOR_DISABLED`（现经 `Window::SetCursorCaptured(true)` 代理），
+而 `OnCursor` 回调把鼠标增量写进 `yaw/pitch`——同机的人动一下鼠标，准星就离开 `--yaw/--pitch` 放的位置，
 `--auto-break` 数出来的 `blocks broken` 会整组失真。`--freeze-at` 因此同时意味着不捕获指针。
 
 ### CPU 侧原语的对抗输入自检（sanitizer）
@@ -151,11 +151,11 @@ src/gldx/scene/               Scene · SceneNode · Transform（纯 CPU 层级�
 src/gldx/render/              Renderer · RenderPass · RenderFrame · RenderPasses(含 Voxel 两 pass) · PostProcessChain · SpriteBatch · TextRenderer · ParticleBatch
 src/gldx/text|assets|debug/   Font / AssetManager·ThreadPool·ModelLoader·ImageLoader / DebugDraw·Profiler
 src/gldx/third_party/         stb_image_impl.cpp（唯一第三方实现 TU，非模块接口）
-src/gldxwin/gldxwin.cppm      引擎无关窗口库 primary interface（namespace gldx::win）：App 单例（glfwInit/Terminate + GL 4.1 core hints + 多窗口帧循环 Run）、Window（建窗+MakeContextCurrent+gladLoadGL，OnCreate/OnFrame/OnDestroy 钩子 + SetCloseOnEsc + UserData 槽）、WindowDesc/FrameInfo/RunOptions。仅链 glfw+GLAD，import 不到任何 gldx 类型
+src/gldxwin/gldxwin.cppm      引擎无关窗口库 primary interface（namespace gldx::win）：App 单例（glfwInit/Terminate + GL 4.1 core hints + 多窗口帧循环 Run + `Now()`）、Window（建窗+MakeContextCurrent+gladLoadGL，OnCreate/OnFrame/OnDestroy 钩子 + SetCloseOnEsc + UserData 槽 `SetUserData/GetUserData/UserDataAs<T>` + 完整输入面：事件 `OnKey/OnChar/OnMouseButton/OnCursor/OnScroll`、轮询 `KeyIsDown/MouseIsDown/CursorPos/SetCursorPos/SetCursorVisible/SetCursorCaptured/SetRawMouseInput`、几何与上下文 `Pos/SetPos/Size/FramebufferSize/Focus/ContextIsCurrent/CaptureScreenshot`）、WindowDesc/FrameInfo/RunOptions + portable 词汇 `Key/KeyAction/MouseButton/Vec2d`（不露 GLFW 类型）。**GLFW 窗口 user-pointer 被 gldxwin 独占**（构造时无条件装 5 个 trampoline 指回 `this`），demo 严禁再 `glfwSetWindowUserPointer`/`glfwSet*Callback`——改用上面的输入面或回调 lambda 捕获；`Handle()` 是给未代理的窗口系统能力（raw mouse/clipboard/joystick/file drop）留的逃生舱，日常 demo 应保持不调用。仅链 glfw+GLAD，import 不到任何 gldx 类型
 src/gldxwin/App.cpp|Window.cpp  App::Run 帧循环实现 + Window 生命周期；gmf.hpp 挂 glad/glfw 到 global module
 src/gldxcli/gldxcli.cppm      CLI 开关库 primary interface（namespace gldx::cli::Flags）：--off/--on/--quit-after/--help + number/integer/real/string（域夹范围）；纯标准库、零链接依赖（原 header-only demo_cli.h 迁入）
 src/demo/pbr_showcase/       成品 PBR 场景演示（原 src/main.cpp）：HDR/PBR/CSM/IBL/Bloom/天空盒/实例化/HUD，import 三库 + 手写生命周期迁到 App/Window 钩子；拆为 `main.cpp`（装配）+ `Input.{h,cpp}`（回调）+ `Scene.{h,cpp}`（`ShowcaseScene`/`BuildInstancedField`）
-src/demo/voxel_terrain/      体素演示入口（原 src/voxel_main.cpp）：chunk 流式生成/网格化 + 方块编辑（保留本地时钟保帧序，仅换窗口生命周期）；拆为 `main.cpp`（装配+帧循环）+ `World.{h,cpp}`（常量/`World`/`WaterSim`/`GenerateChunk`）+ `Input.{h,cpp}` + `Hud.{h,cpp}`（`VoxelHudPass`）
+src/demo/voxel_terrain/      体素演示入口（原 src/voxel_main.cpp）：chunk 流式生成/网格化 + 方块编辑（保留本地时钟保帧序，仅换窗口生命周期，输入全走 gldxwin 代理不再直调 glfw）；拆为 `main.cpp`（装配+帧循环）+ `World.{h,cpp}`（常量/`World`/`WaterSim`/`GenerateChunk`）+ `Streaming.{h,cpp}`（`ChunkStreamer`：线程池+生成/网格化双队列）+ `Input.{h,cpp}` + `Hud.{h,cpp}`（`VoxelHudPass`）
 src/demo/{feature}/          单功能入门 demo：import gldx/gldxwin/gldxcli，用 gldx::win::App+Window 钩子（OnCreate 建 Renderer/MarkAsRenderThread，OnFrame 填 RenderFrame+Render）+ gldx::cli::Flags；只装配它演示的那个子系统；新增一个目录免改 CMake
 src/demo/CMakeLists.txt      add_gldx_demo(<name>)：d_<name>→OUTPUT_NAME=<name>→link gldx/gldxwin/gldxcli；GLOB(CONFIGURE_DEPENDS) 遍历含 main.cpp 的子目录
 src/assets/                  运行期内容（不编译）：models/ 投放目录 · shaders/ 只读参考镜像（不加载）
@@ -182,8 +182,9 @@ AGENTS.md                    本文件（agent 速查，留在仓库根便于自
 - **加一个渲染 pass**：继承 `gldx::RenderPass`，`void Execute(gldx::RenderFrame&) override`，`renderer.AddPass(std::make_unique<...>())`。GL 工作在渲染线程执行（`Renderer::Render` 保证）。
 - **加几何**：`gldx::GeometryFactory::Cube/Sphere/Plane` 或自填 `gldx::MeshData` → `Mesh::Upload(std::move(data))`（渲染线程）。
 - **加载模型/贴图**：`AssetManager::RequestModel/RequestTexture(key, path)`（key 由调用方命名，重复 key 被忽略），每帧 `ProcessUploads()`，就绪前 `Get*` 返回 `nullptr`。纹理引用必须落在模型目录内、图片边长≤`kMaxTextureSide`（16384，解码前校验），两条越界都会被拒。
-- **改 GLSL**：改 `src/gldx/shader/*Shaders.h`（单一真源），**不要**改 `src/assets/shaders/`（那只是镜像）。
+- **改 GLSL**：改 `src/gldx/shader/*Shaders.h`（单一真源），**不要**改 `src/assets/shaders/`（那只是镜像）。要 demo/用户从外部 `.glsl` 热加载用 opt-in 的 `ShaderProgram::CreateFromFiles(vertPath, fragPath)`（仅读入后转发 `CreateFromSource`；不破坏内嵌单一真源，普通构建仍零运行期路径依赖）。
 - **UBO 绑定**：`ShaderProgram::SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding)` 等，链接后设一次。
+- **demo 里处理输入/截图**：只用 `gldx::win::Window` 的输入面——订阅 `OnKey/OnChar/OnMouseButton/OnCursor/OnScroll` 或在 lambda 里捕获状态，轮询用 `KeyIsDown/MouseIsDown/CursorPos`，指针锁定用 `SetCursorCaptured`，截图用 `Window::CaptureScreenshot(path)`；**不要** `glfwSet*Callback`/`glfwSetWindowUserPointer`/`glfwGetKey`/`glfwGetTime`（后者用 `App::Now()`）——user-pointer 归 gldxwin 独占，直调会踩坏回调分发。只有窗口系统专属能力（raw mouse/clipboard/joystick/file drop）才落回 `Handle()` 逃生舱。
 
 ## 报错 → 修复
 

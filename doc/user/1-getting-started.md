@@ -63,7 +63,7 @@ pip install jinja2         # 生成 GLAD 需要
 
 ## 4. 构建与运行
 
-四种方式任选其一。产物固定在 `output/`：`GLFW_Template`（`src/main.cpp` 的 hello-triangle 最小演示）与 `src/demo/` 下每个 feature demo 一个可执行（`pbr_showcase`、`voxel_terrain`…共 15 个）（Windows 加 `.exe`）。
+四种方式任选其一。产物固定在 `output/`：`GLFW_Template`（`src/main.cpp` 的 hello-triangle 最小演示）与 `src/demo/` 下每个 feature demo 一个可执行（`pbr_showcase`、`voxel_terrain`…共 16 个）（Windows 加 `.exe`）。
 
 ### 4.1 命令行（跨平台通用）
 

@@ -1,0 +1,14 @@
+# Model staging directory.
+#
+# Everything dropped in here is ignored by default: real mesh assets are large
+# and get versioned through your own workflow (see README.md), not through this
+# repo. Only this .gitignore and README.md stay tracked, which is what keeps the
+# otherwise-empty directory present in git.
+#
+# To start versioning a specific model anyway:
+#   git add -f src/assets/models/<that-one-file>.glb
+# or turn on Git LFS and relax the rules below - see the repo-root .gitattributes
+# for the exact steps.
+*
+!README.md
+!.gitignore
