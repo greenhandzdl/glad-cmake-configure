@@ -19,6 +19,7 @@
 | --- | --- | --- |
 | 🟢 入门 | [user/1-getting-started.md](user/1-getting-started.md) | 前置要求、克隆（含子模块）、各平台依赖、四种构建运行方式、演示操作 |
 | 🟢 ① | [user/2-core-setup.md](user/2-core-setup.md) | 接入 `main.cpp` 的最小骨架：窗口/渲染线程/Renderer/每帧形状 |
+| 🟢 ①·补 | [user/2a-window-input-cli.md](user/2a-window-input-cli.md) | 窗口生命周期钩子、键盘/鼠标/滚轮输入、光标/截图/多窗口与 `gldxcli` 开关（每特性完整代码 + demo） |
 | 🟢 ② | [user/3-geometry-scene.md](user/3-geometry-scene.md) | 网格、材质、场景层级、实例化 |
 | 🟡 ③ | [user/4-assets-loading.md](user/4-assets-loading.md) | 贴图/模型的异步两阶段加载与拒收规则 |
 | 🟡 ④ | [user/5-lighting-ubo.md](user/5-lighting-ubo.md) | 光照数据、UBO 绑定第一课、采样器、IBL |
@@ -41,7 +42,7 @@
 ## 阅读顺序建议
 
 - 只想跑起来看效果：[user/1-getting-started.md](user/1-getting-started.md) 一篇足够。
-- 要基于引擎写程序：[user/1](user/1-getting-started.md) → [user/2](user/2-core-setup.md)，其余 API 章（[3](user/3-geometry-scene.md)～[7](user/7-voxel-basics.md)）按需跳读。
+- 要基于引擎写程序：[user/1](user/1-getting-started.md) → [user/2](user/2-core-setup.md) → [user/2a](user/2a-window-input-cli.md)，其余 API 章（[3](user/3-geometry-scene.md)～[7](user/7-voxel-basics.md)、[8](user/8-advanced.md)）按需跳读。
 - 要改引擎代码或新增会碰 GL 的功能：[developer/thread-safety.md](developer/thread-safety.md) **先读再动手**。
 - 想知道某个东西在哪：[AGENTS.md](../AGENTS.md) 的文件地图与 [developer/design.md](developer/design.md) §1 的分层图。
 

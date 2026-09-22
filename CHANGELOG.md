@@ -5,6 +5,36 @@
 
 ## Unreleased
 
+### 库线程安全审计 + 纹理格式映射表去重
+
+- **线程安全审计（结论：无需改动）**：复核单渲染线程模型的落地——`RenderContext` 用 `thread_local bool` 实现线程亲和，仅 `MarkAsRenderThread()` 所在线程为真，所有碰 GL 的成员（构造/上传/绑定/绘制/析构/`Use`）入口都以 `AssertRenderThread(...)` fail-fast 守卫；全库跨线程面仅 `ThreadPool` 与 `AssetManager` 两处且都正确加锁（`queueMutex_` 守提交/待传队列、`storeMutex_` 读写锁护资源表、futures 作唯一交接介质，`Upload` 一律回渲染线程 `ProcessUploads` 执行）。无游离可变全局/单例。
+- **纹理格式表去重**：`Texture2D` 的 `DataFormat`/`InternalFormat` 与 `Texture2DArray` 的 `ArrayDataFormat`/`ArrayInternalFormat` 是逐字相同的两张通道→GL 格式映射表（array 版原注释即自陈“Mirrors Texture2D's table”），存在漂移隐患。抽为共享内部头 `src/gldx/texture/TextureFormat.h`（`gldx::detail::` 内 `inline`，纯 `GLenum` 算术、无状态无 GL 调用），两个 `.cpp` 从 global module fragment 引用。净删约 40 行重复，行为完全等价。
+- **审慎评估后不动**：`ShaderProgram::Set` 热路径的字符串 hash（名多走 SSO、改动仅省栈上临时对象，ROI 极低且触碰导出 API）、RAII 类的 move/析构样板与 `Bind` 的 `glActiveTexture`（target 枚举各异，强行基类化/参数化即项目警告的透传包装反模式）。
+- **验证**：全量重建零告警（模块扫描器只重编纹理 2 个 TU 并重链 `libgldx.a`）；23 个可执行 `--quit-after 3` 回归 pass=23/fail=0（`voxel_terrain` 覆盖 `Texture2DArray`、`model_loading`/`pbr_showcase`/`texture_samplers` 覆盖 `Texture2D` 新路径）。
+
+### 清理 `src/assets/shaders/`：镜像废除、demo 自带着色器就近归位
+
+- **背景**：`src/assets/shaders/` 顶层的 8 个 `.glsl` 长期作为内嵌 GLSL 的“可浏览镜像”，但镜像与单一真源（`src/gldx/shader/*Shaders.h` 的 `gldx::shaders::k*` raw string）极易漂移，维护成本高且从不被编译/加载；而真正**从磁盘加载**的 `file_demo/` 着色器混在镜像目录里，语义不亲。
+- **顶层镜像废除**：`pbr/depth/skybox/instanced/postprocess/ibl/sprite/debug.glsl` 内容清空，每个只保留三行 `[MIRROR DEPRECATED]` 注释，指名其唯一真源的具体头文件与常量名（不再与头文件同步）。
+- **demo 着色器就近归位**：`git mv` `file_demo/triangle.{vert,frag}` → `src/demo/shader_file/assets/shaders/`，`file_demo/{points.vert,squares.geom,points.frag}` → `src/demo/geometry_shader_file/assets/shaders/`，删除已空的 `file_demo/` 目录。因这些路径只由 demo 的 `--vert/--geom/--frag` 命令行传入（无硬编码默认路径、不被 CMake 引用），搬迁零运行影响，`*.vert/.geom/.frag` 也不会被 demo 的 `GLOB_RECURSE *.cpp` 误当源码。
+- **文档**：重写 `src/assets/shaders/README.md`（镜像表→真源映射 + demo 新位置）与 `src/assets/README.md` 相关描述；同步 `AGENTS.md`、`doc/agents/author-program.md` §6、`doc/user/8-advanced.md` §3/§5、`doc/user/9-troubleshooting.md` §5、`doc/developer/README.md` 中对镜像与 `file_demo` 旧路径的引用。
+- **验证**：全量重建零告警零错误；`shader_file`/`geometry_shader_file` 两 demo 传新路径端到端仍 exit 0（内嵌 fallback 与文件加载两条路径都未受影响）。
+
+### 新增 `multi_window_levels` demo（多窗口的同步↔异步、per-window 剔除、LOD 分档、独立 context）
+
+- **背景**：`multi_viewport`/`render_passes` 只覆盖了多窗口的**同步、同场景、同等级**一角——所有窗读同一个原子时钟、渲染同一份确定性场景、只差一个固定相机偏移。但引擎的分层允许窗口彼此更不同，使用者文档旧 §7 也只讲了这一角，没把“同步↔异步、不同 culling（有些窗显示有些窗不）、不同视角、完全无关的 GL 上下文、窗口的不同等级”这些正交维度摊开。
+- **新增 demo `multi_window_levels`**（`src/demo/multi_window_levels/`，`--windows N` 默认 5）：五个“等级”窗，每窗一个 `Profile`（`Profiles.{h,cpp}`）同时沿四个独立轴取值——**时钟**（Sync 读 `SharedState` 原子相位 vs Async 用 `FrameInfo::dt` 各自累积，带不同 `rate`）、**视角**（固定 yaw/pitch/radius，绕到对面的 `rear-guard` 与 `flagship` 共享同相位却剔成不同可见集）、**视距/FOV**（远平面与张角当“档位”，短远平面 + 窄 fov 的 `scout` 只剩 `6/38`）、**LOD**（球体细分从 `lod 32` 降到 `lod 8`）。第五轴是 island 窗（`independent=true`）：不建 `Renderer`/`Scene`/PBR program/`LightBuffer`，只 `glClear` 自己的默认帧缓冲 + `DebugDraw` 画一套独立线框，证明一进程一渲染线程里两个 context 可彻底互不相干。每窗 HUD 实时打印 `SYNC/ASYNC`、`phase`、`visible x/38`、`lod`、`far`，把每个维度做成屏上可观测证据。拆为 `Profiles.{h,cpp}` + `SharedState.{h,cpp}`（只有同步窗才读的原子时钟 + worker）+ `View.{h,cpp}`（按 `Profile` 分支建/绘，含 island 特判）+ `main.cpp`（多窗接线）四组文件。
+- **文档**：`doc/user/2a-window-input-cli.md` §7 新增 §7.1–§7.4 四小节（同步↔异步、per-window 视锥剔除、LOD/视距分档、完全无关的独立 context），每节配完整可编译代码片段并链到 `multi_window_levels`；`doc/user/README.md` 覆盖矩阵拆出“多窗口同步”与“多窗口异步/剔除/LOD/独立 context”两行；根 `README.md` 目录树 + demo 表、`AGENTS.md` 多窗口 how-to 同步补录。
+- **验证**：全量重建（新增 `d_multi_window_levels` 目标）零告警零错误；`--quit-after 3` exit 0（Apple 驱动 `GLD_TEXTURE_INDEX_2D ... using zero texture` 为 `GeometryPass` 采样器占位纹理的良性提示、非错误）；`--shot-at 2` 逐窗抓五张（字节数 48–85 KB 各异，内容互不相同）：实测两同步窗 phase 同为 `3.84` 而 `visible` 为 `23/38` vs `24/38`（同钟不同剔除）、两异步窗 phase `2.24`/`3.24`（各自漂移）、island 窗 `INDEP-CONTEXT` 只画自己线框；全部 23 个可执行 `--quit-after 2` 回归扫描均 exit 0 零回退。
+
+### 使用者文档扩充：覆盖每个特性 + 完整代码 + 现场 demo 链接
+
+- **背景**：`doc/user/` 此前给的多是代码片段而非可直接编译的完整代码，且不系统地把特性链到正在使用它的 demo；尤其 `gldxwin`（窗口/输入/光标/截图/多窗口）与 `gldxcli`（命令行开关）在旧文档里几乎只字未提（第 2 章只讲基础建窗）——与“不仅 GL、还包括窗口”的覆盖要求相背。
+- **新增专章 `doc/user/2a-window-input-cli.md`（①·补 窗口·输入·命令行）**：把 `gldxwin` 与 `gldxcli` 摊开讲透——生命周期钩子（`OnCreate`/`OnFrame`/`OnDestroy` + `MarkAsRenderThread` 时机）、`FrameInfo` 字段与 `App::Run`/`App::Now`、输入事件回调（`OnKey`/`OnChar`/`OnMouseButton`/`OnCursor`/`OnScroll` 与 `Key`/`KeyAction`/`MouseButton` 可移植枚举）、轮询态（`KeyIsDown`/`MouseIsDown`/`CursorPos`）、光标控制（`SetCursorCaptured`/`SetCursorVisible`/`SetRawMouseInput`）、窗口几何与动作、`CaptureScreenshot`、`SetUserData`/`UserDataAs`/`Handle()` 逃生舱、`ContextIsCurrent` 多窗断言、**多窗口 N 个独立 context 的完整骨架**，以及 `gldx::cli::Flags` 的 `on/number/integer/real/string/quitAfter/wantsHelp/printUsage`。**每特性都给能直接编译的完整代码**，并逐个链到 `src/demo/{feature}/` 现场演示。
+- **扩充 `doc/user/8-advanced.md`**：自定义 `RenderPass` 由 `MyPass` 桩升为完整可编译的 `TintPass`（RAII 句柄 + `VertexArray` 成员绘制 + 帧级裸调对照）；新增 §5《`ShaderProgram` 四入口与全阶段装配》（`CreateFromSource`/两文件 `CreateFromFiles`/`CreateFromSources({...})`/多阶段文件 `CreateFromFiles({...})` + `ShaderStage` 枚举，含全 5 阶段与 macOS 细分+几何良性提示说明）与 §6《文字 HUD 与调试绘制》（`Font`/`SpriteBatch`/`TextRenderer` 完整 pass + `DebugDraw`/`Profiler`）。
+- **补齐现场演示链接**：为 `3-geometry-scene`、`4-assets-loading`、`5-lighting-ubo`、`6-camera-picking`、`7-voxel-basics` 每个特性段落补 **🔗 现场演示** 行指向对应 demo（`geometry_upload`/`instancing`/`model_loading`/`pbr_lighting`/`shadow_csm`/`texture_samplers`/`ibl_environment`/`skybox`/`camera_picking`/`voxel_terrain`/`particles` 等）；第 2 章与入门页新增指向 2a 专章的导航。
+- **索引**：`doc/user/README.md` 纳入 2a 行并新增“**特性 → 现场 demo 覆盖矩阵**”（窗口/输入/命令行/几何/资源/光照/阴影/采样/IBL/后期/相机拾取/体素/自定义 pass/着色器装配/HUD调试 一次排齐）；`doc/README.md` 同步章表与阅读顺序。纯文档变更，不动代码与行为。
+
 ### 新增 `geometry_shader_file` demo（多阶段着色器从文件加载）
 
 - **背景**：四个程序装配入口里，`CreateFromSource`（内嵌 V+F）、`CreateFromFiles(vertPath, fragPath)`（两文件版，由 `shader_file` 覆盖）、`CreateFromSources({...})`（多阶段内嵌，由 `geometry_shader`/`shader_stages` 覆盖）都有 demo，**唯独多阶段文件版 `CreateFromFiles(std::initializer_list<ShaderFile>)` 零覆盖**——它能把几何/细分等可选阶段也从磁盘装配，是两文件版根本表达不了的能力。

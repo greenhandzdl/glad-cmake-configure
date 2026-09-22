@@ -67,7 +67,7 @@ glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
 ## §5 资源投放：改 `src/assets/shaders/` 没反应
 
-`src/assets/shaders/` 里的 `.glsl/.vert/.frag` **只是内嵌 GLSL 的只读参考镜像，不被编译、不被加载**。真正的着色器在 `src/gldx/shader/*Shaders.h` 单一真源里。要改着色效果，改 `*Shaders.h`；别指望动 `shaders/` 影响运行，也别把要加载的模型丢进 `shaders/`。
+`src/assets/shaders/` 顶层的 `.glsl` **是已废除的内嵌 GLSL 镜像，只剩一行指向真源的注释，不被编译、不被加载**。真正的着色器在 `src/gldx/shader/*Shaders.h` 单一真源里。要改着色效果，改 `*Shaders.h`；别指望动 `shaders/` 影响运行，也别把要加载的模型丢进 `shaders/`。（真正从磁盘加载的 demo 着色器住在各 demo 的 `src/demo/{feat}/assets/shaders/` 下。）
 
 - 运行期**模型/贴图**投放目录是 `src/assets/models/`。
 

@@ -11,7 +11,7 @@
 
 **体素 / 世界层原语**（v1.3）：`Chunk` + `ChunkMesher`（面剔除 + 逐顶点 AO，产出 opaque / transparent 两份网格）、`BlockRegistry`、`Texture2DArray`（一方块一纹理层）、`VoxelOpaquePass` / `VoxelTransparentPass`（视距排序 + 球剔除 + 混合，`VoxelPipeline.doubleSided` 可控不透明背面剔除）、`VoxelShaders`（sampler2DArray + 平行光近似 + alpha cutoff）、`RaycastVoxel`（DDA 逐格拾取，返回命中格与进入面法向）、`Camera` 飞行接口、`Collision`（`MoveVoxelAabb`：以脚底为锚的 AABB 逐轴碰撞 + 贴墙滑行，纯 CPU）、`Noise`（Perlin + fBm，seeded 且 worker 线程安全）、`ParticleBatch`（挖掘碎屑）、`Mesh::Update`（chunk remesh 整缓冲重传）、线性距离雾。
 
-文档按读者角色分三条路径，入口见 **[doc/](doc/README.md)**：使用者请看 [`doc/user/`](doc/user/README.md)（入门 + 一章一个 API 主题的基础系列：骨架/几何场景/资源加载/光照 UBO/相机拾取/体素世界，再加进阶与排错），开发者请看 [`doc/developer/`](doc/developer/README.md)（[design](doc/developer/design.md) + [thread-safety](doc/developer/thread-safety.md)），AI agent 速查见根目录 [AGENTS.md](AGENTS.md)。
+文档按读者角色分三条路径，入口见 **[doc/](doc/README.md)**：使用者请看 [`doc/user/`](doc/user/README.md)（入门 + 一章一个 API 主题的基础系列：骨架/**窗口·输入·命令行**/几何场景/资源加载/光照 UBO/相机拾取/体素世界，再加进阶（自定义 pass、着色器装配、文字 HUD/调试绘制）与排错——每个特性都配完整代码并链到对应 demo），开发者请看 [`doc/developer/`](doc/developer/README.md)（[design](doc/developer/design.md) + [thread-safety](doc/developer/thread-safety.md)），AI agent 速查见根目录 [AGENTS.md](AGENTS.md)。
 
 ## 目录结构
 
@@ -58,7 +58,8 @@
 │   │   ├── geometry_shader_file/ #  多阶段从文件加载：CreateFromFiles({{Vertex},{Geometry},{Fragment}}) 从磁盘装配含几何阶段的程序（无路径时退回内嵌源）
 │   │   ├── shader_stages/    #   全 5 阶段集成：CreateFromSources 装配 Vertex+TessControl+TessEval+Geometry+Fragment，画 GL_PATCHES 细分线框（main + Stages.h）
 │   │   ├── multi_viewport/   #   多窗口同步视图：每窗独立 context 串行重渲同一场景（main 接线 + SharedState.{h,cpp} + View.{h,cpp}，atomic 共享态 + 后台 worker，线程/上下文安全验收场）
-│   │   └── render_passes/    #   多窗口 + for 循环装配不同 RenderPass 子类：ClearPass + Triangle/Quad/Line/Point（main + SharedState.{h,cpp} + Passes.{h,cpp} + View.{h,cpp}，一表多态、各窗独立 context 同步时钟）
+│   │   ├── render_passes/    #   多窗口 + for 循环装配不同 RenderPass 子类：ClearPass + Triangle/Quad/Line/Point（main + SharedState.{h,cpp} + Passes.{h,cpp} + View.{h,cpp}，一表多态、各窗独立 context 同步时钟）
+│   │   └── multi_window_levels/  # 多窗口的同步↔异步、per-window 剔除、LOD/视距分档、完全无关的独立 context：五个"等级"窗（main + Profiles.{h,cpp} + SharedState.{h,cpp} + View.{h,cpp}，同步窗共享原子时钟、异步窗各自 dt 累积、Frustum 逐窗剔成不同 visible/total、island 窗不共享任何 GPU 对象）
 │   └── assets/               # 内容资源（不被编译）：GLSL 参考镜像 + 模型投放目录，与 gldx 代码同级
 │       ├── shaders/          #   内嵌 GLSL 的只读参考镜像（不被编译/加载）
 │       └── models/           #   FBX/OBJ/glTF 投放目录（运行期经 AssetManager 异步加载）
@@ -224,6 +225,7 @@ AddressSanitizer + UndefinedBehaviorSanitizer 的对抗输入自检（NaN / inf 
 | `model_loading` | AssetManager 异步 + GLDX_ENABLE_ASSIMP=OFF 优雅降级 | `./scripts/run.sh model_loading` |
 | `multi_viewport` | 多窗口同步视图：每窗独立 context 各自上传、单线程串行重渲、原子共享时钟/轨道（拖任一窗全窗同步） | `./scripts/run.sh multi_viewport` |
 | `render_passes` | 多窗口 + for 循环装配不同 `RenderPass` 子类（Clear/Triangle/Quad/Line/Point），各窗独立 context 共设同一原子时钟 | `./scripts/run.sh render_passes` |
+| `multi_window_levels` | 多窗口的四个正交维度：同步↔异步时钟、per-window 视锥剔除（同一场不同 `visible/total`）、LOD/视距分档、以及一个与其余窗完全无关的独立 context（island） | `./scripts/run.sh multi_window_levels` |
 | `shader_file` | `CreateFromFiles` 从磁盘加载 GLSL（坏路径 exit 1，无路径退回内嵌源） | `./scripts/run.sh shader_file` |
 | `geometry_shader` | `CreateFromSources({Vertex,Geometry,Fragment})` 选择性装配几何阶段（点→方块阵） | `./scripts/run.sh geometry_shader` |
 | `geometry_shader_file` | `CreateFromFiles({{Vertex},{Geometry},{Fragment}})` 多阶段从磁盘加载（含从文件装配的几何阶段；坏路径 exit 1，无路径退回内嵌源） | `./scripts/run.sh geometry_shader_file` |

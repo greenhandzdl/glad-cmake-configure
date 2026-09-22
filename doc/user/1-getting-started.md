@@ -129,6 +129,6 @@ CLion 会自动导入 `CMakePresets.json`。**macOS 上唯一要做的**：在 `
 
 ## 下一步
 
-- 想在自己的程序里用 `gldx` → [🟢 ① 核心骨架](2-core-setup.md)，后续 API 章（几何/资源/光照/相机/体素）见 [user 目录](README.md)
+- 想在自己的程序里用 `gldx` → [🟢 ① 核心骨架](2-core-setup.md)，紧接着看 [🟢 ①·补 窗口·输入·命令行](2a-window-input-cli.md)（键盘/鼠标/多窗口/截图/`--开关`）；后续 API 章（几何/资源/光照/相机/体素/进阶）见 [user 目录](README.md)
 - 想知道"为什么全黑 / 为什么 CLion 没配置" → [🧰 排错](9-troubleshooting.md)
 - 想理解引擎为什么这样设计 → [../developer/design.md](../developer/design.md)

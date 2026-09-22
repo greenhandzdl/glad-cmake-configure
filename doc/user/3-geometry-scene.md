@@ -15,6 +15,8 @@ mesh.Upload(std::move(data));                // Stage B：只能在渲染线程�
 - `GeometryFactory` 现成有 `Cube/Sphere/Plane`；要自定义就往 `MeshData` 里自填顶点/索引再 `Upload`。
 - chunk remesh 这类"几何变了但资源不重建"的场景用 `Mesh::Update(MeshData&&)`（整缓冲 orphan 重传、VAO 复用），不必销毁再 `Upload`。
 
+🔗 **现场演示**：[`../../src/demo/geometry_upload/main.cpp`](../../src/demo/geometry_upload/main.cpp) 专测 `Mesh::Upload` / `Update` 与自定义顶点缓冲的上传路径。
+
 ## 2. 给一个材质
 
 ```cpp
@@ -48,6 +50,10 @@ node.SetRenderable(&mesh, &mat);             // 节点持"非拥有"指针：mes
 gldx::InstancedMesh field;
 field.Create(std::move(geo), std::move(instances));   // 返回 bool；gldx::Instance{model, color}
 ```
+
+🔗 **现场演示**：
+- 实例化场（几百个不同变换/颜色）：[`../../src/demo/instancing/main.cpp`](../../src/demo/instancing/main.cpp)。
+- 网格+材质+旋转子层级（carousel，演示场景变换传播）的完整装配：[`../../src/demo/pbr_showcase/main.cpp`](../../src/demo/pbr_showcase/main.cpp)。
 
 ---
 

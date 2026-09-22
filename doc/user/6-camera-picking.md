@@ -49,6 +49,8 @@ int hit = gldx::PickNearest(ray, spheres);       // 无命中返回 -1；单球�
 
 ③ 把 `spheres[i]` 映射回你的节点、选中、换材质参数——这步是你的应用逻辑（demo 里选中后高亮 `metallic`）。`PickRay` 用近/远两平面反投影构造射线，**与投影类型无关**：透视给出 eye→远点方向，正交得到正确的过像素垂线；射线含非有限分量时下游按 miss 处理（不崩）。
 
+🔗 **现场演示**：[`../../src/demo/camera_picking/main.cpp`](../../src/demo/camera_picking/main.cpp)——一个环阵 16 球（一半在眼后），轨道环绕时 HUD 实时报 `visible/total` 剔除计数，右键拾取高亮；拾取坐标归一化与射线构造都在同一文件。
+
 ---
 
 ## 下一步

@@ -41,6 +41,8 @@ lights.Bind();                                                           // 每�
 
 **遇到"全黑且无报错"，先查这一步。** 同类"忘了一步就静默无输出"的坑记在 [排错 §3](9-troubleshooting.md#3-黑屏且无任何报错忘了给-ubouniform-block-绑定)。
 
+🔗 **现场演示**：[`../../src/demo/pbr_lighting/main.cpp`](../../src/demo/pbr_lighting/main.cpp) 把 `LightSetup` → `LightBuffer` → 绑定 → `BuildPbrPipeline` 跑成一张带明暗的球阵；级联阴影见 [`../../src/demo/shadow_csm/main.cpp`](../../src/demo/shadow_csm/main.cpp)。
+
 ## 3. 采样贴图：走 `Sampler`，别硬写过滤
 
 ```cpp
@@ -51,6 +53,8 @@ albedo.Apply(0);      // 绑到 texture unit 0
 ```
 
 引擎的 `PbrPass` 对 albedo/metal-rough/normal/emissive **一律按 sRGB 采样**；数据贴图（法线/遮罩等）要精确数值时须走自己的 pass 并显式配 `GL_LINEAR`。
+
+🔗 **现场演示**：[`../../src/demo/texture_samplers/main.cpp`](../../src/demo/texture_samplers/main.cpp)——同一张 `Texture2D` 绑不同 `Sampler`（NEAREST vs LINEAR）分屏对比，Sampler 对象在 `SamplerPass.{h,cpp}`。
 
 ## 4. 环境光（IBL）与天空：`EnvironmentMap`
 
@@ -64,6 +68,10 @@ frame.sky.env = &env;       // 之后每帧随 RenderFrame 交给引擎（同一
 ```
 
 返回 `false` 表示有 shader 编译失败（会打日志）；`env.valid()` 为真后把 `frame.sky.box`（`SkyboxRenderer`）一并接上、并装一个 `SkyboxPass`，它就兼作背景（IBL 与天空盒两个用途共享 `frame.sky.env`，但由 `frame.ibl.enabled` 与是否装 `SkyboxPass` 各自独立开关）。
+
+🔗 **现场演示**：
+- IBL 环境光烘焙：[`../../src/demo/ibl_environment/main.cpp`](../../src/demo/ibl_environment/main.cpp)。
+- 天空盒背景：[`../../src/demo/skybox/main.cpp`](../../src/demo/skybox/main.cpp)。
 
 ---
 

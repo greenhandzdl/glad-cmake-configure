@@ -22,6 +22,8 @@ while (running) {
 
 按"可能还没好"写代码：`Get*` 在就绪前永远返回空，绝不暴露半成品；模型同理用 `GetModel(key)`。想知道还有多少在途，用 `PendingCount()`。
 
+🔗 **现场演示**：[`../../src/demo/model_loading/main.cpp`](../../src/demo/model_loading/main.cpp) 走完整链路 `RequestModel` → 每帧 `ProcessUploads` → `GetModel` 拿到后入场景绘制（并演示上面的三条拒收规则）。
+
 ## 2. 为什么必须两阶段
 
 | 阶段 | 在哪个线程 | 做什么 | 产出 |

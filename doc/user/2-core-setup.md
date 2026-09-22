@@ -45,6 +45,8 @@ int main(int argc, char** argv) {
 
 窗口怎么建、GL 4.1 上下文怎么来、`glfwInit`/`glfwTerminate` 的时序，全在 `gldxwin` 里统一处理——包括 macOS Core Profile 必需的 `GLFW_OPENGL_FORWARD_COMPAT` hint，你不必再手写任何 `glfwWindowHint`。想要更细的建/拆时机（多窗口、显式释放 GL 资源），用 `window.OnCreate(...)` / `window.OnDestroy(...)` 钩子（骨架细则见 [agents 手册](../agents/author-program.md) §3）。
 
+> 这一章只搭骨架。**窗口生命周期钩子、按键/鼠标/滚轮输入、光标控制、截图、多窗口、以及 `gldxcli` 命令行开关的每个特性**，都在紧随其后的 [🟢 ①·补 窗口·输入·命令行](2a-window-input-cli.md) 里逐个展开，每个都配完整代码与现场 demo。
+
 ## 2. 为什么 `Platform.h` 是 `#include` 而不是 `import`
 
 预处理宏（`GLFW_PLATFORM_MACOS`、`GL_VERSION` 等）与 `<GLFW/glfw3.h>` **无法跨模块边界传递**，`#if` 在预处理阶段求值早于 `import`。同理，`glm::vec3` / `GLuint` 这些出现在 `gldx` 接口里的类型属于 global module，你的代码要用它们时也得**自行文本 include** `<glm/...>`。完整取舍见 [../developer/design.md](../developer/design.md) §7。
@@ -61,5 +63,6 @@ int main(int argc, char** argv) {
 
 ## 下一步
 
+- 窗口开好了，想接键盘/鼠标/多窗口/命令行 → [🟢 ①·补 窗口·输入·命令行](2a-window-input-cli.md)
 - 往场景里放东西：几何、材质、变换层级 → [🟡 ② 几何与场景](3-geometry-scene.md)
 - 黑屏了 → 大概率是 UBO 没绑，见 [④ 光照与 UBO](5-lighting-ubo.md) 与 [🧰 排错](9-troubleshooting.md)

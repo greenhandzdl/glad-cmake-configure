@@ -78,6 +78,10 @@ particles.Update(dt);           // 每帧一次
 particles.Draw(frame.viewProj, cam.Position(), pixelScale);   // 透明地形之后画：深度测试开、写入关、互不遮挡
 ```
 
+🔗 **现场演示**：
+- 体素闭环（噪声地形→挖/放→碰撞站立→粒子）：[`../../src/demo/voxel_terrain/`](../../src/demo/voxel_terrain/)（`main.cpp` 装配窗/帧循环，`World.{h,cpp}` 世界层、`Input.{h,cpp}` 输入、`Hud.{h,cpp}` HUD、`Streaming.{h,cpp}` 异步重 mesh）。
+- 粒子系统单独隔离演示（无 3D 场景）：[`../../src/demo/particles/main.cpp`](../../src/demo/particles/main.cpp)。
+
 ## 7. 站立与滑行：`MoveVoxelAabb`（纯 CPU）
 
 射线回答“眼睛看到了哪个格子”，碰撞回答“身体允许走到哪”。把玩家建模成以**脚底中心**为锚的轴对齐盒，逐帧提出位移让它落地、贴墙滑行：
