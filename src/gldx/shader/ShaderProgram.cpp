@@ -3,6 +3,7 @@ module;
 #include "gldx/gmf.hpp"
 
 #include <cstdio>
+#include <fstream>
 
 #include <glm/gtc/type_ptr.hpp>
 
@@ -38,6 +39,24 @@ std::expected<GLuint, std::string> CompileStage(GLenum type, std::string_view so
         return std::unexpected(std::move(log));
     }
     return s;
+}
+
+// Read a whole text file into a string for CreateFromFiles. A crafted or
+// oversized file must never drive an unbounded allocation, so bound the size
+// first (same posture as Font::LoadFromFile). Only used by the opt-in external
+// loader; the engine's own shaders never touch the filesystem.
+std::expected<std::string, std::string> ReadSourceFile(std::string_view path) {
+    std::ifstream file(std::string(path), std::ios::binary | std::ios::ate);
+    if (!file) return std::unexpected("ShaderProgram: cannot open " + std::string(path));
+    const std::streamoff size = file.tellg();
+    constexpr std::streamoff kMaxShaderBytes = 4LL * 1024 * 1024;   // 4 MB sanity limit
+    if (size <= 0 || size > kMaxShaderBytes)
+        return std::unexpected("ShaderProgram: invalid or oversized shader file " + std::string(path));
+    file.seekg(0, std::ios::beg);
+    std::string text(static_cast<std::size_t>(size), '\0');
+    if (!file.read(text.data(), size))
+        return std::unexpected("ShaderProgram: cannot read " + std::string(path));
+    return text;
 }
 
 } // namespace
@@ -95,6 +114,15 @@ ShaderProgram::CreateFromSource(std::string_view vertexSrc, std::string_view fra
     ShaderProgram result;
     result.id_ = prog;
     return result;
+}
+
+std::expected<ShaderProgram, std::string>
+ShaderProgram::CreateFromFiles(std::string_view vertexPath, std::string_view fragmentPath) {
+    auto vsSrc = ReadSourceFile(vertexPath);
+    if (!vsSrc) return std::unexpected(vsSrc.error());
+    auto fsSrc = ReadSourceFile(fragmentPath);
+    if (!fsSrc) return std::unexpected(fsSrc.error());
+    return CreateFromSource(*vsSrc, *fsSrc);
 }
 
 void ShaderProgram::Use() const {

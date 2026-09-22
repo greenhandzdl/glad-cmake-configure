@@ -34,6 +34,18 @@ public:
     static std::expected<ShaderProgram, std::string>
     CreateFromSource(std::string_view vertexSrc, std::string_view fragmentSrc);
 
+    // Opt-in loader for *external* GLSL (e.g. a demo or a user-authored shader
+    // hot-loaded from disk): reads the two files (UTF-8/raw bytes) and forwards
+    // to CreateFromSource. This is deliberately additive — the engine's own
+    // shaders stay embedded as the single source of truth in
+    // src/gldx/shader/*Shaders.h (see src/assets/shaders/README.md), so normal
+    // builds keep their "zero runtime path / working-directory dependency"
+    // guarantee and CI stays safe. Runs on the render thread (it links a
+    // program); a missing / unreadable / oversized file yields std::unexpected,
+    // never an exception.
+    static std::expected<ShaderProgram, std::string>
+    CreateFromFiles(std::string_view vertexPath, std::string_view fragmentPath);
+
     void Use() const;
     static void Unuse();
 

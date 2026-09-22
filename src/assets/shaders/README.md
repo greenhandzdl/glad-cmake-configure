@@ -26,3 +26,10 @@ raw string（`gldx::shaders::k*`）。把 GLSL 放在头文件里换来三件事
 | `debug.glsl`         | `DebugShaders.h` — `kDebugVertex`、`kDebugFragment`           |
 
 所有程序都面向 **GLSL `#version 410 core`**（OpenGL 4.1 Core 基线）。
+
+> 另有一个**可选**的外部加载入口 `gldx::ShaderProgram::CreateFromFiles(vertPath, fragPath)`，
+> 供 demo 或用户热加载自己写的 `.glsl`。它不改变上面的约定：引擎自带着色器仍以头文件内嵌
+> 为唯一真源，本镜像目录**顶层**的文件依旧不被任何构建/运行路径读取。
+>
+> **例外**：子目录 [`file_demo/`](file_demo/) 下的 `.vert`/`.frag` **不是**镜像——它们是
+> `shader_file` demo 真正从磁盘加载的着色器（走 `CreateFromFiles`）。
