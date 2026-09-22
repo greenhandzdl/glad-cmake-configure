@@ -1,15 +1,20 @@
 // texture_samplers demo — the two-sampler render pass (see SamplerPass.h).
 #include "gldx/core/Platform.h"   // <glad/gl.h>: GL_* filter/draw constants
 
-import gldx;
-
-#include "SamplerPass.h"
-
 #include <cstdint>
 #include <cstdio>
 #include <span>
 
 #include <glm/glm.hpp>
+
+// The engine as a single C++20 named module. Its global module fragment already
+// attaches <span> (std::dynamic_extent) and the GLM headers (glm::qualifier) to
+// the global module, so — as in every other demo TU — all std/GLM textual
+// includes must precede the import; re-including them after it trips MSVC's
+// global-module redefinition checks.
+import gldx;
+
+#include "SamplerPass.h"
 
 namespace texture_samplers {
 namespace {
