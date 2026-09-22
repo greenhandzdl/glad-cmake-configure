@@ -53,7 +53,11 @@
 │   │   ├── instancing/ particles/ text_hud/ camera_picking/ debug_draw/            # 各能力单功能 demo
 │   │   ├── geometry_upload/ model_loading/                                       # 几何上传 / 异步模型 demo
 │   │   ├── texture_samplers/ #   采样器 demo（main + SamplerPass.{h,cpp}：VertexArray/GLBuffer/Sampler RAII，无裸 GL 脚手架）
-│   │   └── multi_viewport/ #   多窗口同步视图：每窗独立 context 串行重渲同一场景（main 接线 + SharedState.{h,cpp} + View.{h,cpp}，atomic 共享态 + 后台 worker，线程/上下文安全验收场）
+│   │   ├── shader_file/      #   从磁盘加载 GLSL（CreateFromFiles 两文件版）：坏路径 exit 1、无路径退回内嵌源
+│   │   ├── geometry_shader/  #   选择性装配几何阶段：CreateFromSources({Vertex,Geometry,Fragment})，喂 GL_POINTS 扩成方块阵
+│   │   ├── shader_stages/    #   全 5 阶段集成：CreateFromSources 装配 Vertex+TessControl+TessEval+Geometry+Fragment，画 GL_PATCHES 细分线框（main + Stages.h）
+│   │   ├── multi_viewport/   #   多窗口同步视图：每窗独立 context 串行重渲同一场景（main 接线 + SharedState.{h,cpp} + View.{h,cpp}，atomic 共享态 + 后台 worker，线程/上下文安全验收场）
+│   │   └── render_passes/    #   多窗口 + for 循环装配不同 RenderPass 子类：ClearPass + Triangle/Quad/Line/Point（main + SharedState.{h,cpp} + Passes.{h,cpp} + View.{h,cpp}，一表多态、各窗独立 context 同步时钟）
 │   └── assets/               # 内容资源（不被编译）：GLSL 参考镜像 + 模型投放目录，与 gldx 代码同级
 │       ├── shaders/          #   内嵌 GLSL 的只读参考镜像（不被编译/加载）
 │       └── models/           #   FBX/OBJ/glTF 投放目录（运行期经 AssetManager 异步加载）
@@ -218,6 +222,10 @@ AddressSanitizer + UndefinedBehaviorSanitizer 的对抗输入自检（NaN / inf 
 | `texture_samplers` | Texture2D + Sampler（NEAREST vs LINEAR 对照） | `./scripts/run.sh texture_samplers` |
 | `model_loading` | AssetManager 异步 + GLDX_ENABLE_ASSIMP=OFF 优雅降级 | `./scripts/run.sh model_loading` |
 | `multi_viewport` | 多窗口同步视图：每窗独立 context 各自上传、单线程串行重渲、原子共享时钟/轨道（拖任一窗全窗同步） | `./scripts/run.sh multi_viewport` |
+| `render_passes` | 多窗口 + for 循环装配不同 `RenderPass` 子类（Clear/Triangle/Quad/Line/Point），各窗独立 context 共设同一原子时钟 | `./scripts/run.sh render_passes` |
+| `shader_file` | `CreateFromFiles` 从磁盘加载 GLSL（坏路径 exit 1，无路径退回内嵌源） | `./scripts/run.sh shader_file` |
+| `geometry_shader` | `CreateFromSources({Vertex,Geometry,Fragment})` 选择性装配几何阶段（点→方块阵） | `./scripts/run.sh geometry_shader` |
+| `shader_stages` | `CreateFromSources` 一次装配全 5 个图形阶段（V+TC+TE+G+F），画 GL_PATCHES 细分线框 | `./scripts/run.sh shader_stages` |
 
 > 最小实现基线不在表内：`./scripts/run.sh`（默认目标 `GLFW_Template`）即 `src/main.cpp` 的 hello-triangle。
 

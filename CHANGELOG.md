@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+### 新增 `render_passes` / `shader_stages` demo（多 RenderPass 子类 + 全着色阶段集成）
+
+- **新增 demo `render_passes`**（`src/demo/render_passes/`，`--windows N` 默认 3）：把两条主线一次跑通——**多窗口/多 context 同步**与**一个 for 循环装配多个不同 `RenderPass` 子类**。每窗在自己的 `OnCreate` 里建一个 context-private `gldx::Renderer`：先 `AddPass` 一个 `ClearPass`（让 pass 执行顺序可见），再 **遍历 `ShapeTable()` 工厂表**逐行 `AddPass` 一个不同的 `ShapePass` 子类——`TrianglePass`（`GL_TRIANGLES`）/ `QuadPass`（`GL_TRIANGLE_STRIP`）/ `LinePass`（`GL_LINES`）/ `PointPass`（`GL_POINTS`）/ 第二个 `TrianglePass`，共 5 个图元并排旋转。跨窗只共享一个 `SharedState`（`std::atomic` 时钟 + 后台 worker，纯 std 头，worker 永远碰不到 GL），故各窗形状同相位旋转；截图连拍先 `freeze` 时钟再逐窗 `CaptureScreenshot`，三张 PNG 逐字节同源（实测 3 窗各 74900 B 完全一致），即“不同 GL context、CPU 真值同步”的直接证据。`PointPass` 走 `glEnable/glDisable(GL_PROGRAM_POINT_SIZE)` 的临时开关姿态（macOS 默认忽略 `gl_PointSize`）。拆为 `SharedState.{h,cpp}` + `Passes.{h,cpp}`（RenderPass 家族 + 工厂表）+ `View.{h,cpp}`（逐窗 Renderer 接线）+ `main.cpp`（多窗接线）四组文件，无巨型 main。
+- **新增 demo `shader_stages`**（`src/demo/shader_stages/`）：把选择性多阶段装配推到**全 5 个图形阶段一次集成**——`CreateFromSources({Vertex, TessControl, TessEvaluation, Geometry, Fragment})` 装配一条完整管线，喂 4 个控制点的 `GL_PATCHES` quad，由细分控制/求值对把它细分成密集网格，再由几何阶段把每个生成的三角形重发为 `line_strip` 线框，fragment 按细分 UV 上渐变蓝→橙。截图里“被细分的线框格阵”是五阶段全部编译/链接/运行才能产生的结果（去掉细分对只剩单个 quad，去掉几何阶段则是实心填充）。GLSL 全在 `Stages.h`，`main.cpp` 只留接线与绘制，同样遵“长代码不塞一个 main”。无 Compute 阶段（4.3+，超 4.1 基线）。
+- **验证**：全量重建（新增 `d_render_passes`/`d_shader_stages` 两目标）零告警零错误；`shader_stages` 端到端 exit 0 + 134 KB 截图（细分线框格阵核验通过，Apple 驱动的“SW vertex processing for EVAL_PROG + GEOM_PROG”为细分+几何共用的良性提示、非错误）；`render_passes --windows 3` 端到端 exit 0 + 三张逐字节同源的截图（三角形/四边形/线/点/第二三角形五图元可见）；全部 21 个 demo `--quit-after 3` 回归扫描均 exit 0 零回退。
+
 ### `ShaderProgram` 选择性多阶段装配（几何 / 细分着色的接入面）
 
 - **新增（gldx 着色器）**：`ShaderProgram` 此前只有 `CreateFromSource(vert, frag)` / `CreateFromFiles(vertPath, fragPath)` 两参入口，无法装配几何、细分控制、细分求值等着色阶段，扩展性受限。现补一个泛型 `enum class ShaderStage : GLenum { Vertex, Fragment, Geometry, TessControl, TessEvaluation }`（底层值即 GL 枚举，直接 `static_cast` 进 `glCreateShader`）+ 两个聚合体 `ShaderSource{stage, source}` / `ShaderFile{stage, path}`，并新增选择性装配入口 `CreateFromSources(std::initializer_list<ShaderSource>)` 与 `CreateFromFiles(std::initializer_list<ShaderFile>)`：调用方用花括号列表按需列出要挂的阶段即可（顺序无关、每阶段至多一次）。核心 `AssembleFromSources` 先校验“至少含 vertex + fragment”（4.1 图形管线的最小集，几何/细分为可选中间级），再逐阶段编译→attach→link，任一编译/链接失败返回 `std::unexpected`（info log）并释放已建的全部 shader，绝不抛异常。**不提供 Compute**：`GL_COMPUTE_SHADER` 是 OpenGL 4.3+，高于本项目 4.1 core 基线（macOS 上限），GLAD 4.1 loader 根本不定义该常量——已在枚举注释里写明“除非抬高基线否则勿加”。

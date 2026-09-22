@@ -123,7 +123,7 @@ CLion 会自动导入 `CMakePresets.json`。**macOS 上唯一要做的**：在 `
 
 在 `pbr_showcase` 里能看到球阵和阴影、按 `1..6` 与 `Tab` 有明显画面变化，就说明**整条工具链 + 运行库都通了**。
 
-另两个成品演示：`voxel_terrain`（`./scripts/run.sh voxel_terrain`）是可玩的体素世界，验收引擎的体素原语。此外 `src/demo/` 下还有 13 个单功能入门 demo（`pbr_lighting`、`shadow_csm`、`ibl_environment`、`postprocess_bloom`、`skybox`、`instancing`、`particles`、`text_hud`、`camera_picking`、`debug_draw`、`geometry_upload`、`texture_samplers`、`model_loading`），每个只装配一个子系统。操作键位与可脚本化的命令行开关（`--off/--on/--freeze-at/--quit-after`，`--help` 看全表）见 [根 README](../../README.md#命令行功能开关无键盘自检)。
+另两个成品演示：`voxel_terrain`（`./scripts/run.sh voxel_terrain`）是可玩的体素世界，验收引擎的体素原语。此外 `src/demo/` 下还有一批单功能入门 demo（`pbr_lighting`、`shadow_csm`、`ibl_environment`、`postprocess_bloom`、`skybox`、`instancing`、`particles`、`text_hud`、`camera_picking`、`debug_draw`、`geometry_upload`、`texture_samplers`、`model_loading`），每个只装配一个子系统。着色器装配与多窗口专项：`shader_file`（从磁盘加载 GLSL）、`geometry_shader`（选择性挂几何阶段）、`shader_stages`（一次集成全 5 个图形阶段、画 GL_PATCHES 细分线框）、`multi_viewport`（N 窗独立 context 同步重渲同一场景）、`render_passes`（N 窗 + 一个 for 循环装配 Clear/Triangle/Quad/Line/Point 多个不同 `RenderPass` 子类、共设一个原子时钟）。操作键位与可脚本化的命令行开关（`--off/--on/--freeze-at/--quit-after`，`--help` 看全表）见 [根 README](../../README.md#命令行功能开关无键盘自检)。
 
 ---
 
