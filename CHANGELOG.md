@@ -5,6 +5,8 @@
 
 ## Unreleased
 
+## v1.5.0
+
 ### 库线程安全审计 + 纹理格式映射表去重
 
 - **线程安全审计（结论：无需改动）**：复核单渲染线程模型的落地——`RenderContext` 用 `thread_local bool` 实现线程亲和，仅 `MarkAsRenderThread()` 所在线程为真，所有碰 GL 的成员（构造/上传/绑定/绘制/析构/`Use`）入口都以 `AssertRenderThread(...)` fail-fast 守卫；全库跨线程面仅 `ThreadPool` 与 `AssetManager` 两处且都正确加锁（`queueMutex_` 守提交/待传队列、`storeMutex_` 读写锁护资源表、futures 作唯一交接介质，`Upload` 一律回渲染线程 `ProcessUploads` 执行）。无游离可变全局/单例。

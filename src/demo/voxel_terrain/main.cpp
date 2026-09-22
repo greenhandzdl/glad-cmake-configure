@@ -99,7 +99,7 @@ using namespace voxel_terrain;
 
 // Application identity + default window geometry now live with the demo, not
 // the engine header (Platform.h no longer carries app-level constants).
-constexpr const char* kAppVersion   = "1.4.0";
+constexpr const char* kAppVersion   = "1.5.0";
 constexpr const char* kWindowTitle  = "gldx::Renderer - voxel playground";
 constexpr int kWindowWidth  = 800;
 constexpr int kWindowHeight = 600;

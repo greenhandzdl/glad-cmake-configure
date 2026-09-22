@@ -133,7 +133,7 @@ cmake --build build
 配置结束会打印依赖解析摘要，便于确认 GLAD 的来源：
 
 ```
--- GLFW_Template 1.4.0 configuration:
+-- GLFW_Template 1.5.0 configuration:
 --   GLAD        : submodule (OpenGL 4.1 Core)   # 或 system
 --   Assimp      : submodule (static, bundled zlib)   # 或 DISABLED (GLDX_ENABLE_ASSIMP=OFF)
 ```
@@ -263,7 +263,7 @@ GLFW_Template-macos-arm64.zip
 GLFW_Template-windows-x64.zip
 ```
 
-当前正式版：**[v1.4.0](https://github.com/greenhandzdl/glad-cmake-configure/releases/tag/v1.4.0)**
+当前正式版：**[v1.5.0](https://github.com/greenhandzdl/glad-cmake-configure/releases/tag/v1.5.0)**
 
 ## 平台说明
 
