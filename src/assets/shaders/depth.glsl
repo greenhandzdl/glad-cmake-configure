@@ -1,17 +1,3 @@
-// -----------------------------------------------------------------------------
-// REFERENCE MIRROR - not compiled by the build.
-// The runtime embeds these programs as raw strings in src/gldx/shader/ShaderLib.h
-// (kDepthVertex / kDepthFragment); that header is the single source of truth.
-// This file is a browsable/editable copy only.
-// -----------------------------------------------------------------------------
-
-// ===== depth.vert =====
-#version 410 core
-layout(location=0) in vec3 aPos;
-uniform mat4 uModel;
-uniform mat4 uLightMat;
-void main() { gl_Position = uLightMat * uModel * vec4(aPos, 1.0); }
-
-// ===== depth.frag =====
-#version 410 core
-void main() { }
+// [MIRROR DEPRECATED] 此文件已废除，不再维护内容。
+// 唯一真源：src/gldx/shader/ShaderLib.h — gldx::shaders::kDepthVertex, kDepthFragment
+// 要阅读或修改深度着色器，请直接打开该头文件。

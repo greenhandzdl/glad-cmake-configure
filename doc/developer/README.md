@@ -12,7 +12,7 @@
 1. 先跑通 [../user/1-getting-started.md](../user/1-getting-started.md)，确认工具链（macOS 必须 Homebrew LLVM，见 [../user/9-troubleshooting.md](../user/9-troubleshooting.md)）。
 2. 读 [design.md](design.md) §1 的分层图，搞清楚你要改的东西在哪一层、依赖允许朝向哪里。
 3. **只要新增/修改会拥有或调用 GL 的代码，先读 [thread-safety.md](thread-safety.md)**，对照其末尾检查清单。
-4. 改 GLSL 记得只有 `src/gldx/shader/*Shaders.h` 是真源（`src/assets/shaders/` 是镜像，不加载）。
+4. 改 GLSL 记得只有 `src/gldx/shader/*Shaders.h` 是真源（`src/assets/shaders/` 顶层已废除为只剩注释的镜像，不加载；真从磁盘加载的 demo 着色器在各 demo 的 `assets/shaders/` 下）。
 
 ## 验证一次改动是否 OK
 

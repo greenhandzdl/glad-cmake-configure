@@ -174,7 +174,7 @@ while (running) {
 
 ## 6. 改着色器：只有一个真源
 
-GLSL **内嵌**在 `src/gldx/shader/*Shaders.h`（`ShaderLib.h`/`PostProcessShaders.h`/`IblShaders.h`）——**只改这里**。`src/assets/shaders/` 是**只读镜像，不编译不加载**，改它无效果。
+GLSL **内嵌**在 `src/gldx/shader/*Shaders.h`（`ShaderLib.h`/`PostProcessShaders.h`/`IblShaders.h`）——**只改这里**。`src/assets/shaders/` 顶层的 `.glsl` 已全部废除为**只剩注释的镜像，不编译不加载**，改它无效果（真正从磁盘加载的 demo 着色器住在各 demo 的 `src/demo/{feat}/assets/shaders/` 下）。
 
 ---
 

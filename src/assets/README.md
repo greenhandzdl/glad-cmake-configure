@@ -4,7 +4,7 @@
 
 | 目录 | 内容 |
 | ---- | ---- |
-| [`shaders/`](shaders/README.md) | 内嵌 GLSL 的只读**参考镜像**（不被加载）。 |
+| [`shaders/`](shaders/README.md) | 已废除的内嵌 GLSL 镜像（只剩指向真源的注释，不被加载）。 |
 | [`models/`](models/README.md)   | 模型投放目录（FBX / OBJ / glTF），运行期经 `AssetManager` 异步加载。 |
 
 ## 源码隔离约定
@@ -24,14 +24,14 @@ src/
                        （STB image / truetype）；不泄漏到 module 接口
   gldx/shader/*Shaders.h   GLSL 以嵌入的 raw string 住在这里 —— 着色器代码的唯一真源
   assets/          内容资源，放在 src/ 内、与引擎代码同级（不另设顶层目录）：
-    shaders/       上述 GLSL 的可浏览副本（永不编译、永不加载）
+    shaders/       已废除的内嵌 GLSL 镜像，每个文件只剩一行指向真源的注释（永不编译、永不加载）
     models/        经 gldx::AssetManager 加载的内容
 ```
 
 关键规则：
 
 1. **GLSL 是嵌入的，不是加载的。** 引擎从 `gldx::shaders::k*` 字符串常量编译着色器；
-   `src/assets/shaders/` 只是文档。这让运行不依赖工作目录/路径假设——三平台 CI 尤其需要。
+   `src/assets/shaders/` 只是已废除的镜像（每个文件只剩一行指向真源的注释）。这让运行不依赖工作目录/路径假设——三平台 CI 尤其需要。
 2. **从磁盘读的内容只有两类：模型/贴图与 HUD 字体。**模型/贴图永远经 `gldx::AssetManager`
    异步加载（后台解码 + 渲染线程上传）；字体是 demo 侧同步的 `Font::LoadFromFile`
    （找系统 TTF，找不到则禁用文字叠加，不阻断运行）。大型二进制默认不入库——见

@@ -12,7 +12,7 @@
  * clear colour could fake.
  *
  * --vert PATH --frag PATH  the two GLSL files to load (run it from the repo
- *     root and point at src/assets/shaders/file_demo/triangle.{vert,frag}).
+ *     root and point at src/demo/shader_file/assets/shaders/triangle.{vert,frag}).
  *     If neither is given the demo falls back to an identical embedded source so
  *     a bare run still opens a window; a *given* path that fails to load is a
  *     hard error (exit 1), so a scripted check can trust "exit 0 + snapshot" as
@@ -33,9 +33,9 @@ import gldxcli;
 
 namespace {
 
-// Embedded twin of the file_demo shaders, used only when no --vert/--frag was
-// passed. Kept effect-identical to the files so a fallback run and a file run
-// are visually indistinguishable.
+// Embedded twin of the on-disk shaders (see assets/shaders/), used only when no
+// --vert/--frag was passed. Kept effect-identical to the files so a fallback run
+// and a file run are visually indistinguishable.
 constexpr const char* kFallbackVert = R"GLSL(#version 410 core
 out vec2 vUV;
 void main() {

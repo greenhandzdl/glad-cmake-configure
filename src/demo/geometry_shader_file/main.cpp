@@ -19,7 +19,7 @@
  *
  * --vert PATH --geom PATH --frag PATH
  *     the three GLSL files to load (run from the repo root and point at
- *     src/assets/shaders/file_demo/points.vert / squares.geom / points.frag).
+ *     src/demo/geometry_shader_file/assets/shaders/points.vert / squares.geom / points.frag).
  *     All three must be given to take the file path; a given set that fails to
  *     load is a hard error (exit 1), so a scripted check trusts "exit 0 +
  *     snapshot" as proof. With none given the demo falls back to an identical
@@ -43,9 +43,10 @@ import gldxcli;
 
 namespace {
 
-// Embedded twins of the three file_demo stages, used only when no --vert/--geom/
-// --frag was passed. Effect-identical to the files so a fallback run and a file
-// run are visually indistinguishable; the fallback goes through the embedded
+// Embedded twins of the three on-disk stages (see assets/shaders/), used only
+// when no --vert/--geom/--frag was passed. Effect-identical to the files so a
+// fallback run and a file run are visually indistinguishable; the fallback goes
+// through the embedded
 // multi-stage loader (CreateFromSources) to keep the two paths clearly distinct.
 constexpr const char* kVert = R"GLSL(#version 410 core
 layout(location = 0) in vec2 aPos;
