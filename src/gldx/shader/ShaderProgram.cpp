@@ -87,24 +87,42 @@ ShaderProgram& ShaderProgram::operator=(ShaderProgram&& other) noexcept {
 }
 
 std::expected<ShaderProgram, std::string>
-ShaderProgram::CreateFromSource(std::string_view vertexSrc, std::string_view fragmentSrc) {
-    RenderContext::AssertRenderThread("ShaderProgram::CreateFromSource");
+ShaderProgram::AssembleFromSources(std::span<const ShaderSource> stages) {
+    RenderContext::AssertRenderThread("ShaderProgram::AssembleFromSources");
 
-    auto vs = CompileStage(GL_VERTEX_SHADER, vertexSrc);
-    if (!vs) return std::unexpected(vs.error());
-    auto fs = CompileStage(GL_FRAGMENT_SHADER, fragmentSrc);
-    if (!fs) { glDeleteShader(*vs); return std::unexpected(fs.error()); }
+    // A 4.1 graphics pipeline needs at least a vertex + a fragment stage; the
+    // rest are optional intermediates. Guard up front so a malformed assembly
+    // gives a clear message instead of an opaque driver link log.
+    bool hasVertex = false, hasFragment = false;
+    for (const auto& s : stages) {
+        hasVertex   = hasVertex   || (s.stage == ShaderStage::Vertex);
+        hasFragment = hasFragment || (s.stage == ShaderStage::Fragment);
+    }
+    if (!hasVertex || !hasFragment)
+        return std::unexpected(
+            "ShaderProgram::AssembleFromSources: a 4.1 pipeline needs at least a vertex and a fragment stage");
 
     GLuint prog = glCreateProgram();
-    glAttachShader(prog, *vs);
-    glAttachShader(prog, *fs);
-    glLinkProgram(prog);
+    std::vector<GLuint> compiled;
+    compiled.reserve(stages.size());
+    auto abortWith = [&](std::string msg) {
+        for (GLuint sh : compiled) glDeleteShader(sh);
+        glDeleteProgram(prog);
+        return std::unexpected(std::move(msg));
+    };
 
-    glDeleteShader(*vs);
-    glDeleteShader(*fs);
+    for (const auto& s : stages) {
+        auto sh = CompileStage(static_cast<GLenum>(s.stage), s.source);
+        if (!sh) return abortWith(sh.error());
+        compiled.push_back(*sh);
+        glAttachShader(prog, *sh);
+    }
+    glLinkProgram(prog);
 
     GLint ok = GL_FALSE;
     glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+    // The program has absorbed the shaders; release our references either way.
+    for (GLuint sh : compiled) glDeleteShader(sh);
     if (!ok) {
         std::string log = InfoLog(prog, GL_INFO_LOG_LENGTH, "program link error");
         glDeleteProgram(prog);
@@ -117,12 +135,43 @@ ShaderProgram::CreateFromSource(std::string_view vertexSrc, std::string_view fra
 }
 
 std::expected<ShaderProgram, std::string>
+ShaderProgram::CreateFromSources(std::initializer_list<ShaderSource> stages) {
+    return AssembleFromSources(std::span<const ShaderSource>(stages.begin(), stages.size()));
+}
+
+std::expected<ShaderProgram, std::string>
+ShaderProgram::CreateFromSource(std::string_view vertexSrc, std::string_view fragmentSrc) {
+    return CreateFromSources({{ShaderStage::Vertex, vertexSrc},
+                              {ShaderStage::Fragment, fragmentSrc}});
+}
+
+std::expected<ShaderProgram, std::string>
+ShaderProgram::CreateFromFiles(std::initializer_list<ShaderFile> files) {
+    // Read every stage first so a missing / oversized file fails cleanly before
+    // any GL work. Sources are owned in `texts`; the parallel `stages` point into
+    // it and are finalised only once every string is in place, so no reallocation
+    // or small-string move can leave a view dangling.
+    std::vector<std::string> texts;
+    texts.reserve(files.size());
+    std::vector<ShaderStage> order;
+    order.reserve(files.size());
+    for (const auto& f : files) {
+        auto src = ReadSourceFile(f.path);
+        if (!src) return std::unexpected(src.error());
+        texts.push_back(std::move(*src));
+        order.push_back(f.stage);
+    }
+    std::vector<ShaderSource> stages;
+    stages.reserve(texts.size());
+    for (std::size_t i = 0; i < texts.size(); ++i)
+        stages.push_back(ShaderSource{order[i], std::string_view(texts[i])});
+    return AssembleFromSources(std::span<const ShaderSource>(stages));
+}
+
+std::expected<ShaderProgram, std::string>
 ShaderProgram::CreateFromFiles(std::string_view vertexPath, std::string_view fragmentPath) {
-    auto vsSrc = ReadSourceFile(vertexPath);
-    if (!vsSrc) return std::unexpected(vsSrc.error());
-    auto fsSrc = ReadSourceFile(fragmentPath);
-    if (!fsSrc) return std::unexpected(fsSrc.error());
-    return CreateFromSource(*vsSrc, *fsSrc);
+    return CreateFromFiles({{ShaderStage::Vertex, vertexPath},
+                            {ShaderStage::Fragment, fragmentPath}});
 }
 
 void ShaderProgram::Use() const {

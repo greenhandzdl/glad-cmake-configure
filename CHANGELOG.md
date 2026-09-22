@@ -5,6 +5,13 @@
 
 ## Unreleased
 
+### `ShaderProgram` 选择性多阶段装配（几何 / 细分着色的接入面）
+
+- **新增（gldx 着色器）**：`ShaderProgram` 此前只有 `CreateFromSource(vert, frag)` / `CreateFromFiles(vertPath, fragPath)` 两参入口，无法装配几何、细分控制、细分求值等着色阶段，扩展性受限。现补一个泛型 `enum class ShaderStage : GLenum { Vertex, Fragment, Geometry, TessControl, TessEvaluation }`（底层值即 GL 枚举，直接 `static_cast` 进 `glCreateShader`）+ 两个聚合体 `ShaderSource{stage, source}` / `ShaderFile{stage, path}`，并新增选择性装配入口 `CreateFromSources(std::initializer_list<ShaderSource>)` 与 `CreateFromFiles(std::initializer_list<ShaderFile>)`：调用方用花括号列表按需列出要挂的阶段即可（顺序无关、每阶段至多一次）。核心 `AssembleFromSources` 先校验“至少含 vertex + fragment”（4.1 图形管线的最小集，几何/细分为可选中间级），再逐阶段编译→attach→link，任一编译/链接失败返回 `std::unexpected`（info log）并释放已建的全部 shader，绝不抛异常。**不提供 Compute**：`GL_COMPUTE_SHADER` 是 OpenGL 4.3+，高于本项目 4.1 core 基线（macOS 上限），GLAD 4.1 loader 根本不定义该常量——已在枚举注释里写明“除非抬高基线否则勿加”。
+- **向后兼容**：旧的两参 `CreateFromSource(vert, frag)` / `CreateFromFiles(vertPath, fragPath)` 签名不变，内部改为转发给泛型入口，全部既有引擎着色器与 demo 零改动、行为逐字节不变。
+- **新增 demo `geometry_shader`**（`src/demo/geometry_shader/`）：端到端验证选择性装配。用 `CreateFromSources({{Vertex},{Geometry},{Fragment}})` 挂一个几何阶段，喂 `GL_POINTS`、由几何着色器把每个点扩成一块带径向渐变的方块——没有几何阶段就画不出这些方块，故「exit 0 + 截图里是 4×3 方块阵」即几何阶段确实被编译、链接、运行的直接证据。纯内嵌源、无外部文件依赖，CI 安全。
+- **验证**：全量重建（含 `GLFW_Template` 与全部 demo，新增 `geometry_shader` 目标）零告警零错误；`geometry_shader` 端到端 exit 0 + 120 KB 截图（方块阵核验通过）；`shader_file` 三条回归（文件加载 exit 0 + 截图、坏路径 exit 1、内嵌 fallback exit 0）无回退。
+
 ### 新增 `multi_viewport` demo + gldxwin 多窗口契约修复
 
 - **修复（gldxwin 契约）**：`App::Run` 主循环现在每帧先 `glfwMakeContextCurrent(该窗 handle)` 再触发 `OnFrame`——此前单窗口循环恰好运行在"最后一个被 makeCurrent 的 context"上，多窗口循环则会把所有窗口的绘制全部堆进同一个 context。gldxwin 的头注释一直承诺 OnCreate/OnDestroy 在"该窗口 context current"下运行，本次把同样的保证补齐到 OnFrame（单窗口下该调用是幂等 no-op，零行为变化）。
