@@ -80,9 +80,9 @@ void Mesh::Draw() const {
     if (!ranges_.empty()) {
         for (const auto& r : ranges_) DrawRange(r);
     } else if (ebo_.valid()) {
-        glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indexCount_), GL_UNSIGNED_INT, nullptr);
+        vao_.DrawElements(GL_TRIANGLES, static_cast<GLsizei>(indexCount_), GL_UNSIGNED_INT, nullptr);
     } else {
-        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertexCount_));
+        vao_.DrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertexCount_));
     }
     vao_.Unbind();
 }
@@ -94,10 +94,10 @@ void Mesh::DrawRange(const GeometryRange& range) const {
     if (ebo_.valid()) {
         const auto* offset = reinterpret_cast<const void*>(
             static_cast<std::uintptr_t>(range.indexOffset) * sizeof(std::uint32_t));
-        glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(range.indexCount), GL_UNSIGNED_INT, offset);
+        vao_.DrawElements(GL_TRIANGLES, static_cast<GLsizei>(range.indexCount), GL_UNSIGNED_INT, offset);
     } else {
-        glDrawArrays(GL_TRIANGLES, static_cast<GLint>(range.indexOffset),
-                     static_cast<GLsizei>(range.indexCount));
+        vao_.DrawArrays(GL_TRIANGLES, static_cast<GLint>(range.indexOffset),
+                        static_cast<GLsizei>(range.indexCount));
     }
     vao_.Unbind();
 }

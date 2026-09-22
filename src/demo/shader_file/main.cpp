@@ -126,7 +126,7 @@ int main(int argc, char** argv) {
         if (st.program.valid()) {
             st.program.Use();
             st.vao.Bind();
-            glDrawArrays(GL_TRIANGLES, 0, 3);
+            st.vao.DrawArrays(GL_TRIANGLES, 0, 3);
             st.vao.Unbind();
         }
 

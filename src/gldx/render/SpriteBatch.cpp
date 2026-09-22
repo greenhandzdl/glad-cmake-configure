@@ -73,7 +73,7 @@ void SpriteBatch::Draw(const Texture2D& tex, float x, float y, float w, float h,
 void SpriteBatch::Flush() {
     if (verts_.empty()) return;
     vbo_.SubData(std::span<const Vertex>(verts_));
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(verts_.size()));
+    vao_.DrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(verts_.size()));
     verts_.clear();
 }
 

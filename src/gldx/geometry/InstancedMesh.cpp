@@ -72,8 +72,8 @@ void InstancedMesh::Draw() const {
     RenderContext::AssertRenderThread("InstancedMesh::Draw");
     if (!vao_.valid() || count_ == 0) return;
     vao_.Bind();
-    glDrawElementsInstanced(GL_TRIANGLES, static_cast<GLsizei>(indexCount_),
-                            GL_UNSIGNED_INT, nullptr, static_cast<GLsizei>(count_));
+    vao_.DrawElementsInstanced(GL_TRIANGLES, static_cast<GLsizei>(indexCount_),
+                               GL_UNSIGNED_INT, nullptr, static_cast<GLsizei>(count_));
     vao_.Unbind();
 }
 

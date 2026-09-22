@@ -188,3 +188,30 @@ pass 中，从而让整帧（场景*与*自发光*与*天空盒）被一致地�
 因为较新的标准库不再传递性地带上 `<ostream>`/`<cstdint>` 这类头，内置的 Assimp
 构建会被强制包含其遗留 contrib 源码所缺的那几个头（见 `cmake/Assimp.cmake` 里的
 `assimp` 块）——我们自己的源码则保持诚实、显式的 include。
+
+## 9. OpenGL 调用的封装边界
+
+“封装 OpenGL”不等于“给每个 `gl*` 都套一层方法”。本项目按**语义归属**决定封不封，
+一条清晰的界线：
+
+- **句柄对象的生命周期与对它自身的操作 → 封进对应的 RAII 包装类。** 一个 GL 对象
+  （VAO/VBO/UBO/纹理/FBO/采样器）的生成、绑定、上传、删除，都收在 `core/`（及
+  `render/Framebuffer`）里那几个 owning 类型内部，`RenderContext` 守卫渲染线程。
+- **绘制原语 → 收进 `VertexArray`。** `glDrawArrays` / `glDrawElements` /
+  `glDrawElementsInstanced` 的语义是“用当前绑定的这个 VAO 画”，天然属于 VAO。故
+  `VertexArray` 提供 `DrawArrays` / `DrawElements` / `DrawElementsInstanced` 三个薄成
+  员（不碰绑定，`Bind`/`Unbind` 仍归调用方）。全仓库的 `glDraw*` 只出现在
+  `VertexArray.cpp` 一处——`Mesh`/`InstancedMesh`/`VoxelMeshGpu`/各 batch 内部、demo
+  与 `src/main.cpp` 的 `TrianglePass` 都改走它，绘制因此有了单一真源，demo/app 层不
+  再有任何裸 `glDraw`。
+- **帧级 / pass 级状态 → 刻意保持裸调。** `glViewport` / `glBindFramebuffer` /
+  `glClearColor` / `glClear` **不**封。它们作用于“这一帧绑到哪张目标、视口多大、怎
+  么清”，语义属于**某个 pass 自身**而非任一 GL 句柄对象。`Renderer` 被刻意定位为“只
+  管一次性全局状态 + pass 排序”，清屏下沉在各 pass 的 `Execute` 里（见 §3）：阴影 pass
+  清的是级联深度数组的某一层、后期 pass 清的是离屏 target、`DebugHudPass` 反而**不能
+  清**——把它们统一上收进 `Renderer` 既不可能语义正确、也只会得到一组 `glClear` 的转发
+  壳，正是本项目红线要避开的“透传包装反模式”。离屏目标需要时由 `Framebuffer` 就近提供
+  `Viewport`/`ClearColor`/`ClearDepth`，够用即止、不再多加壳。
+
+一句话：**能表达“是谁的 GL 状态”的就封进那个对象，只属于“本 pass 这一帧怎么画”的保
+持开放。** 这与 `gldxwin` 对 GLFW 的“薄适配器 + 选择性封装”是同一套判断（见 §8）。

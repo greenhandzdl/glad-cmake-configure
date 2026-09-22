@@ -33,6 +33,16 @@ public:
     void AttachAttribute(GLuint index, GLint componentCount, GLenum type,
                          GLboolean normalized, GLsizei stride, const void* offset) const;
 
+    // Draw against this VAO. These are the engine's only owners of the raw
+    // glDraw* entry points: pass/demo code calls one of these instead of
+    // reaching for glDrawArrays/glDrawElements directly, so the draw primitive
+    // has a single source. They do NOT touch the binding—Bind()/Unbind() around
+    // them stays the caller's concern. All render-thread only.
+    void DrawArrays(GLenum mode, GLint first, GLsizei count) const;
+    void DrawElements(GLenum mode, GLsizei count, GLenum type, const void* offset) const;
+    void DrawElementsInstanced(GLenum mode, GLsizei count, GLenum type,
+                               const void* offset, GLsizei instanceCount) const;
+
     [[nodiscard]] GLuint id()    const noexcept { return id_; }
     [[nodiscard]] bool   valid() const noexcept { return id_ != 0; }
 

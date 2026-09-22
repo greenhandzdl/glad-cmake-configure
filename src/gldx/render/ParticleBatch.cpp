@@ -129,7 +129,7 @@ void ParticleBatch::Draw(const glm::mat4& viewProj, const glm::vec3& cameraPos,
 
     vao_.Bind();
     vbo_.SubData(std::span<const GpuVertex>(stage_));
-    glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(stage_.size()));
+    vao_.DrawArrays(GL_POINTS, 0, static_cast<GLsizei>(stage_.size()));
     vao_.Unbind();
 
     glDepthMask(hadDepthMask ? GL_TRUE : GL_FALSE);

@@ -70,7 +70,7 @@ void DebugDraw::Draw(const glm::mat4& viewProj) {
     shader_.Set("uViewProj", viewProj);
     vbo_.SubData(std::span<const Vertex>(verts_));
     vao_.Bind();
-    glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(verts_.size()));
+    vao_.DrawArrays(GL_LINES, 0, static_cast<GLsizei>(verts_.size()));
     vao_.Unbind();
     ShaderProgram::Unuse();
 

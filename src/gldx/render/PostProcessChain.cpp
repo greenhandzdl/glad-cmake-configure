@@ -120,7 +120,7 @@ void PostProcessChain::EndScene() {
 
 void PostProcessChain::DrawFullscreen() {
     emptyVao_.Bind();
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+    emptyVao_.DrawArrays(GL_TRIANGLES, 0, 3);
     emptyVao_.Unbind();
 }
 

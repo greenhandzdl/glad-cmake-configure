@@ -73,8 +73,8 @@ void VoxelMesh::Draw() const {
     if (!vao_.valid()) return;
     vao_.Bind();
     if (ebo_.valid() && indexCount_ > 0) {
-        glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indexCount_),
-                       GL_UNSIGNED_INT, nullptr);
+        vao_.DrawElements(GL_TRIANGLES, static_cast<GLsizei>(indexCount_),
+                          GL_UNSIGNED_INT, nullptr);
     }
     vao_.Unbind();
 }

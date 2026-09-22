@@ -110,7 +110,7 @@ void EnvironmentMap::RenderSky() {
         skyGenShader_.Set("uRight",   kFaceBasis[f][0]);
         skyGenShader_.Set("uUp",      kFaceBasis[f][1]);
         skyGenShader_.Set("uFacing",  kFaceBasis[f][2]);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        emptyVao_.DrawArrays(GL_TRIANGLES, 0, 3);
     }
 }
 
@@ -126,7 +126,7 @@ void EnvironmentMap::RenderIrradiance() {
         irradianceShader_.Set("uRight",  kFaceBasis[f][0]);
         irradianceShader_.Set("uUp",     kFaceBasis[f][1]);
         irradianceShader_.Set("uFacing", kFaceBasis[f][2]);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        emptyVao_.DrawArrays(GL_TRIANGLES, 0, 3);
     }
 }
 
@@ -147,7 +147,7 @@ void EnvironmentMap::RenderPrefilter() {
             prefilterShader_.Set("uRight",  kFaceBasis[f][0]);
             prefilterShader_.Set("uUp",     kFaceBasis[f][1]);
             prefilterShader_.Set("uFacing", kFaceBasis[f][2]);
-            glDrawArrays(GL_TRIANGLES, 0, 3);
+            emptyVao_.DrawArrays(GL_TRIANGLES, 0, 3);
         }
     }
 }
@@ -158,7 +158,7 @@ void EnvironmentMap::RenderBrdf() {
     fbo_.Bind();
     fbo_.Viewport(512, 512);
     emptyVao_.Bind();
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+    emptyVao_.DrawArrays(GL_TRIANGLES, 0, 3);
 }
 
 void EnvironmentMap::BindIrradiance(unsigned& unit) const {

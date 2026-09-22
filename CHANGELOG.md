@@ -25,6 +25,13 @@
 - **新增 demo `shader_file`**（`src/demo/shader_file/`）：端到端跑通 `CreateFromFiles`。从 `--vert`/`--frag` 指定的文件加载并链接程序，画一个纯由 `gl_VertexID` 生成（无顶点缓冲）的全屏三角，用暖色斜渐变证明“确实有着色器在跑”而非 clear 色。语义上可脚本验证：不传路径时退回与文件等价的**内嵌**源仍能开窗口；传了路径却加载失败则 **exit 1**（“exit 0 + 非空截图”即文件路径真跑通的证据）。配套的真·被加载着色器放在 `src/assets/shaders/file_demo/triangle.{vert,frag}`（镜像目录的例外，README 已标注）。
 - **仓库卫生（models 目录）**：`src/assets/models/` 新增局部 `.gitignore` 把投放内容**全量忽略**（只留 README + 这份 .gitignore 撑住目录），删除冗余的 `.gitkeep`；仓库根新增 `.gitattributes`，用**注释掉**的 `*.glb filter=lfs ...` 规则 + 步骤说明写清“将来若要版本化大模型资产，怎么开 Git LFS”（默认仍关闭，不影响三平台“克隆即可构建”）。
 
+### 绘制原语收进 `VertexArray`（OpenGL 函数选择性封装的收口）
+
+- **新增（gldx core）**：`VertexArray` 补三个渲染线程守卫的绘制成员 `DrawArrays(mode, first, count)` / `DrawElements(mode, count, type, offset)` / `DrawElementsInstanced(mode, count, type, offset, instanceCount)`。此前 `VertexArray` 只管 `Create`/`Bind`/`Unbind`/`AttachAttribute`，绘制仍由各处裸 `glDraw*` 发起。收进来后，**全仓库的 `glDraw*` 只出现在 `VertexArray.cpp` 一处**，绘制原语有了单一真源。这三个成员不碰绑定（`Bind`/`Unbind` 仍归调用方），是纯薄封装。
+- **重构（库内 + demo 去裸绘制）**：把 `Mesh`/`InstancedMesh`/`VoxelMeshGpu`/`PostProcessChain`/`EnvironmentMap`/`SpriteBatch`/`ParticleBatch`/`DebugDraw` 内部、以及 demo 层 `shader_file`/`texture_samplers` 与 `src/main.cpp` 的 `TrianglePass` 的裸 `glDrawArrays`/`glDrawElements`/`glDrawElementsInstanced` 全部改走新成员。顺带把 `main.cpp` 的 `TrianglePass` 从手写 `GLuint vao_/vbo_` + `glGen/glBind/glBufferData` 迁到引擎既有 RAII `gldx::VertexArray`/`GLBuffer`，app 层再无手写 GL 句柄。
+- **封装边界（刻意不封的部分）**：`glViewport` / `glBindFramebuffer` / `glClearColor` / `glClear` 这些**帧级 / pass 级** GL 操作**保持裸调**，不并入 `VertexArray`，也不回收到 `Renderer`。理由沉淀进 `doc/developer/design.md` §9：它们作用于“当前绑定到哪张目标、这一帧怎么清”，语义属 pass 自身而非某个 GL 句柄对象；`Renderer` 刻意只是“全局状态 + pass 排序”，清屏由各 pass 决定（阴影 pass 清深度数组层、后期 pass 清离屏 target、HUD 反而不能清），强行上收会退化成透传包装反模式。`Framebuffer` 已就近提供 `Viewport`/`ClearColor`/`ClearDepth`，够用的地方不再加壳。
+- **验证**：全量重建（含 `GLFW_Template` 与全部 demo）零告警零错误；`shader_file` 端到端 exit 0 + 非空截图、`texture_samplers`/`main` 三角形截图回归无回退（绘制结果逐字节不变，仅调用路径改走 `VertexArray`）。
+
 ## v1.4.0
 
 ### 精简与安全验证（发布前体检）

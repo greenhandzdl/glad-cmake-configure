@@ -181,6 +181,7 @@ AGENTS.md                    本文件（agent 速查，留在仓库根便于自
 
 - **加一个渲染 pass**：继承 `gldx::RenderPass`，`void Execute(gldx::RenderFrame&) override`，`renderer.AddPass(std::make_unique<...>())`。GL 工作在渲染线程执行（`Renderer::Render` 保证）。
 - **加几何**：`gldx::GeometryFactory::Cube/Sphere/Plane` 或自填 `gldx::MeshData` → `Mesh::Upload(std::move(data))`（渲染线程）。
+- **画东西（OpenGL 封装边界）**：句柄对象的操作走 RAII 包装（`VertexArray`/`GLBuffer`/`Texture`…，别裸调 `glGen/Bind/Delete`）。绘制原语收在 `VertexArray`：绑定后用 `vao.DrawArrays(mode,first,count)` / `vao.DrawElements(...)` / `vao.DrawElementsInstanced(...)`，**不要**在 demo/pass 里直接 `glDraw*`（全仓 `glDraw*` 只应出现在 `VertexArray.cpp`）。但 `glViewport`/`glBindFramebuffer`/`glClear` 这些**帧级/pass 级**操作**刻意保持裸调**（属本 pass 自身、非某对象，封进去就是透传包装反模式），别去“补封装”。理由见 `doc/developer/design.md` §9。
 - **加载模型/贴图**：`AssetManager::RequestModel/RequestTexture(key, path)`（key 由调用方命名，重复 key 被忽略），每帧 `ProcessUploads()`，就绪前 `Get*` 返回 `nullptr`。纹理引用必须落在模型目录内、图片边长≤`kMaxTextureSide`（16384，解码前校验），两条越界都会被拒。
 - **改 GLSL**：改 `src/gldx/shader/*Shaders.h`（单一真源），**不要**改 `src/assets/shaders/`（那只是镜像）。要 demo/用户从外部 `.glsl` 热加载用 opt-in 的 `ShaderProgram::CreateFromFiles(vertPath, fragPath)`（仅读入后转发 `CreateFromSource`；不破坏内嵌单一真源，普通构建仍零运行期路径依赖）。
 - **UBO 绑定**：`ShaderProgram::SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding)` 等，链接后设一次。

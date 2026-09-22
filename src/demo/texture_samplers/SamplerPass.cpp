@@ -135,10 +135,10 @@ void SamplerPass::Execute(gldx::RenderFrame& f) {
 
     vao_.Bind();
     nearest_.Bind(0);   // sampler object on unit 0
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, reinterpret_cast<const void*>(0));
+    vao_.DrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, reinterpret_cast<const void*>(0));
     linear_.Bind(0);
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT,
-                   reinterpret_cast<const void*>(6 * sizeof(GLuint)));
+    vao_.DrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT,
+                      reinterpret_cast<const void*>(6 * sizeof(GLuint)));
     vao_.Unbind();
     gldx::Sampler::Unbind(0);
 

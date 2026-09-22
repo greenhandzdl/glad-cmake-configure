@@ -8,7 +8,8 @@
  * feature demos, it brings *none* of the render subsystems - no GeometryPass,
  * no LightBuffer, no PBR program, no scene graph, no shadow / IBL / bloom /
  * skybox. It defines one custom gldx::RenderPass holding an inline GLSL program
- * and a hand-built VAO, and hands the renderer an otherwise-empty RenderFrame.
+ * and a gldx::VertexArray + gldx::GLBuffer, and hands the renderer an
+ * otherwise-empty RenderFrame.
  * If this builds and draws, then "import gldx + one pass + one window" really
  * is the floor of the whole engine - and it is reached purely by importing the
  * three libraries (gldx / gldxwin / gldxcli), no demo scaffolding header.
@@ -21,8 +22,8 @@
  */
 
 // Plain text include first: it orders <glad/gl.h> before <GLFW/glfw3.h> and
-// carries the GLFW/GLAD declarations this TU calls directly (glGenVertexArrays,
-// glfwSwapBuffers via gldxwin, ...). The three libraries are then imported.
+// carries the GLFW/GLAD declarations this TU references directly (GL_* enums,
+// GLuint, glfwSwapBuffers via gldxwin, ...). The three libraries are then imported.
 #include "gldx/core/Platform.h"
 
 import gldx;
@@ -31,6 +32,7 @@ import gldxcli;
 
 #include <cstdio>
 #include <memory>
+#include <span>
 #include <utility>
 
 namespace {
@@ -75,24 +77,22 @@ public:
         }
         program_ = std::make_unique<gldx::ShaderProgram>(std::move(*program));
 
-        glGenVertexArrays(1, &vao_);
-        glGenBuffers(1, &vbo_);
-        glBindVertexArray(vao_);
-        glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(kVertices), kVertices, GL_STATIC_DRAW);
+        // The engine's own RAII wrappers instead of raw glGen/glBind/glBufferData:
+        // GLBuffer::Create uploads from a typed span and self-unbinds, so the
+        // bindings the VAO must capture are recorded explicitly inside its scope.
+        vbo_.Create(GL_ARRAY_BUFFER, std::span<const GLfloat>(kVertices));
         constexpr GLsizei stride = 5 * sizeof(GLfloat);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<const void*>(0));
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride,
-                              reinterpret_cast<const void*>(2 * sizeof(GLfloat)));
-        glBindVertexArray(0);
+        vao_.Create();
+        vao_.Bind();
+        vbo_.Bind(GL_ARRAY_BUFFER);
+        vao_.AttachAttribute(0, 2, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<const void*>(0));
+        vao_.AttachAttribute(1, 3, GL_FLOAT, GL_FALSE, stride,
+                             reinterpret_cast<const void*>(2 * sizeof(GLfloat)));
+        vao_.Unbind();
     }
 
-    ~TrianglePass() override {
-        if (vao_) glDeleteVertexArrays(1, &vao_);
-        if (vbo_) glDeleteBuffers(1, &vbo_);
-    }
+    // vao_ / vbo_ are gldx RAII wrappers: their destructors delete the GL names
+    // on the render thread (the pass is torn down inside Run, context still current).
 
     void Execute(gldx::RenderFrame& frame) override {
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -101,16 +101,16 @@ public:
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         if (program_) {
             program_->Use();
-            glBindVertexArray(vao_);
-            glDrawArrays(GL_TRIANGLES, 0, 3);
-            glBindVertexArray(0);
+            vao_.Bind();
+            vao_.DrawArrays(GL_TRIANGLES, 0, 3);
+            vao_.Unbind();
         }
     }
 
 private:
     std::unique_ptr<gldx::ShaderProgram> program_;
-    GLuint vao_ = 0;
-    GLuint vbo_ = 0;
+    gldx::VertexArray vao_;
+    gldx::GLBuffer    vbo_;
 };
 
 } // namespace

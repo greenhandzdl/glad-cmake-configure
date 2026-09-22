@@ -53,4 +53,20 @@ void VertexArray::AttachAttribute(GLuint index, GLint componentCount, GLenum typ
     glEnableVertexAttribArray(index);
 }
 
+void VertexArray::DrawArrays(GLenum mode, GLint first, GLsizei count) const {
+    RenderContext::AssertRenderThread("VertexArray::DrawArrays");
+    glDrawArrays(mode, first, count);
+}
+
+void VertexArray::DrawElements(GLenum mode, GLsizei count, GLenum type, const void* offset) const {
+    RenderContext::AssertRenderThread("VertexArray::DrawElements");
+    glDrawElements(mode, count, type, offset);
+}
+
+void VertexArray::DrawElementsInstanced(GLenum mode, GLsizei count, GLenum type,
+                                        const void* offset, GLsizei instanceCount) const {
+    RenderContext::AssertRenderThread("VertexArray::DrawElementsInstanced");
+    glDrawElementsInstanced(mode, count, type, offset, instanceCount);
+}
+
 } // namespace gldx
