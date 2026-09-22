@@ -355,7 +355,11 @@ int main(int argc, char** argv) {
 
             if (!snapPath.empty() && !snapped && info.time >= snapAt) {
                 snapped = true;
-                if (gldx::CaptureScreenshot(snapPath))
+                // Window-bound capture via the gldxwin member, like every other
+                // demo. The free gldx::CaptureScreenshot lives in module-gldx
+                // purview and does not resolve across the static-lib boundary on
+                // MSVC's module linker (macOS/Linux ld tolerate it).
+                if (info.window->CaptureScreenshot(snapPath))
                     std::printf("snapshot: %s\n", snapPath.c_str());
                 else
                     std::fprintf(stderr, "snapshot failed: %s\n", snapPath.c_str());
