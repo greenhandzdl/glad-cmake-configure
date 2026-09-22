@@ -48,19 +48,6 @@ struct View {
     double lastX = 0.0, lastY = 0.0;
     bool dragging = false;
 };
-void OnMouse(GLFWwindow* w, double x, double y) {
-    auto* v = static_cast<View*>(glfwGetWindowUserPointer(w));
-    if (!v || !v->dragging) return;
-    v->yaw   -= static_cast<float>(x - v->lastX) * 0.006f;
-    v->pitch  = std::min(std::max(v->pitch + static_cast<float>(y - v->lastY) * 0.006f, -1.45f), 1.45f);
-    v->lastX = x; v->lastY = y;
-}
-void OnButton(GLFWwindow* w, int b, int a, int) {
-    if (b != GLFW_MOUSE_BUTTON_LEFT) return;
-    if (auto* v = static_cast<View*>(glfwGetWindowUserPointer(w))) {
-        v->dragging = (a == GLFW_PRESS); glfwGetCursorPos(w, &v->lastX, &v->lastY);
-    }
-}
 
 const char* const kFontCandidates[] = {
     "/System/Library/Fonts/Menlo.ttc", "/System/Library/Fonts/Helvetica.ttc",
@@ -117,7 +104,6 @@ int main(int argc, char** argv) {
 
     gldx::RenderContext::MarkAsRenderThread();
 
-    GLFWwindow* const native = window.Handle();
     gldx::Renderer renderer;
     renderer.Init();
 
@@ -125,9 +111,21 @@ int main(int argc, char** argv) {
     view.yaw = flags.real("yaw", view.yaw);
     view.pitch = flags.real("pitch", view.pitch);
     view.radius = flags.real("radius", view.radius, 0.5f, 200.0f);
-    glfwSetWindowUserPointer(native, &view);
-    glfwSetCursorPosCallback(native, OnMouse);
-    glfwSetMouseButtonCallback(native, OnButton);
+    // Drag-to-orbit lives on the gldxwin input surface now: no GLFW
+    // callbacks, no user-pointer, no GLFW constants in demo code.
+    window.OnCursor([&view](gldx::win::Window&, gldx::win::Vec2d pos) {
+        if (!view.dragging) return;
+        view.yaw   -= static_cast<float>(pos.x - view.lastX) * 0.006f;
+        view.pitch  = std::min(std::max(view.pitch + static_cast<float>(pos.y - view.lastY) * 0.006f, -1.45f), 1.45f);
+        view.lastX = pos.x; view.lastY = pos.y;
+    });
+    window.OnMouseButton([&view](gldx::win::Window& w, gldx::win::MouseButton button,
+                              gldx::win::KeyAction action, int) {
+        if (button != gldx::win::MouseButton::Left) return;
+        view.dragging = (action == gldx::win::KeyAction::Press);
+        const gldx::win::Vec2d c = w.CursorPos();
+        view.lastX = c.x; view.lastY = c.y;
+    });
 
     auto hud = std::make_unique<StatusHudPass>();
     StatusHudPass* hudRaw = hud.get();

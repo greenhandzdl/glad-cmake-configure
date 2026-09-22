@@ -27,6 +27,12 @@ namespace gldx {
 // or the file could not be written.
 bool CaptureScreenshot(const std::string& path);
 
+// NOTE: the EncodeScreenshot half of this job lives in util/ScreenshotHook.h -
+// it is deliberately a GLOBAL-MODULE entity (gldxwin calls it from its own
+// global module fragment), so it must not be declared or exported here inside
+// the module purview, or it would gain a @gldx module bound the linker cannot
+// match from gldxwin.
+
 } // namespace gldx
 
 #endif // GLDX_UTIL_SCREENSHOT_H

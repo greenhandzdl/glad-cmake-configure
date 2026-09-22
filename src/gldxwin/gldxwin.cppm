@@ -18,6 +18,17 @@
 //              (OnCreate / OnFrame / OnDestroy) let a demo build, drive and tear
 //              down its GL resources strictly while a context is current.
 //
+// Window also owns the *input surface*: key/char/mouse-button/cursor/scroll
+// callbacks and polled state (KeyIsDown & co) are expressed with the portable
+// enums below, so a demo never needs to include GLFW or name a GLFW constant.
+// gldxwin therefore installs those GLFW callbacks itself and reserves the
+// window's GLFW user-pointer for the trampoline - demos must not call
+// glfwSetWindowUserPointer; use the SetUserData slot or capture the Window in
+// the callback lambda instead. Handle() remains only as the escape hatch for
+// window-system capabilities this layer deliberately does not proxy (raw mouse
+// move, clipboard, joystick, file drop): "rare and GLFW-typed - do not proxy;
+// frequent and type-clean - proxy" is the binding rule.
+//
 // The contract every consumer must respect (the point of the whole library):
 //   * GL resources are created in OnCreate and destroyed in OnDestroy - both run
 //     on the render thread with the window's context current, and OnDestroy runs
@@ -42,6 +53,31 @@ module;
 export module gldxwin;
 
 export namespace gldx::win {
+
+// Portable input vocabulary. The values carry no GLFW meaning; Window.cpp owns
+// the one mapping table, so a demo switches on these names instead of GLFW_*
+// constants and compiles without <GLFW/glfw3.h> in scope.
+enum class KeyAction { Press, Release, Repeat };
+
+enum class Key {
+    Unknown,
+    A, B, C, D, E, F, G, H, I, J, K, L, M,
+    N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
+    Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
+    Escape, Tab, Space, Enter, Backspace,
+    Left, Right, Up, Down,
+    LeftBracket, RightBracket, Minus, Equal,
+    LeftControl, LeftShift,
+};
+
+enum class MouseButton { Left, Right, Middle };
+
+// A 2D coordinate pair for cursor / window / framebuffer queries. Deliberately
+// not glm::vec2: gldxwin must stay engine-agnostic (no gldx / GLM dependency).
+struct Vec2d {
+    double x = 0.0;
+    double y = 0.0;
+};
 
 // How a Window should come up. Plain defaults so a demo can pass `WindowDesc{}`
 // or set just the fields it cares about. `title` is a borrowed C string (GLFW's
@@ -91,8 +127,11 @@ public:
     // draw" rather than a crash.
     [[nodiscard]] bool Ok() const noexcept { return handle_ != nullptr; }
 
-    // The native handle, for the demo's own glfwGetKey / glfwSet*Callback /
-    // glfwSetWindowUserPointer input plumbing. Valid only when Ok().
+    // The native handle, an explicit escape hatch for window-system capabilities
+    // this library does not proxy (raw mouse move, clipboard, joystick, file
+    // drop). Everything a normal demo needs - input, geometry, context checks,
+    // screenshots - goes through the methods below, so keeping Handle() unused
+    // is the design goal. Valid only when Ok().
     [[nodiscard]] GLFWwindow* Handle() const noexcept { return handle_; }
 
     [[nodiscard]] const WindowDesc& Desc() const noexcept { return desc_; }
@@ -105,6 +144,51 @@ public:
 
     [[nodiscard]] bool ShouldClose() const;
     void Close() const;
+
+    // ---- Input: event callbacks ------------------------------------------------
+    // All fire on the render thread inside Run()'s glfwPollEvents. The latest
+    // setter wins per event kind; an empty std::function unsubscribes. gldxwin
+    // registers the GLFW trampolines (and clears them before destroying the
+    // window, which GLFW requires for mouse callbacks); demos never call
+    // glfwSet*Callback on this handle.
+    void OnKey(std::function<void(Window&, Key, KeyAction, int mods)> cb);
+    void OnChar(std::function<void(Window&, unsigned int codepoint)> cb);
+    void OnMouseButton(std::function<void(Window&, MouseButton, KeyAction, int mods)> cb);
+    // Cursor positions are window (logical) coordinates.
+    void OnCursor(std::function<void(Window&, Vec2d)> cb);
+    void OnScroll(std::function<void(Window&, double dx, double dy)> cb);
+
+    // ---- Input: polled state ---------------------------------------------------
+    // Read the *current context's* window (GLFW's own rule). Safe from OnFrame
+    // (Run makes each window current before its frame) and from single-window
+    // demos; in a multi-window loop, only the window whose context is current
+    // answers correctly - register a callback instead when in doubt.
+    [[nodiscard]] bool KeyIsDown(Key key) const;
+    [[nodiscard]] bool MouseIsDown(MouseButton button) const;
+    [[nodiscard]] Vec2d CursorPos() const;
+    void SetCursorPos(Vec2d pos) const;
+    void SetCursorVisible(bool visible) const;      // false = hide the cursor
+    void SetCursorCaptured(bool captured) const;    // true = disable + lock to centre
+    void SetRawMouseInput(bool enabled) const;      // GLFW raw cursor-motion mode
+
+    // ---- Window queries and actions (current-context rules as above) -----------
+    [[nodiscard]] Vec2d Pos() const;                // top-left on screen
+    void SetPos(Vec2d topLeft) const;
+    [[nodiscard]] Vec2d Size() const;               // logical (content) size
+    [[nodiscard]] Vec2d FramebufferSize() const;    // pixel size (Retina ~2x)
+    void Focus() const;
+    void SetTitle(const std::string& title);
+
+    // Per-window screenshot plumbing: make this window current, read the region
+    // the last pass left in GL_VIEWPORT, hand the tight-packed bottom-up RGB row
+    // buffer to gldx::EncodeScreenshot (PNG lives in the engine, gldxwin stays
+    // engine-agnostic and only forward-declares the hook).
+    bool CaptureScreenshot(const std::string& path) const;
+
+    // True when this window's context is the calling thread's current context -
+    // the multi-window loop's per-frame sanity check, without the demo having to
+    // call glfwGetCurrentContext/Handle() itself.
+    [[nodiscard]] bool ContextIsCurrent() const;
 
     // Lifecycle hooks. OnCreate fires once before the first frame (build GL
     // resources, call MarkAsRenderThread); OnFrame fires every frame; OnDestroy
@@ -122,6 +206,16 @@ public:
     [[nodiscard]] T* UserDataAs() const noexcept { return static_cast<T*>(userData_); }
 
 private:
+    // GLFW trampolines, defined in Window.cpp (internal linkage, module-only
+    // visibility). They are declared here so the definition can be a friend and
+    // dispatch through the private on*_ callbacks; Run()/the constructor install
+    // and clear them. No consumer outside gldxwin can even name them.
+    static void TrampKey(GLFWwindow* w, int key, int scancode, int action, int mods);
+    static void TrampChar(GLFWwindow* w, unsigned int codepoint);
+    static void TrampMouseButton(GLFWwindow* w, int button, int action, int mods);
+    static void TrampCursor(GLFWwindow* w, double x, double y);
+    static void TrampScroll(GLFWwindow* w, double dx, double dy);
+
     // Run() drives these; kept private so timing state stays consistent.
     void ResetTiming(double startedAt);
     void FillFrameInfo(FrameInfo& out, double startedAt, double now);
@@ -134,6 +228,14 @@ private:
     std::function<void(Window&)>   onCreate_;
     std::function<void(FrameInfo&)> onFrame_;
     std::function<void(Window&)>   onDestroy_;
+
+    // Input callbacks, driven by the GLFW trampolines installed in Window.cpp
+    // (the GLFW window user-pointer is reserved to point back at `this`).
+    std::function<void(Window&, Key, KeyAction, int)>      onKey_;
+    std::function<void(Window&, unsigned int)>             onChar_;
+    std::function<void(Window&, MouseButton, KeyAction, int)> onButton_;
+    std::function<void(Window&, Vec2d)>                    onCursor_;
+    std::function<void(Window&, double, double)>           onScroll_;
 
     void* userData_    = nullptr;
     bool  closeOnEsc_  = true;
@@ -170,6 +272,10 @@ public:
     int Run(const RunOptions& options = {});
 
     [[nodiscard]] bool AnyWindowOpen() const;
+
+    // GLFW's global timer (seconds since glfwInit). Exposed so demos stop
+    // calling glfwGetTime directly; per-frame time is already in FrameInfo.
+    [[nodiscard]] static double Now();
 
 private:
     App();

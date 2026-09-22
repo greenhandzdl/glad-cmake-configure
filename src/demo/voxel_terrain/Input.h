@@ -4,7 +4,7 @@
 /**
  * @file Input.h
  * @brief Fly/orbit camera + interaction state for the voxel_terrain demo, and
- *        the GLFW callbacks that mutate it.
+ *        the gldxwin input-surface callbacks that mutate it.
  *
  * Pulled out of main.cpp so the demo reads like a small project: main wires the
  * engine together and drives the per-frame loop, this file owns "what the user
@@ -14,7 +14,7 @@
  * .cpp files establish `import gldx;` before including either header).
  */
 
-#include "gldx/core/Platform.h"   // <glad/gl.h> + <GLFW/glfw3.h>
+import gldxwin;   // gldx::win::Window / Key / MouseButton / Vec2d - no GLFW here
 
 #include <glm/glm.hpp>
 
@@ -58,11 +58,12 @@ glm::vec3 SunToward(const Input& in);
 // `keepCursor` is the scripted-run override: with --freeze-at the view has to
 // stay where --yaw/--pitch put it, and a captured pointer hands the last word
 // to whoever is moving the mouse next to the window.
-void ApplyCapture(GLFWwindow* win, Input& in, bool keepCursor = false);
+void ApplyCapture(gldx::win::Window& win, Input& in, bool keepCursor = false);
 
-void MouseCallback(GLFWwindow* win, double x, double y);
-void MouseButtonCallback(GLFWwindow* win, int button, int action, int);
-void ScrollCallback(GLFWwindow* win, double, double dy);
+void MouseCallback(gldx::win::Window& win, gldx::win::Vec2d pos);
+void MouseButtonCallback(gldx::win::Window& win, gldx::win::MouseButton button,
+                         gldx::win::KeyAction action, int);
+void ScrollCallback(gldx::win::Window& win, double dx, double dy);
 
 } // namespace voxel_terrain
 

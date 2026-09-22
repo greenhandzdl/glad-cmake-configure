@@ -1,3 +1,8 @@
+// pbr_showcase demo — camera / interaction implementation (see Input.h).
+#include "gldx/core/Platform.h"
+
+import gldx;
+
 #include "Input.h"
 
 #include <algorithm>
@@ -22,56 +27,56 @@ glm::vec3 SunToward(const Input& in) {
                                     ce * std::cos(in.sunAzimuth)));
 }
 
-void MouseCallback(GLFWwindow* win, double x, double y) {
-    auto* in = static_cast<Input*>(glfwGetWindowUserPointer(win));
+void MouseCallback(gldx::win::Window& win, gldx::win::Vec2d pos) {
+    auto* in = static_cast<Input*>(win.GetUserData());
     if (!in || !in->dragging) return;
-    const float dx = static_cast<float>(x - in->lastX);
-    const float dy = static_cast<float>(y - in->lastY);
+    const float dx = static_cast<float>(pos.x - in->lastX);
+    const float dy = static_cast<float>(pos.y - in->lastY);
     in->yaw   -= dx * 0.006f;
     in->pitch += dy * 0.006f;
     in->pitch = std::clamp(in->pitch, -1.45f, 1.45f);
-    in->lastX = x;
-    in->lastY = y;
+    in->lastX = pos.x;
+    in->lastY = pos.y;
 }
 
-void MouseButtonCallback(GLFWwindow* win, int button, int action, int) {
-    auto* in = static_cast<Input*>(glfwGetWindowUserPointer(win));
+void MouseButtonCallback(gldx::win::Window& win, gldx::win::MouseButton button,
+                         gldx::win::KeyAction action, int) {
+    auto* in = static_cast<Input*>(win.GetUserData());
     if (!in) return;
-    double cx = 0, cy = 0;
-    glfwGetCursorPos(win, &cx, &cy);
-    if (button == GLFW_MOUSE_BUTTON_RIGHT) {
-        if (action == GLFW_PRESS) {           // request a pick at this pixel
-            int ww = 0, wh = 0;
-            glfwGetWindowSize(win, &ww, &wh);
-            if (ww > 0 && wh > 0) {
+    const bool press = action == gldx::win::KeyAction::Press;
+    const gldx::win::Vec2d c = win.CursorPos();
+    if (button == gldx::win::MouseButton::Right) {
+        if (press) {                      // request a pick at this pixel
+            const gldx::win::Vec2d size = win.Size();
+            if (size.x > 0 && size.y > 0) {
                 in->pickPending = true;
-                in->pickX = static_cast<float>(cx / ww);   // window-normalised
-                in->pickY = static_cast<float>(cy / wh);
+                in->pickX = static_cast<float>(c.x / size.x);   // window-normalised
+                in->pickY = static_cast<float>(c.y / size.y);
             }
         }
         return;
     }
-    if (button != GLFW_MOUSE_BUTTON_LEFT) return;
-    in->dragging = (action == GLFW_PRESS);
-    in->lastX = cx;
-    in->lastY = cy;
+    if (button != gldx::win::MouseButton::Left) return;
+    in->dragging = press;
+    in->lastX = c.x;
+    in->lastY = c.y;
 }
 
-void ScrollCallback(GLFWwindow* win, double, double dy) {
-    auto* in = static_cast<Input*>(glfwGetWindowUserPointer(win));
+void ScrollCallback(gldx::win::Window& win, double, double dy) {
+    auto* in = static_cast<Input*>(win.GetUserData());
     if (!in) return;
     in->radius = std::clamp(in->radius - static_cast<float>(dy) * 0.6f, 2.0f, 60.0f);
 }
 
-void HandleKeys(GLFWwindow* win, Input& in) {
+void HandleKeys(gldx::win::Window& win, Input& in) {
     const float step = 0.04f;
-    if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_LEFT) == GLFW_PRESS)
+    if (win.KeyIsDown(gldx::win::Key::A) || win.KeyIsDown(gldx::win::Key::Left))
         in.sunAzimuth -= step;
-    if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_RIGHT) == GLFW_PRESS)
+    if (win.KeyIsDown(gldx::win::Key::D) || win.KeyIsDown(gldx::win::Key::Right))
         in.sunAzimuth += step;
-    if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_UP) == GLFW_PRESS)
+    if (win.KeyIsDown(gldx::win::Key::W) || win.KeyIsDown(gldx::win::Key::Up))
         in.sunElevation = std::min(in.sunElevation + step, 1.5f);
-    if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_DOWN) == GLFW_PRESS)
+    if (win.KeyIsDown(gldx::win::Key::S) || win.KeyIsDown(gldx::win::Key::Down))
         in.sunElevation = std::max(in.sunElevation - step, 0.05f);
 }
 

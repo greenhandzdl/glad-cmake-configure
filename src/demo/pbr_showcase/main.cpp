@@ -28,7 +28,7 @@
  * renderer.Render(frame). All GL still happens on the render thread.
  *
  * This is deliberately a small C++ project, not one big file: the orbit-camera
- * state and its GLFW callbacks live in Input.{h,cpp}, and the scene graph +
+ * state and its gldxwin input-surface callbacks live in Input.{h,cpp}, and the scene graph +
  * instanced field + the CPU texture generators in Scene.{h,cpp}. main.cpp stays
  * the wiring that stitches the engine together around them.
  */
@@ -91,7 +91,6 @@ int main(int argc, char** argv) {
         std::cerr << "Failed to create GLFW window (OpenGL 4.1 core?)\n";
         return 1;
     }
-    GLFWwindow* const win = window.Handle();
 
     gldx::RenderContext::MarkAsRenderThread();
 
@@ -113,10 +112,12 @@ int main(int argc, char** argv) {
     input.useInstances = flags.on("instances", false);
     input.useSky = flags.on("sky");
     input.ortho = flags.on("ortho", false);
-    glfwSetWindowUserPointer(win, &input);
-    glfwSetCursorPosCallback(win, MouseCallback);
-    glfwSetMouseButtonCallback(win, MouseButtonCallback);
-    glfwSetScrollCallback(win, ScrollCallback);
+    // Input arrives through the gldxwin input surface: gldxwin owns the GLFW
+    // trampolines, so the demo just records its state pointer and subscribes.
+    window.SetUserData(&input);
+    window.OnCursor(MouseCallback);
+    window.OnMouseButton(MouseButtonCallback);
+    window.OnScroll(ScrollCallback);
 
     // All GPU-resource owners live inside this lambda so their destructors run
     // when it returns — while the GL context is still current, before the window
@@ -235,7 +236,7 @@ int main(int argc, char** argv) {
         bool snapped = false;
 
         window.OnFrame([&](gldx::win::FrameInfo& info) {
-            GLFWwindow* const window = info.window->Handle();
+            gldx::win::Window& win = *info.window;
             // Edge-detect the 1..6 toggles: flip once per press, rearm on release.
             auto edgeToggle = [](bool pressed, bool& armed, bool& flag) {
                 if (pressed && armed) { flag = !flag; armed = false; }
@@ -243,21 +244,21 @@ int main(int argc, char** argv) {
             };
             static bool shadowArmed = true, iblArmed = true, bloomArmed = true,
                         debugArmed = true, instArmed = true, skyArmed = true, projArmed = true;
-            edgeToggle(glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS, shadowArmed, input.useShadow);
-            edgeToggle(glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS, iblArmed,    input.useIbl);
-            edgeToggle(glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS, bloomArmed,  input.useBloom);
-            edgeToggle(glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS, debugArmed,  input.useDebug);
-            edgeToggle(glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS, instArmed,   input.useInstances);
-            edgeToggle(glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS, skyArmed,    input.useSky);
+            edgeToggle(win.KeyIsDown(gldx::win::Key::Num1), shadowArmed, input.useShadow);
+            edgeToggle(win.KeyIsDown(gldx::win::Key::Num2), iblArmed,    input.useIbl);
+            edgeToggle(win.KeyIsDown(gldx::win::Key::Num3), bloomArmed,  input.useBloom);
+            edgeToggle(win.KeyIsDown(gldx::win::Key::Num4), debugArmed,  input.useDebug);
+            edgeToggle(win.KeyIsDown(gldx::win::Key::Num5), instArmed,   input.useInstances);
+            edgeToggle(win.KeyIsDown(gldx::win::Key::Num6), skyArmed,    input.useSky);
             // Tab swaps perspective <-> orthographic once per press.
-            if (bool tabDown = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS; tabDown && projArmed) {
+            if (bool tabDown = win.KeyIsDown(gldx::win::Key::Tab); tabDown && projArmed) {
                 input.ortho = camera.ToggleProjection()
                               == gldx::Camera::Projection::Orthographic;
                 projArmed = false;
             } else if (!tabDown) {
                 projArmed = true;
             }
-            HandleKeys(window, input);
+            HandleKeys(win, input);
 
             const int fbw = info.fbWidth;
             const int fbh = info.fbHeight;
@@ -286,7 +287,7 @@ int main(int argc, char** argv) {
             // is what makes two runs of the same settings pixel-identical for a
             // screenshot sweep; unset, the clock is plain wall time as always.
             // The carousel turns on seconds *since start*, not the absolute
-            // timer: glfwGetTime() counts from machine boot, so an absolute clock
+            // timer: the clock counts from machine boot, so an absolute clock
             // left the parked phase different on every run (and lost precision on
             // a long-lived desktop, where the float cast alone moved the angle by
             // thousandths of a radian per frame).

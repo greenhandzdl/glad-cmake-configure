@@ -37,24 +37,6 @@ struct View {
     bool dragging = false;
 };
 
-void OnMouse(GLFWwindow* w, double x, double y) {
-    auto* v = static_cast<View*>(glfwGetWindowUserPointer(w));
-    if (!v || !v->dragging) return;
-    v->yaw   -= static_cast<float>(x - v->lastX) * 0.006f;
-    v->pitch += static_cast<float>(y - v->lastY) * 0.006f;
-    if (v->pitch > 1.45f) v->pitch = 1.45f;
-    if (v->pitch < -1.45f) v->pitch = -1.45f;
-    v->lastX = x; v->lastY = y;
-}
-
-void OnButton(GLFWwindow* w, int b, int a, int) {
-    if (b != GLFW_MOUSE_BUTTON_LEFT) return;
-    auto* v = static_cast<View*>(glfwGetWindowUserPointer(w));
-    if (!v) return;
-    v->dragging = (a == GLFW_PRESS);
-    glfwGetCursorPos(w, &v->lastX, &v->lastY);
-}
-
 // Owns a GPU mesh + its CPU material for one node (addresses stay stable).
 struct Item {
     gldx::Mesh mesh;
@@ -74,7 +56,6 @@ int main(int argc, char** argv) {
 
     gldx::RenderContext::MarkAsRenderThread();
 
-    GLFWwindow* const native = window.Handle();
     gldx::Renderer renderer;
     renderer.Init();
 
@@ -82,9 +63,23 @@ int main(int argc, char** argv) {
     view.yaw = flags.real("yaw", view.yaw);
     view.pitch = flags.real("pitch", view.pitch);
     view.radius = flags.real("radius", view.radius, 2.0f, 40.0f);
-    glfwSetWindowUserPointer(native, &view);
-    glfwSetCursorPosCallback(native, OnMouse);
-    glfwSetMouseButtonCallback(native, OnButton);
+    // Drag-to-orbit lives on the gldxwin input surface now: no GLFW
+    // callbacks, no user-pointer, no GLFW constants in demo code.
+    window.OnCursor([&view](gldx::win::Window&, gldx::win::Vec2d pos) {
+        if (!view.dragging) return;
+        view.yaw   -= static_cast<float>(pos.x - view.lastX) * 0.006f;
+        view.pitch += static_cast<float>(pos.y - view.lastY) * 0.006f;
+        if (view.pitch > 1.45f) view.pitch = 1.45f;
+        if (view.pitch < -1.45f) view.pitch = -1.45f;
+        view.lastX = pos.x; view.lastY = pos.y;
+    });
+    window.OnMouseButton([&view](gldx::win::Window& w, gldx::win::MouseButton button,
+                                  gldx::win::KeyAction action, int) {
+        if (button != gldx::win::MouseButton::Left) return;
+        view.dragging = (action == gldx::win::KeyAction::Press);
+        const gldx::win::Vec2d c = w.CursorPos();
+        view.lastX = c.x; view.lastY = c.y;
+    });
 
     renderer.AddPass(std::make_unique<gldx::GeometryPass>());   // only the pass the scene needs
 

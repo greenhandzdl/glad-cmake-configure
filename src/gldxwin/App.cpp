@@ -144,6 +144,10 @@ bool App::AnyWindowOpen() const {
     return false;
 }
 
+double App::Now() {
+    return glfwGetTime();
+}
+
 int App::Run(const RunOptions& options) {
     if (!ok_) return 1;
 
@@ -180,6 +184,14 @@ int App::Run(const RunOptions& options) {
             // here; AnyWindowOpen() ends the loop on the next pass. This matches
             // the old Ctx::Loop, where should-close was only re-tested at the
             // top of the while, so the closing frame was never skipped.
+            // Make this window's context current before the demo draws: with one
+            // window the loop would happen to run on whichever context was last
+            // made current, but a multi-window loop must switch per window or
+            // every OnFrame would pile onto a single context (the contract in
+            // gldxwin.cppm promises "with that window's context current" for
+            // OnCreate/OnDestroy; this closes the same guarantee for OnFrame).
+            glfwMakeContextCurrent(w->handle_);
+
             FrameInfo info;
             w->FillFrameInfo(info, startedAt, now);
             if (w->onFrame_) w->onFrame_(info);

@@ -93,6 +93,7 @@ import gldxcli;
 #include "World.h"
 #include "Input.h"
 #include "Hud.h"
+#include "Streaming.h"
 
 using namespace voxel_terrain;
 
@@ -122,7 +123,6 @@ int main(int argc, char** argv) {
         std::cerr << "Failed to create GLFW window (OpenGL 4.1 core?)\n";
         return 1;
     }
-    GLFWwindow* const win = window.Handle();
     // Voxel drives ESC itself: in fly mode it releases/takes the pointer grab, and
     // only quits while orbiting. So gldxwin's default Esc-to-close must stay off.
     window.SetCloseOnEsc(false);
@@ -145,10 +145,12 @@ int main(int argc, char** argv) {
     // transparent sheet in the frame without needing a lake to be nearby.
     input.selected = std::clamp(flags.integer("select", input.selected),
                                 1, static_cast<int>(Block::kBuiltinCount) - 1);
-    glfwSetWindowUserPointer(win, &input);
-    glfwSetCursorPosCallback(win, MouseCallback);
-    glfwSetMouseButtonCallback(win, MouseButtonCallback);
-    glfwSetScrollCallback(win, ScrollCallback);
+    // Input arrives through the gldxwin input surface: gldxwin owns the GLFW
+    // trampolines, so the demo just records its state pointer and subscribes.
+    window.SetUserData(&input);
+    window.OnCursor(MouseCallback);
+    window.OnMouseButton(MouseButtonCallback);
+    window.OnScroll(ScrollCallback);
 
     // Same teardown contract as main.cpp: everything owning GL lives in this
     // lambda so destructors run while the context is current.
@@ -282,208 +284,15 @@ int main(int argc, char** argv) {
         opaqueRaw->SetPipeline(vx);
         transpRaw->SetPipeline(vx);
 
-        gldx::ThreadPool pool(4);
-        using GenResult = std::pair<std::unique_ptr<gldx::Chunk>, bool>;
-        struct GenJob { int idx; std::future<GenResult> fut; };
-        struct MeshJob { int idx; std::future<gldx::VoxelChunkMesh> fut; };
-        std::deque<GenJob> genPending;
-        std::deque<MeshJob> meshPending;
-        std::vector<std::pair<int, glm::ivec3>> candidates;   // scratch
-        int genCount = 0, meshCount = 0;
-        // Chunk-grid side offsets, index = Chunk::neighborDirty() side.
-        const glm::ivec3 kSide[6] = { {-1,0,0}, {1,0,0}, {0,-1,0},
-                                      {0,1,0}, {0,0,-1}, {0,0,1} };
-
-        auto submitMesh = [&](int idx) {
-            {
-                // Clear the flag *before* the job runs. An edit that lands
-                // while the worker is copying then re-dirties the chunk and
-                // earns a second remesh, so no change can be swallowed by a
-                // mesh that was built from an older snapshot.
-                std::unique_lock<std::shared_mutex> lk(world.mx);
-                world.cpu[idx]->ClearDirty();
-            }
-            world.state[idx].phase = kMeshing;
-            try {
-                auto fut = pool.enqueue([idx, &world]() -> gldx::VoxelChunkMesh {
-                    std::shared_lock<std::shared_mutex> lk(world.mx);
-                    const gldx::Chunk& ch = *world.cpu[idx];
-                    // Private 8 KB snapshot of the cells, taken under the lock:
-                    // the mesher never sees a torn view of a concurrent edit.
-                    const std::array<std::uint16_t,
-                                     static_cast<std::size_t>(gldx::kChunkSize)
-                                         * gldx::kChunkSize * gldx::kChunkSize> cells = ch.blocks();
-                    return world.mesher.Build(cells.data(), ch.origin(), world);
-                });
-                meshPending.push_back({idx, std::move(fut)});
-            } catch (const std::future_error&) {
-                world.state[idx].phase = kGenerated;   // pool gone; retry later
-            }
-        };
-
-        auto submitGen = [&](int idx, glm::ivec3 g) {
-            world.state[idx].phase = kGenerating;
-            try {
-                auto fut = pool.enqueue([g, &world]() -> GenResult {
-                    auto ch = std::make_unique<gldx::Chunk>(g * kChunk);
-                    const bool any = GenerateChunk(*ch, world);
-                    return {std::move(ch), any};
-                });
-                genPending.push_back({idx, std::move(fut)});
-            } catch (const std::future_error&) {
-                world.state[idx].phase = kEmpty;
-            }
-        };
-
-        auto streamChunks = [&](const glm::vec3& eye) {
-            const int ccx = std::clamp(static_cast<int>(eye.x) / kChunk, 0, kGridX - 1);
-            const int ccy = std::clamp(static_cast<int>(eye.y) / kChunk, 0, kGridY - 1);
-            const int ccz = std::clamp(static_cast<int>(eye.z) / kChunk, 0, kGridZ - 1);
-            // Publish the ring centre before anything asks who is ready.
-            world.camChunk = {ccx, ccz};
-
-            candidates.clear();
-            for (int dz = -kRenderDistance; dz <= kRenderDistance; ++dz) {
-                for (int dx = -kRenderDistance; dx <= kRenderDistance; ++dx) {
-                    const int rr = dx * dx + dz * dz;
-                    if (rr > kRenderDistance * kRenderDistance) continue;
-                    const int cz = ccz + dz, cx = ccx + dx;
-                    if (cx < 0 || cz < 0 || cx >= kGridX || cz >= kGridZ) continue;
-                    for (int cy = 0; cy < kGridY; ++cy) {
-                        const int idx = World::Index(cx, cy, cz);
-                        std::uint8_t& phase = world.state[idx].phase;
-                        // The height test costs a few noise lookups; running it
-                        // once and remembering the answer as kVoid keeps the
-                        // per-frame cost at a comparison.
-                        if (phase == kEmpty && !world.ColumnRelevant(cx, cy, cz))
-                            phase = kVoid;
-                        if (phase == kVoid) continue;
-                        candidates.emplace_back(rr + std::abs(cy - ccy),
-                                                glm::ivec3{cx, cy, cz});
-                    }
-                }
-            }
-            std::sort(candidates.begin(), candidates.end(),
-                      [](const auto& a, const auto& b) { return a.first < b.first; });
-
-            // Nearest-first: request generation, then mesh what just became
-            // complete (its 3x3x3 neighbourhood must exist first), then remesh
-            // whatever an edit dirtied.
-            for (const auto& cand : candidates) {
-                const glm::ivec3 g = cand.second;
-                const int idx = World::Index(g.x, g.y, g.z);
-                const std::uint8_t phase = world.state[idx].phase;
-                if (phase == kEmpty) {
-                    if (genPending.size() < kMaxGenInFlight) submitGen(idx, g);
-                } else if (phase == kGenerated) {
-                    if (meshPending.size() >= kMaxMeshInFlight) continue;
-                    std::shared_lock<std::shared_mutex> lk(world.mx);
-                    if (world.NeighborReady(g.x, g.y, g.z)) {
-                        lk.unlock();
-                        submitMesh(idx);
-                    }
-                } else if (phase == kReady) {
-                    std::shared_lock<std::shared_mutex> lk(world.mx);
-                    const gldx::Chunk* ch = world.cpu[idx].get();
-                    const bool dirty = ch && ch->dirty();
-                    lk.unlock();
-                    if (dirty && meshPending.size() < kMaxMeshInFlight) submitMesh(idx);
-                }
-            }
-
-            // Drain finished generation: install the chunk and wake up any
-            // Ready neighbour whose border now disagrees with it.
-            for (auto it = genPending.begin(); it != genPending.end();) {
-                if (it->fut.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
-                    ++it;
-                    continue;
-                }
-                const int idx = it->idx;
-                GenResult result = it->fut.get();
-                std::unique_ptr<gldx::Chunk> ch = std::move(result.first);
-                const glm::ivec3 g = ch->origin() / kChunk;
-                if (!result.second) {
-                    // Pure air after all: cache the verdict instead of the
-                    // data. Neighbours stop waiting on it (NeighborReady) and
-                    // the streaming loop stops proposing it.
-                    world.state[idx].phase = kVoid;
-                    it = genPending.erase(it);
-                    continue;
-                }
-                {
-                    std::unique_lock<std::shared_mutex> lk(world.mx);
-                    world.cpu[idx] = std::move(ch);
-                    for (const glm::ivec3& off : kSide) {
-                        const glm::ivec3 nb = g + off;
-                        if (!World::InRange(nb.x, nb.y, nb.z)) continue;
-                        const int nidx = World::Index(nb.x, nb.y, nb.z);
-                        if (world.state[nidx].phase == kReady && world.cpu[nidx])
-                            world.cpu[nidx]->MarkDirty();
-                    }
-                }
-                world.state[idx].phase = kGenerated;
-                ++genCount;
-                it = genPending.erase(it);
-            }
-
-            // Drain finished meshing and upload (render thread only, that is
-            // why the queue is drained here rather than in the worker). Buffer
-            // swaps are the expensive part, so a frame takes a fixed few.
-            std::size_t uploads = 0;
-            for (auto it = meshPending.begin(); it != meshPending.end();) {
-                if (uploads >= kMaxUploadsPerFrame) break;
-                if (it->fut.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
-                    ++it;
-                    continue;
-                }
-                const int idx = it->idx;
-                gldx::VoxelChunkMesh mesh = it->fut.get();
-                ++uploads;
-                gldx::Chunk& ch = *world.cpu[idx];
-                gldx::VoxelChunkGpu& rec = world.gpu[idx];
-                const glm::ivec3 g = ch.origin() / kChunk;
-
-                // A live opaque VAO is also the record's "built" flag: the
-                // first build is where the transform and bounds get filled.
-                if (rec.opaque.valid()) {
-                    rec.opaque.Update(std::move(mesh.opaque));
-                } else {
-                    rec.origin = g * kChunk;
-                    rec.model = glm::translate(glm::mat4(1.0f), glm::vec3(rec.origin));
-                    rec.center = glm::vec3(rec.origin) + glm::vec3(kChunk * 0.5f);
-                    rec.radius = gldx::Chunk::circumRadius();
-                    rec.opaque.Upload(std::move(mesh.opaque));
-                }
-                // Water is optional per chunk. An empty mesh leaves the buffer
-                // alone instead of asking GL for a zero-size upload; the
-                // indexCount() check below is what actually gates the pass.
-                if (!mesh.transparent.indices.empty()) {
-                    if (rec.transparent.valid()) rec.transparent.Update(std::move(mesh.transparent));
-                    else rec.transparent.Upload(std::move(mesh.transparent));
-                }
-                rec.hasTransparent = rec.transparent.indexCount() > 0;
-
-                {
-                    std::unique_lock<std::shared_mutex> lk(world.mx);
-                    for (int s = 0; s < 6; ++s) {
-                        if (!ch.neighborDirty(s)) continue;
-                        const glm::ivec3 nb = g + kSide[s];
-                        if (!World::InRange(nb.x, nb.y, nb.z)) continue;
-                        const int nidx = World::Index(nb.x, nb.y, nb.z);
-                        if (world.state[nidx].phase == kReady && world.cpu[nidx])
-                            world.cpu[nidx]->MarkDirty();
-                    }
-                    ch.ClearNeighborDirty();
-                }
-                world.state[idx].phase = kReady;
-                ++meshCount;
-                it = meshPending.erase(it);
-            }
-        };
+        // Generation + meshing workers, the two in-flight queues and the
+        // upload drain all live behind one call: Streamer.{h,cpp}.
+        ChunkStreamer streamer(world);
+        int& genCount = streamer.genCountRef();
+        int& meshCount = streamer.meshCountRef();
 
         const bool scripted = flags.number("freeze-at") > 0.0;
-        ApplyCapture(win, input, scripted);
-        const double startedAt = glfwGetTime();
+        ApplyCapture(window, input, scripted);
+        const double startedAt = gldx::win::App::Now();
         const double quitAfter = flags.quitAfter();
         const double freezeAt = flags.number("freeze-at");
         // Everything time-driven (flight speed, water scroll, debris) advances on
@@ -526,7 +335,7 @@ int main(int argc, char** argv) {
         double minFps = 1e9;
 
         window.OnFrame([&](gldx::win::FrameInfo& info) {
-            GLFWwindow* const window = info.window->Handle();
+            gldx::win::Window& win = *info.window;
             // ---- edge-detected toggles + keys -------------------------------
             auto edge = [](bool down, bool& armed) {
                 if (down && armed) { armed = false; return true; }
@@ -535,40 +344,45 @@ int main(int argc, char** argv) {
             };
             static bool flyArmed = true, escArmed = true, partArmed = true, orthoArmed = true;
             static bool bsArmed = true;
-            if (edge(glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS, flyArmed)) {
+            if (edge(win.KeyIsDown(gldx::win::Key::F), flyArmed)) {
                 input.cam = (input.cam == Input::Cam::Fly) ? Input::Cam::Orbit
                                                             : Input::Cam::Fly;
                 if (input.cam == Input::Cam::Orbit) input.focus = camera.Position();
                 ApplyCapture(window, input, scripted);
             }
-            if (edge(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS, escArmed)) {
+            if (edge(win.KeyIsDown(gldx::win::Key::Escape), escArmed)) {
                 if (input.cam == Input::Cam::Fly) {
                     input.captured = !input.captured;
-                    glfwSetInputMode(window, GLFW_CURSOR, input.captured
-                                                          ? GLFW_CURSOR_DISABLED
-                                                          : GLFW_CURSOR_NORMAL);
+                    win.SetCursorCaptured(input.captured);
                 } else {
                     info.window->Close();
                 }
             }
-            if (edge(glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS, partArmed))
+            if (edge(win.KeyIsDown(gldx::win::Key::P), partArmed))
                 input.showParticles = !input.showParticles;
-            if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS)
+            if (win.KeyIsDown(gldx::win::Key::X))
                 info.window->Close();
+            // Block hotbar 1..8: the portable Key enum has no contiguous digit
+            // codes, so the eight keys are an explicit table.
+            static const gldx::win::Key kBlockKeys2[8] = {
+                gldx::win::Key::Num1, gldx::win::Key::Num2, gldx::win::Key::Num3,
+                gldx::win::Key::Num4, gldx::win::Key::Num5, gldx::win::Key::Num6,
+                gldx::win::Key::Num7, gldx::win::Key::Num8,
+            };
             for (int k = 0; k < 8; ++k) {
-                if (glfwGetKey(window, GLFW_KEY_1 + k) == GLFW_PRESS)
+                if (win.KeyIsDown(kBlockKeys2[k]))
                     input.selected = k + 1;
             }
-            if (edge(glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS, orthoArmed)) {
+            if (edge(win.KeyIsDown(gldx::win::Key::Tab), orthoArmed)) {
                 // The camera owns the projection state; the demo only mirrors
                 // the result here for the HUD line.
                 input.ortho = camera.ToggleProjection()
                               == gldx::Camera::Projection::Orthographic;
             }
-            if (edge(glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS, bsArmed))
+            if (edge(win.KeyIsDown(gldx::win::Key::B), bsArmed))
                 input.doubleSided = !input.doubleSided;
 
-            const double now = glfwGetTime();
+            const double now = gldx::win::App::Now();
             // --freeze-at S parks the demo clock S seconds after start: dt falls to
             // 0, so the scroll, the debris and the scripted breaks all stop, and
             // two runs with the same settings become pixel-identical for a sweep.
@@ -616,22 +430,21 @@ int main(int argc, char** argv) {
             // sort of job, and scaling by dt keeps the sweep rate the same on a
             // 30 fps laptop as on a 300 fps one.
             constexpr float kSunRate = 0.6f;
-            if (glfwGetKey(window, GLFW_KEY_LEFT_BRACKET) == GLFW_PRESS)
+            if (win.KeyIsDown(gldx::win::Key::LeftBracket))
                 input.sunAzimuth -= kSunRate * dt;
-            if (glfwGetKey(window, GLFW_KEY_RIGHT_BRACKET) == GLFW_PRESS)
+            if (win.KeyIsDown(gldx::win::Key::RightBracket))
                 input.sunAzimuth += kSunRate * dt;
-            if (glfwGetKey(window, GLFW_KEY_MINUS) == GLFW_PRESS)
+            if (win.KeyIsDown(gldx::win::Key::Minus))
                 input.sunElevation = std::max(0.05f, input.sunElevation - kSunRate * dt);
-            if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS)
+            if (win.KeyIsDown(gldx::win::Key::Equal))
                 input.sunElevation = std::min(1.45f, input.sunElevation + kSunRate * dt);
 
-            int fbw = 0, fbh = 0;
-            glfwGetFramebufferSize(window, &fbw, &fbh);
-            camera.SetViewportAspect(fbh > 0 ? static_cast<float>(fbw) / fbh : 1.0f);
+            const gldx::win::Vec2d fb = win.FramebufferSize();
+            camera.SetViewportAspect(fb.y > 0 ? static_cast<float>(fb.x) / static_cast<float>(fb.y) : 1.0f);
             camera.SetOrbitRadius(input.orbitRadius);
 
             // ---- movement ---------------------------------------------------
-            const bool boost = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS;
+            const bool boost = win.KeyIsDown(gldx::win::Key::LeftShift);
             const float step = input.speed * (boost ? 0.35f : 1.0f) * dt;
             if (input.cam == Input::Cam::Fly) {
                 camera.SetYawPitch(input.yaw, input.pitch);
@@ -639,12 +452,12 @@ int main(int argc, char** argv) {
                 // of moving the eye directly, so it can be resolved against the
                 // world: the same Forward/Right/Up axes MoveForward et al use.
                 glm::vec3 delta(0.0f);
-                if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) delta += camera.Forward();
-                if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) delta -= camera.Forward();
-                if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) delta -= camera.Right();
-                if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) delta += camera.Right();
-                if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) delta += camera.Up();
-                if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) delta -= camera.Up();
+                if (win.KeyIsDown(gldx::win::Key::W)) delta += camera.Forward();
+                if (win.KeyIsDown(gldx::win::Key::S)) delta -= camera.Forward();
+                if (win.KeyIsDown(gldx::win::Key::A)) delta -= camera.Right();
+                if (win.KeyIsDown(gldx::win::Key::D)) delta += camera.Right();
+                if (win.KeyIsDown(gldx::win::Key::Space)) delta += camera.Up();
+                if (win.KeyIsDown(gldx::win::Key::LeftControl)) delta -= camera.Up();
                 delta *= step;
 
                 // The eye sits kEyeHeight above the feet; the collider moves the
@@ -703,7 +516,9 @@ int main(int argc, char** argv) {
                 }
             }
             if (input.wantBreak || input.wantPlace) {
-                const gldx::Ray ray = gldx::PickRay(fbw * 0.5f, fbh * 0.5f, fbw, fbh,
+                const gldx::Ray ray = gldx::PickRay(static_cast<float>(fb.x) * 0.5f,
+                                                  static_cast<float>(fb.y) * 0.5f,
+                                                  static_cast<int>(fb.x), static_cast<int>(fb.y),
                                                   camera.InverseViewProjection());
                 std::optional<gldx::VoxelHit> hit;
                 {
@@ -767,7 +582,7 @@ int main(int argc, char** argv) {
                 particles.Update(static_cast<float>(kSimStep));
             }
 
-            streamChunks(camera.Position());
+            streamer.Stream(camera.Position());
             water.step(world, dt);
 
             // ---- lighting + fog ---------------------------------------------
@@ -807,7 +622,7 @@ int main(int argc, char** argv) {
                           profiler.CpuMs(), profiler.GpuMs(),
                           genCount, meshCount,
                           camera.Position().x, camera.Position().y, camera.Position().z,
-                          genPending.size(), meshPending.size(), particles.count(),
+                          streamer.genInFlight(), streamer.meshInFlight(), particles.count(),
                           prevVisible, prevTotal,
                           kBlockKeys[std::min(input.selected, 8)],
                           input.cam == Input::Cam::Fly ? "-> orbit" : "-> fly",
@@ -833,8 +648,8 @@ int main(int argc, char** argv) {
             frame.overlay.profiler = &profiler;
             frame.particles = input.showParticles ? &particles : nullptr;
             frame.useBloom = false;
-            frame.fbWidth = fbw;
-            frame.fbHeight = fbh;
+            frame.fbWidth = static_cast<int>(fb.x);
+            frame.fbHeight = static_cast<int>(fb.y);
             frame.smoothedFps = smoothedFps;
             frame.ortho = input.ortho;
 
@@ -850,7 +665,7 @@ int main(int argc, char** argv) {
         // One summary line per run: the counters a scripted sweep or a CI smoke
         // cannot read back out of a screenshot (streaming convergence in
         // particular - the HUD shows them, but only to whoever is looking).
-        const double ranFor = glfwGetTime() - startedAt;
+        const double ranFor = gldx::win::App::Now() - startedAt;
         std::printf("voxel_terrain: ran %.1fs  %d frames  fps avg %.1f min %.1f   "
                     "chunks gen %d meshed %d   blocks broken %d   particles live %zu spawned %d\n",
                     ranFor, frames,
@@ -858,7 +673,7 @@ int main(int argc, char** argv) {
                     minFps > 1e8 ? 0.0 : minFps,
                     genCount, meshCount, breaks, particles.count(), spawnedTotal);
 
-        pool.shutdown();
+        streamer.Shutdown();
         return rc;   // GPU owners destruct here, on the render thread
     };
 

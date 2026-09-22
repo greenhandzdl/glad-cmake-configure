@@ -4,13 +4,13 @@
 /**
  * @file Input.h
  * @brief Orbit-camera + interaction state for the pbr_showcase demo, and the
- *        GLFW callbacks / per-frame key handling that mutate it.
+ *        gldxwin input-surface callbacks / per-frame key handling that mutate it.
  *
  * Pulled out of main.cpp so the demo reads like a small project: main wires the
  * engine together, this file owns "how the user drives the camera and toggles".
  */
 
-#include "gldx/core/Platform.h"   // <glad/gl.h> + <GLFW/glfw3.h>
+import gldxwin;   // gldx::win::Window / Key / MouseButton / Vec2d - no GLFW here
 
 #include <glm/glm.hpp>
 
@@ -35,7 +35,7 @@ struct Input {
     // Pending right-click pick request (consumed + cleared in the main loop).
     // Stored normalised to the window, not raw cursor pixels: the pick ray is
     // built in framebuffer pixels, which differ by the content scale (2 on
-    // Retina) from glfwGetCursorPos' window coordinates.
+    // Retina) from the window-coordinate cursor position the callbacks report.
     bool  pickPending = false;
     float pickX = 0.0f, pickY = 0.0f;   // [0..1] across the window
 };
@@ -43,10 +43,11 @@ struct Input {
 // Unit vector pointing from the scene toward the sun (elevation > 0 => upward).
 glm::vec3 SunToward(const Input& in);
 
-void MouseCallback(GLFWwindow* win, double x, double y);
-void MouseButtonCallback(GLFWwindow* win, int button, int action, int);
-void ScrollCallback(GLFWwindow* win, double, double dy);
-void HandleKeys(GLFWwindow* win, Input& in);
+void MouseCallback(gldx::win::Window& win, gldx::win::Vec2d pos);
+void MouseButtonCallback(gldx::win::Window& win, gldx::win::MouseButton button,
+                         gldx::win::KeyAction action, int);
+void ScrollCallback(gldx::win::Window& win, double dx, double dy);
+void HandleKeys(gldx::win::Window& win, Input& in);
 
 // A few well-known system fonts, tried in order; HUD text just no-ops if none
 // are found, so a missing font never breaks the render.

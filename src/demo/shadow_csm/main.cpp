@@ -37,20 +37,6 @@ struct View {
     bool shadow = true;
 };
 
-void OnMouse(GLFWwindow* w, double x, double y) {
-    auto* v = static_cast<View*>(glfwGetWindowUserPointer(w));
-    if (!v || !v->dragging) return;
-    v->yaw   -= static_cast<float>(x - v->lastX) * 0.006f;
-    v->pitch  = std::min(std::max(v->pitch + static_cast<float>(y - v->lastY) * 0.006f, -1.45f), 1.45f);
-    v->lastX = x; v->lastY = y;
-}
-void OnButton(GLFWwindow* w, int b, int a, int) {
-    if (b != GLFW_MOUSE_BUTTON_LEFT) return;
-    if (auto* v = static_cast<View*>(glfwGetWindowUserPointer(w))) {
-        v->dragging = (a == GLFW_PRESS);
-        glfwGetCursorPos(w, &v->lastX, &v->lastY);
-    }
-}
 
 struct Item { gldx::Mesh mesh; gldx::PbrMaterial material; };
 
@@ -67,7 +53,6 @@ int main(int argc, char** argv) {
 
     gldx::RenderContext::MarkAsRenderThread();
 
-    GLFWwindow* const native = window.Handle();
     gldx::Renderer renderer;
     renderer.Init();
 
@@ -76,9 +61,21 @@ int main(int argc, char** argv) {
     view.pitch = flags.real("pitch", view.pitch);
     view.radius = flags.real("radius", view.radius, 2.0f, 40.0f);
     view.shadow = flags.on("shadow");
-    glfwSetWindowUserPointer(native, &view);
-    glfwSetCursorPosCallback(native, OnMouse);
-    glfwSetMouseButtonCallback(native, OnButton);
+    // Drag-to-orbit lives on the gldxwin input surface now: no GLFW
+    // callbacks, no user-pointer, no GLFW constants in demo code.
+    window.OnCursor([&view](gldx::win::Window&, gldx::win::Vec2d pos) {
+        if (!view.dragging) return;
+        view.yaw   -= static_cast<float>(pos.x - view.lastX) * 0.006f;
+        view.pitch  = std::min(std::max(view.pitch + static_cast<float>(pos.y - view.lastY) * 0.006f, -1.45f), 1.45f);
+        view.lastX = pos.x; view.lastY = pos.y;
+    });
+    window.OnMouseButton([&view](gldx::win::Window& w, gldx::win::MouseButton button,
+                              gldx::win::KeyAction action, int) {
+        if (button != gldx::win::MouseButton::Left) return;
+        view.dragging = (action == gldx::win::KeyAction::Press);
+        const gldx::win::Vec2d c = w.CursorPos();
+        view.lastX = c.x; view.lastY = c.y;
+    });
 
     renderer.AddPass(std::make_unique<gldx::ShadowPass>());
     renderer.AddPass(std::make_unique<gldx::GeometryPass>());
@@ -127,7 +124,7 @@ int main(int argc, char** argv) {
         f.fbHeight    = info.fbHeight;
         f.smoothedFps = info.smoothedFps;
 
-        if (bool p = glfwGetKey(info.window->Handle(), GLFW_KEY_1) == GLFW_PRESS; p && armed) { view.shadow = !view.shadow; armed = false; }
+        if (bool p = info.window->KeyIsDown(gldx::win::Key::Num1); p && armed) { view.shadow = !view.shadow; armed = false; }
         else if (!p) armed = true;
 
         const glm::vec3 target(0.0f, 0.4f, 0.0f);

@@ -24,8 +24,18 @@
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 
-// Standard-library headers the public API is expressed with.
+// The single engine hook gldxwin may call (PNG encoding for
+// Window::CaptureScreenshot). Included here, in the global module fragment, so
+// it attaches to the global module on both sides of the link - see the header's
+// comment. This stays a declaration-only include; gldxwin still links just
+// glfw + GLAD and imports no gldx module.
+#include "gldx/util/ScreenshotHook.h"
+
+// Standard-library headers the public API is expressed with (cstdint/cstring
+// back the raw readback buffer inside Window::CaptureScreenshot).
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <string>
 #include <vector>
