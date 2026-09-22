@@ -5,6 +5,16 @@
 
 ## Unreleased
 
+### 新增 `gldx::TransformFeedback` + demo `menger_sponge`：几何在着色阶段生成，细分层级是 uniform 而非重建
+
+- **`src/gldx/core/TransformFeedback.{h,cpp}`（新）**：TF 捕获会话的 RAII 包装（`Bind()` / `Begin(GL_POINTS)` / `End()`，move-only，一个 GL id 一个 owner；错线程即 `AssertRenderThread` abort，析构补上未闭合的 `End` 而不是让 GL 状态逃逸到下一个持有者）。计数在创建会话时一并申请 query，使用者不必自己管 query 对象生命周期；读出分两个入口——非阻塞的 `PrimitivesAvailable()` 与取值的 `PrimitivesGenerated()`，热路径只许用前者。
+- **`VertexArray::DrawTransformFeedback(mode, tf)`**：顶点数直接取 `tf` 那次会话记录的 `PRIMITIVES_GENERATED`，渲染路径上不发生任何 readback，CPU 从不持有“这一帧有多少几何”这个数；仍守住全仓 `glDraw*` 只出现在 `VertexArray.cpp` 的约定。
+- **`ShaderProgram::CreateFromSources` 二参重载 + `TransformFeedbackDesc`**：`layout(xfb_buffer)` 是 GLSL 4.30，OpenGL 4.1 core 基线（macOS 上限）内不可用，故捕获目标的变体名表只能在链接前由 C++ 声明（`varyings` + `bufferMode`，默认 `GL_INTERLEAVED_ATTRIBS`）。单参版行为逐字不变，属纯 opt-in 扩展，不触碰既有调用点。
+- **新增 demo `menger_sponge`**（`src/demo/menger_sponge/`：`main.cpp` + `MengerShaders.h`）：门格海绵 level-L 恰有 20^L 个等大轴对齐子立方体（3×3×3 中坐标分量=1 的个数≥2 的 7 格被挖），于是“第几个块”就是一个 20 进制数——`gl_VertexID` 逐位解码出中心，几何阶段把中心展成 24 顶点立方体，`uniform int uLevel` **就是**解码循环的上界：调层级不重建任何东西，CPU 每帧只上传一个循环次数，全仓零顶点缓冲、零属性、零 `Mesh`。默认臂把 LOD 决策交给 GPU：CPU 只上传一个种子立方体，一串 TF pass 读同一个队列、当场画掉投影小于 `--minpx` 的块、只把还要细分的 20 个子块写回下一个 buffer（buffer 里因此只有活工作）；LOD 判据（含队列预算）单点住在顶点阶段的 `vKeep`，画臂与捕获臂读同一个 verdict 并共用穷举臂的几何阶段，所以一个块要么被画要么被分，不会两边都不管而留下洞。几何阶段再做三层剔除：视锥保守包围、亚像素、凸体背面。可执行总数 24→25。
+- **文档同步**：`doc/user/8-advanced.md` §5 着色阶段的“现场演示”补第 ④ 条（指向 demo，并说明捕获目标为何必须 C++ 侧声明）；README（首段/产物计数/目录树/Demo 索引表）与 `AGENTS.md`（TL;DR 与文件地图登记新 demo、常见任务新增“把几何队列放在 GPU 上”一条）同步。
+- **验证**：全量重编零告警（自有 `src/**`）；25 个可执行 `--quit-after 3` 回归 pass=25/fail=0（`shader_stages` 的 SW vertex processing 为仓内已记录的良性驱动提示）；`menger_sponge --quit-after 4` rc=0、stderr 干净，退出行报 `level 3, 8000 cubes in the closing draw, queue peaked at 400 of 26214`；`GLDX_SNAPSHOT`/`GLDX_SNAPSHOT_AT=2.0` 回读一帧为 1600×1200 framebuffer、非 clear 像素覆盖 40.47%，且该比例在 level 1..5 恒定（外皮未被队列预算啃穿）；`--off cull` 与开启态逐像素 0 差异（剔除只省工作、不改画面）；level 3 两臂在 `--minpx 0` 下差 15/1.92M 像素且全是孤立单像素在三色间翻转（两条中心计算路径的末位浮点差，非缺子树）；立方体数随 level 单调 1/20/400/8000/160000/291240；level 5 默认臂 min 24.2ms 画 436678 个立方体，穷举臂同档 min 195ms 画 302892 个（多 44% 几何、快 8.1×）；13 个畸形 argv 用例（`inf`/`nan`/`1e300`/越界/错功能名）全 rc=0、无 UB、无 NaN 进入 uniform。
+- **已知边界（未改，取舍留给使用方）**：`--minpx 6` 下 level 6/7/8 与 level 5 逐像素相同——队列在第 5 个 pass 抽干，`uLevel` 高于此只是名义值，HUD 以 `FULL` 明示截断。解除需把队列 buffer 从 8 MiB/个提到 64 MiB/个，等于把“诚实的降级”换成“沉默的显存账单”。
+
 ### 基线演示分层：`src/main.cpp` 改走高层 `Mesh`，手搭底层版下放为 demo `hello_triangle`
 
 - **`src/main.cpp`（目标 `GLFW_Template`）改用 `gldx::Mesh` 画 hello-triangle**：默认最小演示应展示绝大多数使用者该走的高层路径——只填 CPU 侧 `MeshData`（3 个 `Vertex`，position+color），`Upload` 一次、逐帧 `Draw`，不再命名 `VertexArray`/`GLBuffer`/`AttachAttribute`。着色器按 `Vertex.h` 固定布局读 location 0（aPos vec3）与 4（aColor vec4），画面与之前逐像素一致。顺带按仓内约定把 std/GLM 文本 include 移到 `import gldx;` 之前（原文件在 import 之后续 `<cstdio>/<memory>/<span>`，是 MSVC 重定义反模式的幸存者而非例外）。

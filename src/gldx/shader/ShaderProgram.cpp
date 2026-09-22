@@ -87,7 +87,8 @@ ShaderProgram& ShaderProgram::operator=(ShaderProgram&& other) noexcept {
 }
 
 std::expected<ShaderProgram, std::string>
-ShaderProgram::AssembleFromSources(std::span<const ShaderSource> stages) {
+ShaderProgram::AssembleFromSources(std::span<const ShaderSource> stages,
+                                   const TransformFeedbackDesc* xfb) {
     RenderContext::AssertRenderThread("ShaderProgram::AssembleFromSources");
 
     // A 4.1 graphics pipeline needs at least a vertex + a fragment stage; the
@@ -117,6 +118,15 @@ ShaderProgram::AssembleFromSources(std::span<const ShaderSource> stages) {
         compiled.push_back(*sh);
         glAttachShader(prog, *sh);
     }
+
+    // Between the attaches and the link, which is the only window in which GL reads
+    // this. A name that is not a captured output of the final stage is a link error
+    // on a conformant implementation, so it surfaces through the link log below
+    // rather than needing its own check here.
+    if (xfb && !xfb->varyings.empty())
+        glTransformFeedbackVaryings(prog, static_cast<GLsizei>(xfb->varyings.size()),
+                                    xfb->varyings.data(), xfb->bufferMode);
+
     glLinkProgram(prog);
 
     GLint ok = GL_FALSE;
@@ -137,6 +147,13 @@ ShaderProgram::AssembleFromSources(std::span<const ShaderSource> stages) {
 std::expected<ShaderProgram, std::string>
 ShaderProgram::CreateFromSources(std::initializer_list<ShaderSource> stages) {
     return AssembleFromSources(std::span<const ShaderSource>(stages.begin(), stages.size()));
+}
+
+std::expected<ShaderProgram, std::string>
+ShaderProgram::CreateFromSources(std::initializer_list<ShaderSource> stages,
+                                 const TransformFeedbackDesc& xfb) {
+    return AssembleFromSources(std::span<const ShaderSource>(stages.begin(), stages.size()),
+                               &xfb);
 }
 
 std::expected<ShaderProgram, std::string>

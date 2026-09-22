@@ -141,6 +141,7 @@ st.vao.DrawArrays(GL_PATCHES, 0, 4);         // 4 个控制点
 - ② 选择性几何阶段：[`../../src/demo/geometry_shader/main.cpp`](../../src/demo/geometry_shader/main.cpp)（V+Geom+F 内嵌）。
 - ②' 多阶段**从文件**加载（V+Geom+F 全走 `CreateFromFiles({...})`）：[`../../src/demo/geometry_shader_file/main.cpp`](../../src/demo/geometry_shader_file/main.cpp)。
 - ③ 全 5 阶段：[`../../src/demo/shader_stages/main.cpp`](../../src/demo/shader_stages/main.cpp)（GLSL 在 `Stages.h`）。
+- ④ 阶段不只变换、还能**生成**几何：[`../../src/demo/menger_sponge/main.cpp`](../../src/demo/menger_sponge/main.cpp)（GLSL 在 `MengerShaders.h`）。门格海绵 level-L 恰有 20^L 个等大子立方体 ⇒ 索引就是一个 20 进制数，`gl_VertexID` 解码出中心、几何阶段展成立方体，`uniform int uLevel` **就是**解码循环的上界——调层级不重建任何东西，CPU 每帧只上传一个循环次数，全仓零顶点缓冲。同一 demo 的另一条臂用 transform feedback 把工作队列放在 GPU 上自行细分（`gldx::TransformFeedback` + `VertexArray::DrawTransformFeedback`）：捕获目标只能用 `CreateFromSources({...}, TransformFeedbackDesc{...})` 在链接前声明，因为 `layout(xfb_buffer)` 是 GLSL 4.30、超出 4.1 core 基线。
 
 ---
 

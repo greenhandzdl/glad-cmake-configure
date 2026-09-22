@@ -1,11 +1,11 @@
 # GLFW + GLAD CMake 图形引擎
 
-跨平台（Windows / macOS / Linux）的 **现代 OpenGL 图形引擎 / PBR 渲染器**，源自一个用 **GLFW** 建窗、**GLAD** 加载函数的 CMake 起步模板，现已成长为一套分层的 `gldx` 引擎子系统。演示按功能拆分：`src/main.cpp` 只留**最简 hello-triangle**（自定义 `RenderPass` + 内联 GLSL + 高层 `gldx::Mesh` 直渲窗口，不碰任何引擎子系统）作为“最小实现”基线，其余一个功能一个入门 demo，集中在 `src/demo/{feature}/main.cpp`（含成品演示 `pbr_showcase`、可玩体素世界 `voxel_terrain`、手写底层 VAO/VBO 的对照 demo `hello_triangle`）。依赖通过 CMake 自动探测，内置 `build/run/clean` 脚本与 GitHub Actions 手动发布流水线。
+跨平台（Windows / macOS / Linux）的 **现代 OpenGL 图形引擎 / PBR 渲染器**，源自一个用 **GLFW** 建窗、**GLAD** 加载函数的 CMake 起步模板，现已成长为一套分层的 `gldx` 引擎子系统。演示按功能拆分：`src/main.cpp` 只留**最简 hello-triangle**（自定义 `RenderPass` + 内联 GLSL + 高层 `gldx::Mesh` 直渲窗口，不碰任何引擎子系统）作为“最小实现”基线，其余一个功能一个入门 demo，集中在 `src/demo/{feature}/main.cpp`（含成品演示 `pbr_showcase`、可玩体素世界 `voxel_terrain`、手写底层 VAO/VBO 的对照 demo `hello_triangle`、着色阶段生成分形的 `menger_sponge`）。依赖通过 CMake 自动探测，内置 `build/run/clean` 脚本与 GitHub Actions 手动发布流水线。
 
 - 语言标准：C++23；引擎以 **C++20 named module `gldx`** 交付（静态库），另有两个应用侧 named module 库：`gldxwin`（引擎无关的 GLFW 窗口/帧循环：`App` 单例 + 多窗口 `Window`）与 `gldxcli`（命令行开关 `Flags`）。消费者统一 `import gldx; import gldxwin; import gldxcli;`
 - OpenGL：**4.1 Core Profile**（GLSL `#version 410 core`；macOS 对应 "4.1 Metal"）
 - 构建系统：CMake ≥ 3.28（配合 Ninja），需支持 named modules 的编译器（Clang ≥ 19 / GCC ≥ 14 / 最新 MSVC）
-- 产物：`output/GLFW_Template`（来自 `src/main.cpp` 的 hello-triangle 最小演示，走高层 `Mesh`）+ `src/demo/` 下每个 feature demo（`output/pbr_showcase`、`output/voxel_terrain` 等，共 23 个）；Windows 加 `.exe`
+- 产物：`output/GLFW_Template`（来自 `src/main.cpp` 的 hello-triangle 最小演示，走高层 `Mesh`）+ `src/demo/` 下每个 feature demo（`output/pbr_showcase`、`output/voxel_terrain` 等，共 24 个）；Windows 加 `.exe`
 
 **已实现的图形能力**：PBR 金属/粗糙工作流、级联阴影（CSM + PCF）、基于图像的照明（IBL：辐照度/预滤波/BRDF LUT）、HDR + MSAA + Bloom + ACES 色调映射、精灵批次 + 位图字体 HUD、实例化绘制、视锥剔除、调试线框、CPU 拾取、帧性能分析、两阶段异步资源管线，以及场景层级（`Scene`/`SceneNode`/`Transform`）+ 渲染管线（`Renderer`/`RenderPass`）。
 
@@ -58,6 +58,7 @@
 │   │   ├── geometry_shader/  #   选择性装配几何阶段：CreateFromSources({Vertex,Geometry,Fragment})，喂 GL_POINTS 扩成方块阵
 │   │   ├── geometry_shader_file/ #  多阶段从文件加载：CreateFromFiles({{Vertex},{Geometry},{Fragment}}) 从磁盘装配含几何阶段的程序（无路径时退回内嵌源）
 │   │   ├── shader_stages/    #   全 5 阶段集成：CreateFromSources 装配 Vertex+TessControl+TessEval+Geometry+Fragment，画 GL_PATCHES 细分线框（main + Stages.h）
+│   │   ├── menger_sponge/  #   着色阶段生成几何：`gl_VertexID` 做 20 进制解码（`uLevel` 就是细分层级，调档不重建）+ transform feedback 自细分队列（GPU 决定还有多少块要分）（main + MengerShaders.h）
 │   │   ├── multi_viewport/   #   多窗口同步视图：每窗独立 context 串行重渲同一场景（main 接线 + SharedState.{h,cpp} + View.{h,cpp}，atomic 共享态 + 后台 worker，线程/上下文安全验收场）
 │   │   ├── render_passes/    #   多窗口 + for 循环装配不同 RenderPass 子类：ClearPass + Triangle/Quad/Line/Point（main + SharedState.{h,cpp} + Passes.{h,cpp} + View.{h,cpp}，一表多态、各窗独立 context 同步时钟）
 │   │   └── multi_window_levels/  # 多窗口的同步↔异步、per-window 剔除、LOD/视距分档、完全无关的独立 context：五个"等级"窗（main + Profiles.{h,cpp} + SharedState.{h,cpp} + View.{h,cpp}，同步窗共享原子时钟、异步窗各自 dt 累积、Frustum 逐窗剔成不同 visible/total、island 窗不共享任何 GPU 对象）
@@ -232,6 +233,7 @@ AddressSanitizer + UndefinedBehaviorSanitizer 的对抗输入自检（NaN / inf 
 | `geometry_shader` | `CreateFromSources({Vertex,Geometry,Fragment})` 选择性装配几何阶段（点→方块阵） | `./scripts/run.sh geometry_shader` |
 | `geometry_shader_file` | `CreateFromFiles({{Vertex},{Geometry},{Fragment}})` 多阶段从磁盘加载（含从文件装配的几何阶段；坏路径 exit 1，无路径退回内嵌源） | `./scripts/run.sh geometry_shader_file` |
 | `shader_stages` | `CreateFromSources` 一次装配全 5 个图形阶段（V+TC+TE+G+F），画 GL_PATCHES 细分线框 | `./scripts/run.sh shader_stages` |
+| `menger_sponge` | 顶点/几何阶段**生成**几何：`uniform int uLevel` 即细分层级（无 mesh 重建）；另一臂用 `gldx::TransformFeedback` 让 GPU 自行细分，绘制数直接取 `PRIMITIVES_GENERATED` | `./scripts/run.sh menger_sponge` |
 
 > 最小实现基线不在表内：`./scripts/run.sh`（默认目标 `GLFW_Template`）即 `src/main.cpp` 的 hello-triangle（高层 `Mesh` 路径）；其手搭底层对照版在表内的 `hello_triangle` 行。
 

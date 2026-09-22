@@ -10,9 +10,9 @@
 
 ## TL;DR 关键事实
 
-- 项目：跨平台 **OpenGL 4.1 Core / PBR 图形引擎**（`gldx`）+ 按功能拆分的演示。仓库名 `glad-cmake-configure`：`src/main.cpp` 只留**最简 hello-triangle**（目标 `GLFW_Template`，最小实现基线，走高层 `Mesh`），其余一个功能一个 demo 在 `src/demo/{feature}/main.cpp`（成品演示 `pbr_showcase` PBR 场景、`voxel_terrain` 体素世界、`hello_triangle` 手搭底层对照，另 ~20 个单功能 demo）。
+- 项目：跨平台 **OpenGL 4.1 Core / PBR 图形引擎**（`gldx`）+ 按功能拆分的演示。仓库名 `glad-cmake-configure`：`src/main.cpp` 只留**最简 hello-triangle**（目标 `GLFW_Template`，最小实现基线，走高层 `Mesh`），其余一个功能一个 demo 在 `src/demo/{feature}/main.cpp`（成品演示 `pbr_showcase` PBR 场景、`voxel_terrain` 体素世界、`hello_triangle` 手搭底层对照、`menger_sponge` 着色阶段生成分形（细分层级是 uniform，另一臂由 GPU 自行细分），另 ~20 个单功能 demo）。
 - 语言：**C++23**；引擎以 **C++20 named module `gldx`** 交付（静态库）。
-- 构建：**CMake ≥ 3.28 + Ninja**。产物落 `output/`：`GLFW_Template`（hello-triangle，Mesh 高层路径）+ 每个 `src/demo/{feature}` 一个可执行（`pbr_showcase`、`voxel_terrain`…共 23 个）（Win 加 `.exe`）。
+- 构建：**CMake ≥ 3.28 + Ninja**。产物落 `output/`：`GLFW_Template`（hello-triangle，Mesh 高层路径）+ 每个 `src/demo/{feature}` 一个可执行（`pbr_showcase`、`voxel_terrain`…共 24 个）（Win 加 `.exe`）。
 - 平台：Windows / macOS / Linux。
 - 依赖：GLFW（系统包）、GLAD（系统优先/子模块回退）、GLM（header-only）、STB（git 子模块内置）、Assimp（git 子模块，可选：`GLDX_ENABLE_ASSIMP` 默认 `ON`）。
 - 子模块：`third_party/glad`、`third_party/stb`、`third_party/assimp`。
@@ -139,7 +139,7 @@ cmake/Assimp.cmake           受 GLDX_ENABLE_ASSIMP 控制的 assimp 子项目�
 src/gldx/CMakeLists.txt        add_library(gldx STATIC) + FILE_SET CXX_MODULES(gldx.cppm)；PUBLIC glfw/GLAD/src/GLM，PRIVATE stb·assimp，OFF 时定义 GLDX_NO_ASSIMP
 src/gldx/gldx.cppm             模块 primary interface：export { #include } 聚合全部公共头
 src/gldx/gmf.hpp              共享 global module fragment（GLAD/GLM/std 预包含；GLuint/glm::vec3 挂 global module）
-src/gldx/core/                Platform.h(GLFW_PLATFORM_* 宏) · RenderContext(线程亲和) · GLBuffer · VertexArray · UniformBuffer · Sampler · Framebuffer
+src/gldx/core/                Platform.h(GLFW_PLATFORM_* 宏) · RenderContext(线程亲和) · GLBuffer · VertexArray(含 `DrawTransformFeedback`) · TransformFeedback(TF 捕获会话 + 非阻塞计数回读) · UniformBuffer · Sampler · Framebuffer
 src/gldx/geometry/            Mesh · InstancedMesh · GeometryFactory(Cube/Sphere/Plane)
 src/gldx/texture/             Texture2D · Texture2DArray · TextureCubeMap · RenderTexture
 src/gldx/voxel/               BlockRegistry · Chunk · ChunkMesher（纯 CPU 网格化）· VoxelMeshGpu
@@ -157,6 +157,7 @@ src/gldxcli/gldxcli.cppm      CLI 开关库 primary interface（namespace gldx::
 src/demo/pbr_showcase/       成品 PBR 场景演示（原 src/main.cpp）：HDR/PBR/CSM/IBL/Bloom/天空盒/实例化/HUD，import 三库 + 手写生命周期迁到 App/Window 钩子；拆为 `main.cpp`（装配）+ `Input.{h,cpp}`（回调）+ `Scene.{h,cpp}`（`ShowcaseScene`/`BuildInstancedField`）
 src/demo/hello_triangle/     基线对照 demo（原 src/main.cpp 的手搭版）：VertexArray+GLBuffer+AttachAttribute 画同一个三角形，展示 Mesh::Upload 背后发生了什么；窗口标题标「manual VAO/VBO」
 src/demo/voxel_terrain/      体素演示入口（原 src/voxel_main.cpp）：chunk 流式生成/网格化 + 方块编辑（保留本地时钟保帧序，仅换窗口生命周期，输入全走 gldxwin 代理不再直调 glfw）；拆为 `main.cpp`（装配+帧循环）+ `World.{h,cpp}`（常量/`World`/`WaterSim`/`GenerateChunk`）+ `Streaming.{h,cpp}`（`ChunkStreamer`：线程池+生成/网格化双队列）+ `Input.{h,cpp}` + `Hud.{h,cpp}`（`VoxelHudPass`）
+src/demo/menger_sponge/      着色阶段生成几何：`main.cpp`（两条臂装配 + `RunQueue` pass 链）+ `MengerShaders.h`（内嵌 GLSL）。穷举臂 = `gl_VertexID` 的 20 进制解码（`uniform int uLevel` 即循环上界，零顶点缓冲/零属性/零 Mesh）；默认臂 = transform feedback 自细分队列（CPU 只上传 1 个种子立方体，每 pass 当场画掉已完成的、只 capture 还要细分的子块，绘制数取 `PRIMITIVES_GENERATED`）。CLI `--level/--size/--distance/--minpx` + `--off subdivide,cull,hud,spin`，`Up`/`Down`/`+`/`-` 运行时改档
 src/demo/{feature}/          单功能入门 demo：import gldx/gldxwin/gldxcli，用 gldx::win::App+Window 钩子（OnCreate 建 Renderer/MarkAsRenderThread，OnFrame 填 RenderFrame+Render）+ gldx::cli::Flags；只装配它演示的那个子系统；新增一个目录免改 CMake
 src/demo/CMakeLists.txt      add_gldx_demo(<name>)：d_<name>→OUTPUT_NAME=<name>→link gldx/gldxwin/gldxcli；GLOB(CONFIGURE_DEPENDS) 遍历含 main.cpp 的子目录
 src/assets/                  运行期内容（不编译）：models/ 投放目录 · shaders/ 只读参考镜像（不加载）
@@ -188,6 +189,7 @@ AGENTS.md                    本文件（agent 速查，留在仓库根便于自
 - **改 GLSL**：改 `src/gldx/shader/*Shaders.h`（单一真源），**不要**改 `src/assets/shaders/`（顶层 `.glsl` 已全部废除为只剩注释的镜像；真正从磁盘加载的 demo 着色器住在各 demo 的 `src/demo/{feat}/assets/shaders/` 下）。要 demo/用户从外部 `.glsl` 热加载用 opt-in 的 `ShaderProgram::CreateFromFiles(vertPath, fragPath)`（仅读入后转发 `CreateFromSource`；不破坏内嵌单一真源，普通构建仍零运行期路径依赖）。
 - **装配额外着色阶段（几何/细分）**：`CreateFromSource`/`CreateFromFiles` 只处理 vertex+fragment 这对经典组合；要挂几何、细分控制/求值等着色阶段，用泛型入口 `ShaderProgram::CreateFromSources({{ShaderStage::Vertex, src}, {ShaderStage::Geometry, src}, {ShaderStage::Fragment, src}})`（按需列阶段，顺序无关、每阶段至多一次），文件版同理 `CreateFromFiles({...ShaderFile...})`（从磁盘装配多阶段，参考 `src/demo/geometry_shader_file/`：V+Geom+F 三个文件走 `CreateFromFiles({{Vertex,…},{Geometry,…},{Fragment,…}})`）。`ShaderStage` 底层就是 GL 枚举。**4.1 图形管线至少含 vertex+fragment**，否则返回 `std::unexpected`。**没有 `Compute`**——那是 OpenGL 4.3+、超出 4.1 core 基线（macOS 上限），GLAD 4.1 loader 不定义 `GL_COMPUTE_SHADER`；要抬基线另说。参考 `src/demo/geometry_shader/`（喂 `GL_POINTS`、几何阶段扩成方块的端到端示例）；要“一次集成全 5 个图形阶段”参考 `src/demo/shader_stages/`（`CreateFromSources({Vertex,TessControl,TessEvaluation,Geometry,Fragment})` 装配完整管线、画 `GL_PATCHES` 细分线框；细分是 4.0+、几何是 3.2+，均在 4.1 core 内；macOS 下细分+几何共用会触发“SW vertex processing”驱动提示，属良性非错误）。
 - **UBO 绑定**：`ShaderProgram::SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding)` 等，链接后设一次。
+- **把几何队列放在 GPU 上（transform feedback）**：4.1 core 没有 compute / SSBO / atomic counter，“还有多少几何要生成”交给 GPU 自己决定只能走 TF。捕获目标必须在**链接前**声明——`ShaderProgram::CreateFromSources({{ShaderStage::Vertex, v}, {ShaderStage::Geometry, g}}, gldx::TransformFeedbackDesc{std::span<const char* const>(kVaryings)})`（`layout(xfb_buffer)` 是 GLSL 4.30、基线内不可用，所以变体名表只能由 C++ 给；`bufferMode` 默认 `GL_INTERLEAVED_ATTRIBS`）。绘制用 `vao.DrawTransformFeedback(GL_POINTS, tf)`——顶点数取的就是 `tf` 那次会话记录的 `PRIMITIVES_GENERATED`，CPU 不经手；第一个 pass 没有上游，用普通 `DrawArrays` 喂种子。读回计数只为 HUD 仪表与退出诊断，故必须先问非阻塞的 `PrimitivesAvailable()`，并且**放在帧首**读上一帧的：同帧 `End()` 后立即查会因 GPU 落后一帧而永远 false。参考 `src/demo/menger_sponge/`（buffer 里只装活工作：每 pass 当场画掉已完成的立方体、只 capture 还要细分的子块，于是队列不会被已画内容占满）。
 - **demo 里处理输入/截图**：只用 `gldx::win::Window` 的输入面——订阅 `OnKey/OnChar/OnMouseButton/OnCursor/OnScroll` 或在 lambda 里捕获状态，轮询用 `KeyIsDown/MouseIsDown/CursorPos`，指针锁定用 `SetCursorCaptured`，截图用 `Window::CaptureScreenshot(path)`；**不要** `glfwSet*Callback`/`glfwSetWindowUserPointer`/`glfwGetKey`/`glfwGetTime`（后者用 `App::Now()`）——user-pointer 归 gldxwin 独占，直调会踩坏回调分发。只有窗口系统专属能力（raw mouse/clipboard/joystick/file drop）才落回 `Handle()` 逃生舱。
 
 ## 报错 → 修复

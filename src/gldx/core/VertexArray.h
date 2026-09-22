@@ -13,6 +13,8 @@
 
 namespace gldx {
 
+class TransformFeedback;   // DrawTransformFeedback() below reaches its id()
+
 class VertexArray {
 public:
     VertexArray() = default;
@@ -42,6 +44,14 @@ public:
     void DrawElements(GLenum mode, GLsizei count, GLenum type, const void* offset) const;
     void DrawElementsInstanced(GLenum mode, GLsizei count, GLenum type,
                                const void* offset, GLsizei instanceCount) const;
+
+    // Draw as many primitives as a finished transform feedback capture session
+    // generated, with no count argument: the number never reaches the CPU. This is
+    // the read end of the pair that TransformFeedback is the write end of, and it is
+    // what makes a GPU-decided workload size a workload size rather than a value the
+    // host has to predict. `tf` must be a closed capture session, not the object
+    // currently bound for one - its count is only final after End().
+    void DrawTransformFeedback(GLenum mode, const TransformFeedback& tf) const;
 
     [[nodiscard]] GLuint id()    const noexcept { return id_; }
     [[nodiscard]] bool   valid() const noexcept { return id_ != 0; }

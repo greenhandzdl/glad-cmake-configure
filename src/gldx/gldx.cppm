@@ -41,6 +41,7 @@ export {
 #include "gldx/core/RenderContext.h"
 #include "gldx/core/GLBuffer.h"
 #include "gldx/core/VertexArray.h"
+#include "gldx/core/TransformFeedback.h"
 #include "gldx/core/UniformBuffer.h"
 #include "gldx/core/Sampler.h"
 

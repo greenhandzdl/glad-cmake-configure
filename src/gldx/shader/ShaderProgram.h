@@ -41,6 +41,19 @@ enum class ShaderStage : GLenum {
 struct ShaderSource { ShaderStage stage; std::string_view source; };
 struct ShaderFile   { ShaderStage stage; std::string_view path;   };
 
+// Which GS/VS outputs a program should record into a transform feedback buffer, and
+// how. It has to be handed over *before* the link: glTransformFeedbackVaryings is
+// ignored afterwards, and GLSL 4.10 has no layout(xfb_buffer / xfb_stride) output
+// qualifiers to declare it in the source instead (those are 4.30; a 4.10 core shader
+// rejects them outright). So this is the only route available on this baseline, and
+// the reason it is a parameter rather than a Set-style call after creation.
+// `varyings` are output names as written in the shader; the pointed-to strings only
+// have to outlive the call, same as ShaderSource::source does.
+struct TransformFeedbackDesc {
+    std::span<const char* const> varyings;
+    GLenum bufferMode = GL_INTERLEAVED_ATTRIBS;
+};
+
 class ShaderProgram {
 public:
     ShaderProgram() = default;
@@ -60,6 +73,13 @@ public:
     // partially-created shader is released. Render-thread only (it links).
     static std::expected<ShaderProgram, std::string>
     CreateFromSources(std::initializer_list<ShaderSource> stages);
+
+    // Same assembly, with transform feedback capture declared first. Pass an empty
+    // `varyings` list to capture nothing, which keeps this overload usable as the
+    // single entry point when the set is only known at runtime.
+    static std::expected<ShaderProgram, std::string>
+    CreateFromSources(std::initializer_list<ShaderSource> stages,
+                      const TransformFeedbackDesc& xfb);
 
     // File-backed twin: reads every listed file first (so a missing / unreadable
     // / oversized path fails before any GL work), then assembles via
@@ -110,8 +130,11 @@ private:
     // Core the public entry points forward to. Takes stage/source pairs whose
     // string_views stay valid for the duration of the call; the initializer_list
     // overloads wrap theirs in a span, the file overload owns them in a vector.
+    // `xfb` is applied between attaching the shaders and linking; null means the
+    // program captures nothing.
     static std::expected<ShaderProgram, std::string>
-    AssembleFromSources(std::span<const ShaderSource> stages);
+    AssembleFromSources(std::span<const ShaderSource> stages,
+                        const TransformFeedbackDesc* xfb = nullptr);
 
     GLuint id_ = 0;
     mutable std::unordered_map<std::string, GLint> locCache_;

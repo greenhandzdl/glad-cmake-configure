@@ -69,4 +69,9 @@ void VertexArray::DrawElementsInstanced(GLenum mode, GLsizei count, GLenum type,
     glDrawElementsInstanced(mode, count, type, offset, instanceCount);
 }
 
+void VertexArray::DrawTransformFeedback(GLenum mode, const TransformFeedback& tf) const {
+    RenderContext::AssertRenderThread("VertexArray::DrawTransformFeedback");
+    glDrawTransformFeedback(mode, tf.id());
+}
+
 } // namespace gldx

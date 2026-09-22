@@ -15,6 +15,7 @@ set(GLDX_SOURCES
     core/RenderContext.cpp
     core/GLBuffer.cpp
     core/VertexArray.cpp
+    core/TransformFeedback.cpp
     core/UniformBuffer.cpp
     core/Sampler.cpp
     shader/ShaderProgram.cpp
