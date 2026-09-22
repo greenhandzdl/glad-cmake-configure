@@ -31,5 +31,6 @@ raw string（`gldx::shaders::k*`）。把 GLSL 放在头文件里换来三件事
 > 供 demo 或用户热加载自己写的 `.glsl`。它不改变上面的约定：引擎自带着色器仍以头文件内嵌
 > 为唯一真源，本镜像目录**顶层**的文件依旧不被任何构建/运行路径读取。
 >
-> **例外**：子目录 [`file_demo/`](file_demo/) 下的 `.vert`/`.frag` **不是**镜像——它们是
-> `shader_file` demo 真正从磁盘加载的着色器（走 `CreateFromFiles`）。
+> **例外**：子目录 [`file_demo/`](file_demo/) 下的文件**不是**镜像——它们是 demo 真正从磁盘加载的着色器：
+> - `triangle.vert` / `triangle.frag`：`shader_file` demo 走两文件版 `CreateFromFiles(vertPath, fragPath)` 加载。
+> - `points.vert` / `squares.geom` / `points.frag`：`geometry_shader_file` demo 走多阶段版 `CreateFromFiles({{Vertex,…},{Geometry,…},{Fragment,…}})` 加载（含一个从文件装配的几何阶段，两文件版表达不了）。

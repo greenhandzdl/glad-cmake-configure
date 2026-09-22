@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+### 新增 `geometry_shader_file` demo（多阶段着色器从文件加载）
+
+- **背景**：四个程序装配入口里，`CreateFromSource`（内嵌 V+F）、`CreateFromFiles(vertPath, fragPath)`（两文件版，由 `shader_file` 覆盖）、`CreateFromSources({...})`（多阶段内嵌，由 `geometry_shader`/`shader_stages` 覆盖）都有 demo，**唯独多阶段文件版 `CreateFromFiles(std::initializer_list<ShaderFile>)` 零覆盖**——它能把几何/细分等可选阶段也从磁盘装配，是两文件版根本表达不了的能力。
+- **新增 demo `geometry_shader_file`**（`src/demo/geometry_shader_file/`）：`geometry_shader` 的文件孪生。用 `CreateFromFiles({{Vertex,points.vert},{Geometry,squares.geom},{Fragment,points.frag}})` 从三个磁盘文件装配一顶 V+Geom+F 程序，喂 `GL_POINTS` 由（从文件加载的）几何阶段扩成方块阵——没有几何阶段就画不出方块，故“exit 0 + 截图是 4×3 方块阵”即多阶段文件装配确实编译/链接/运行的证据。沿用 `shader_file` 的可脚本验证契约：三个路径都给才走文件版（给定但加载失败 = **exit 1**），一个都不给退回与文件等价的**内嵌** 3 阶段源（`CreateFromSources`），裸跑/CI 仍安全。配套真·被加载的着色器新增在 `src/assets/shaders/file_demo/points.vert`/`squares.geom`/`points.frag`（镜像目录的例外，README 已标注）。
+- **验证**：全量重建（新增 `d_geometry_shader_file` 目标）零告警零错误；三条端到端均符合契约：传三文件路径 exit 0 + 120 KB 方块阵截图、裸跑（内嵌 fallback）exit 0、传不存在路径 exit 1（报 `cannot open nope.vert`）。
+
 ### 新增 `render_passes` / `shader_stages` demo（多 RenderPass 子类 + 全着色阶段集成）
 
 - **新增 demo `render_passes`**（`src/demo/render_passes/`，`--windows N` 默认 3）：把两条主线一次跑通——**多窗口/多 context 同步**与**一个 for 循环装配多个不同 `RenderPass` 子类**。每窗在自己的 `OnCreate` 里建一个 context-private `gldx::Renderer`：先 `AddPass` 一个 `ClearPass`（让 pass 执行顺序可见），再 **遍历 `ShapeTable()` 工厂表**逐行 `AddPass` 一个不同的 `ShapePass` 子类——`TrianglePass`（`GL_TRIANGLES`）/ `QuadPass`（`GL_TRIANGLE_STRIP`）/ `LinePass`（`GL_LINES`）/ `PointPass`（`GL_POINTS`）/ 第二个 `TrianglePass`，共 5 个图元并排旋转。跨窗只共享一个 `SharedState`（`std::atomic` 时钟 + 后台 worker，纯 std 头，worker 永远碰不到 GL），故各窗形状同相位旋转；截图连拍先 `freeze` 时钟再逐窗 `CaptureScreenshot`，三张 PNG 逐字节同源（实测 3 窗各 74900 B 完全一致），即“不同 GL context、CPU 真值同步”的直接证据。`PointPass` 走 `glEnable/glDisable(GL_PROGRAM_POINT_SIZE)` 的临时开关姿态（macOS 默认忽略 `gl_PointSize`）。拆为 `SharedState.{h,cpp}` + `Passes.{h,cpp}`（RenderPass 家族 + 工厂表）+ `View.{h,cpp}`（逐窗 Renderer 接线）+ `main.cpp`（多窗接线）四组文件，无巨型 main。
