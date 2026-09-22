@@ -14,8 +14,10 @@ add_subdirectory(gldxcli)
 # dependencies are carried transitively by the GLFW and GLAD targets, which the
 # gldx library links PUBLIC. Each executable is a sole consumer of the imports.
 #
-#   GLFW_Template  the minimum-pipeline hello-triangle (main.cpp): imports the
-#                  three libraries and asks for no optional subsystem.
+#   GLFW_Template  the minimum-pipeline hello-triangle (main.cpp), drawn through
+#                  the high-level gldx::Mesh: imports the three libraries and
+#                  asks for no optional subsystem. The hand-assembled
+#                  VertexArray/GLBuffer variant lives in demo/hello_triangle.
 #   demo/*         the feature demos, one executable each, collected by the
 #                  nested add_subdirectory (see demo/CMakeLists.txt).
 #

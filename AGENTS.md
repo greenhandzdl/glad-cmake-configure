@@ -10,9 +10,9 @@
 
 ## TL;DR 关键事实
 
-- 项目：跨平台 **OpenGL 4.1 Core / PBR 图形引擎**（`gldx`）+ 按功能拆分的演示。仓库名 `glad-cmake-configure`：`src/main.cpp` 只留**最裸 hello-triangle**（目标 `GLFW_Template`，最小实现基线），其余一个功能一个 demo 在 `src/demo/{feature}/main.cpp`（成品演示 `pbr_showcase` PBR 场景、`voxel_terrain` 体素世界，另 ~13 个单功能 demo）。
+- 项目：跨平台 **OpenGL 4.1 Core / PBR 图形引擎**（`gldx`）+ 按功能拆分的演示。仓库名 `glad-cmake-configure`：`src/main.cpp` 只留**最简 hello-triangle**（目标 `GLFW_Template`，最小实现基线，走高层 `Mesh`），其余一个功能一个 demo 在 `src/demo/{feature}/main.cpp`（成品演示 `pbr_showcase` PBR 场景、`voxel_terrain` 体素世界、`hello_triangle` 手搭底层对照，另 ~20 个单功能 demo）。
 - 语言：**C++23**；引擎以 **C++20 named module `gldx`** 交付（静态库）。
-- 构建：**CMake ≥ 3.28 + Ninja**。产物落 `output/`：`GLFW_Template`（hello-triangle）+ 每个 `src/demo/{feature}` 一个可执行（`pbr_showcase`、`voxel_terrain`…共 16 个）（Win 加 `.exe`）。
+- 构建：**CMake ≥ 3.28 + Ninja**。产物落 `output/`：`GLFW_Template`（hello-triangle，Mesh 高层路径）+ 每个 `src/demo/{feature}` 一个可执行（`pbr_showcase`、`voxel_terrain`…共 23 个）（Win 加 `.exe`）。
 - 平台：Windows / macOS / Linux。
 - 依赖：GLFW（系统包）、GLAD（系统优先/子模块回退）、GLM（header-only）、STB（git 子模块内置）、Assimp（git 子模块，可选：`GLDX_ENABLE_ASSIMP` 默认 `ON`）。
 - 子模块：`third_party/glad`、`third_party/stb`、`third_party/assimp`。
@@ -42,7 +42,7 @@ cd glad-cmake-configure
 # 通用（跨平台）
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./output/GLFW_Template     # 最裸 hello-triangle
+./output/GLFW_Template     # 最简 hello-triangle（Mesh 高层路径）
 ./output/pbr_showcase      # 任一 demo：./output/<demo>（src/demo/ 下一个目录一个）
 
 # macOS 预设（已钉 Homebrew clang，仅 Darwin 生效）
@@ -133,7 +133,7 @@ cmake -S . -B cmake-build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
 
 ```
 src/CMakeLists.txt           编排：add_subdirectory(gldx/gldxwin/gldxcli) + add_executable(GLFW_Template main.cpp)（link gldx/gldxwin/gldxcli）+ add_subdirectory(demo)
-src/main.cpp                 最裸 hello-triangle：自定义 RenderPass + 内联 GLSL 直渲窗口，import gldx/gldxwin/gldxcli，由 gldx::win::App + 一个 Window（OnFrame 驱动）；目标 GLFW_Template，不碰任何可选子系统
+src/main.cpp                 最简 hello-triangle：自定义 RenderPass + 内联 GLSL + 高层 gldx::Mesh（MeshData→Upload→Draw，不命名 VAO/VBO/属性布局）直渲窗口，import gldx/gldxwin/gldxcli，由 gldx::win::App + 一个 Window（OnFrame 驱动）；目标 GLFW_Template，不碰任何可选子系统。底层手搭对照版在 src/demo/hello_triangle/
 cmake/Dependencies.cmake     GLFW find_package · GLAD（系统优先→子模块生成，含 uv venv 回退）· GLM find_path · stb INTERFACE（产出 GLAD_TARGET/GLM_INCLUDE_DIR）
 cmake/Assimp.cmake           受 GLDX_ENABLE_ASSIMP 控制的 assimp 子项目块（含 macOS fdopen 修复）
 src/gldx/CMakeLists.txt        add_library(gldx STATIC) + FILE_SET CXX_MODULES(gldx.cppm)；PUBLIC glfw/GLAD/src/GLM，PRIVATE stb·assimp，OFF 时定义 GLDX_NO_ASSIMP
@@ -155,6 +155,7 @@ src/gldxwin/gldxwin.cppm      引擎无关窗口库 primary interface（namespac
 src/gldxwin/App.cpp|Window.cpp  App::Run 帧循环实现 + Window 生命周期；gmf.hpp 挂 glad/glfw 到 global module
 src/gldxcli/gldxcli.cppm      CLI 开关库 primary interface（namespace gldx::cli::Flags）：--off/--on/--quit-after/--help + number/integer/real/string（域夹范围）；纯标准库、零链接依赖（原 header-only demo_cli.h 迁入）
 src/demo/pbr_showcase/       成品 PBR 场景演示（原 src/main.cpp）：HDR/PBR/CSM/IBL/Bloom/天空盒/实例化/HUD，import 三库 + 手写生命周期迁到 App/Window 钩子；拆为 `main.cpp`（装配）+ `Input.{h,cpp}`（回调）+ `Scene.{h,cpp}`（`ShowcaseScene`/`BuildInstancedField`）
+src/demo/hello_triangle/     基线对照 demo（原 src/main.cpp 的手搭版）：VertexArray+GLBuffer+AttachAttribute 画同一个三角形，展示 Mesh::Upload 背后发生了什么；窗口标题标「manual VAO/VBO」
 src/demo/voxel_terrain/      体素演示入口（原 src/voxel_main.cpp）：chunk 流式生成/网格化 + 方块编辑（保留本地时钟保帧序，仅换窗口生命周期，输入全走 gldxwin 代理不再直调 glfw）；拆为 `main.cpp`（装配+帧循环）+ `World.{h,cpp}`（常量/`World`/`WaterSim`/`GenerateChunk`）+ `Streaming.{h,cpp}`（`ChunkStreamer`：线程池+生成/网格化双队列）+ `Input.{h,cpp}` + `Hud.{h,cpp}`（`VoxelHudPass`）
 src/demo/{feature}/          单功能入门 demo：import gldx/gldxwin/gldxcli，用 gldx::win::App+Window 钩子（OnCreate 建 Renderer/MarkAsRenderThread，OnFrame 填 RenderFrame+Render）+ gldx::cli::Flags；只装配它演示的那个子系统；新增一个目录免改 CMake
 src/demo/CMakeLists.txt      add_gldx_demo(<name>)：d_<name>→OUTPUT_NAME=<name>→link gldx/gldxwin/gldxcli；GLOB(CONFIGURE_DEPENDS) 遍历含 main.cpp 的子目录

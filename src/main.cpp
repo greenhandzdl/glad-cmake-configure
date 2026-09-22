@@ -1,6 +1,7 @@
 /**
  * @file main.cpp
- * @brief The smallest thing that can put pixels on screen: a bare hello-triangle.
+ * @brief The smallest thing that can put pixels on screen: a hello-triangle
+ *        drawn through the engine's high-level geometry resource, gldx::Mesh.
  *
  * This is the engine's "minimum implementation" demo, kept in src/ root on
  * purpose so the primary `GLFW_Template` target (and the CI artifact name that
@@ -8,11 +9,17 @@
  * feature demos, it brings *none* of the render subsystems - no GeometryPass,
  * no LightBuffer, no PBR program, no scene graph, no shadow / IBL / bloom /
  * skybox. It defines one custom gldx::RenderPass holding an inline GLSL program
- * and a gldx::VertexArray + gldx::GLBuffer, and hands the renderer an
- * otherwise-empty RenderFrame.
+ * and a gldx::Mesh, and hands the renderer an otherwise-empty RenderFrame.
  * If this builds and draws, then "import gldx + one pass + one window" really
  * is the floor of the whole engine - and it is reached purely by importing the
  * three libraries (gldx / gldxwin / gldxcli), no demo scaffolding header.
+ *
+ * Mesh is the default way to get geometry on screen: fill a CPU-side MeshData,
+ * Upload() once on the render thread, Draw() per frame - the VBO/VAO/EBO and
+ * the fixed 5-attribute layout (see gldx/geometry/Vertex.h) stay behind that
+ * door. Readers who want to see and edit that bottom layer directly - bare
+ * gldx::VertexArray + gldx::GLBuffer + AttachAttribute - have the exact same
+ * triangle assembled that way in src/demo/hello_triangle/.
  *
  * The window / context / frame-loop lifecycle is gldxwin's App + Window; the
  * only per-frame callback just fills fbWidth/fbHeight and renders, because the
@@ -21,32 +28,37 @@
  * Controls: Esc quits. --quit-after SECONDS ends a scripted/headless run.
  */
 
-// Plain text include first: it orders <glad/gl.h> before <GLFW/glfw3.h> and
-// carries the GLFW/GLAD declarations this TU references directly (GL_* enums,
-// GLuint, glfwSwapBuffers via gldxwin, ...). The three libraries are then imported.
+// Plain text includes first: Platform.h orders <glad/gl.h> before <GLFW/glfw3.h>
+// and carries the GLFW/GLAD declarations this TU references directly (GL_*
+// enums, GLuint, glfwSwapBuffers via gldxwin, ...). std/GLM text includes must
+// precede `import gldx;`: gldx's global module fragment already attaches those
+// entities to the global module and MSVC rejects a later textual re-include.
+// The three libraries are then imported.
 #include "gldx/core/Platform.h"
+
+#include <cstdio>
+#include <glm/glm.hpp>
+#include <memory>
+#include <utility>
+#include <vector>
 
 import gldx;
 import gldxwin;
 import gldxcli;
 
-#include <cstdio>
-#include <memory>
-#include <span>
-#include <utility>
-
 namespace {
 
-// A self-contained colored triangle: positions in the XY plane (location 0) and
-// an rgb colour (location 1). `#version 410 core` matches the project's OpenGL
-// 4.1 baseline; no engine shader header is involved.
+// A self-contained colored triangle expressed in Mesh's fixed Vertex layout:
+// position at attribute location 0 (vec3), color at location 4 (vec4) - see
+// gldx/geometry/Vertex.h. `#version 410 core` matches the project's OpenGL 4.1
+// baseline; no engine shader header is involved.
 constexpr const char* kVertex = R"GLSL(#version 410 core
-layout(location=0) in vec2 aPos;
-layout(location=1) in vec3 aColor;
+layout(location=0) in vec3 aPos;
+layout(location=4) in vec4 aColor;
 out vec3 vColor;
 void main() {
-    vColor = aColor;
-    gl_Position = vec4(aPos, 0.0, 1.0);
+    vColor = aColor.rgb;
+    gl_Position = vec4(aPos.xy, 0.0, 1.0);
 }
 )GLSL";
 
@@ -56,17 +68,32 @@ out vec4 FragColor;
 void main() { FragColor = vec4(vColor, 1.0); }
 )GLSL";
 
-// 3 vertices, interleaved [x, y, r, g, b]; the classic first triangle.
-const GLfloat kVertices[] = {
+// The classic first triangle, in CPU-side terms only: MeshData is pure value
+// data, freely buildable anywhere; Mesh::Upload is what ships it to the GPU.
+// Keeping the corner table small keeps the demo about the API, not the data.
+struct Corner { float x, y; float r, g, b; };
+const Corner kCorners[] = {
      0.0f,  0.6f,   1.0f, 0.35f, 0.30f,   // top, red
     -0.6f, -0.5f,   0.30f, 1.0f, 0.40f,   // bottom-left, green
      0.6f, -0.5f,   0.30f, 0.55f, 1.0f,   // bottom-right, blue
 };
 
-// One pass that owns a program + a VAO and renders straight at the default
-// framebuffer. Built on the render thread (Run has made the context current
-// before the app callback constructs it), torn down inside it, so both the GL
-// calls here and the ShaderProgram destructor see a live context.
+gldx::MeshData MakeTriangle() {
+    gldx::MeshData data;
+    data.vertices.reserve(3);
+    for (const auto& c : kCorners) {
+        gldx::Vertex v;
+        v.position = glm::vec3(c.x, c.y, 0.0f);
+        v.color    = glm::vec4(c.r, c.g, c.b, 1.0f);
+        data.vertices.push_back(v);
+    }
+    return data;   // indices empty => Mesh::Draw takes the DrawArrays path
+}
+
+// One pass that owns a program + a Mesh and renders straight at the default
+// framebuffer. Built on the render thread (the Window ctor has made the context
+// current before main() constructs it), torn down inside Run, so both the GL
+// calls here and the Mesh/ShaderProgram destructors see a live context.
 class TrianglePass : public gldx::RenderPass {
 public:
     TrianglePass() : RenderPass("Triangle") {
@@ -77,22 +104,15 @@ public:
         }
         program_ = std::make_unique<gldx::ShaderProgram>(std::move(*program));
 
-        // The engine's own RAII wrappers instead of raw glGen/glBind/glBufferData:
-        // GLBuffer::Create uploads from a typed span and self-unbinds, so the
-        // bindings the VAO must capture are recorded explicitly inside its scope.
-        vbo_.Create(GL_ARRAY_BUFFER, std::span<const GLfloat>(kVertices));
-        constexpr GLsizei stride = 5 * sizeof(GLfloat);
-        vao_.Create();
-        vao_.Bind();
-        vbo_.Bind(GL_ARRAY_BUFFER);
-        vao_.AttachAttribute(0, 2, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<const void*>(0));
-        vao_.AttachAttribute(1, 3, GL_FLOAT, GL_FALSE, stride,
-                             reinterpret_cast<const void*>(2 * sizeof(GLfloat)));
-        vao_.Unbind();
+        // The whole geometry story at this level: hand the CPU data to Mesh.
+        // Upload() creates the buffers + VAO and records the fixed attribute
+        // layout internally - this file never names a VAO, a VBO or an
+        // glVertexAttribPointer.
+        mesh_.Upload(MakeTriangle());
     }
 
-    // vao_ / vbo_ are gldx RAII wrappers: their destructors delete the GL names
-    // on the render thread (the pass is torn down inside Run, context still current).
+    // mesh_ is a gldx RAII wrapper: its destructor deletes the GL names on the
+    // render thread (the pass is torn down inside Run, context still current).
 
     void Execute(gldx::RenderFrame& frame) override {
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -101,16 +121,13 @@ public:
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         if (program_) {
             program_->Use();
-            vao_.Bind();
-            vao_.DrawArrays(GL_TRIANGLES, 0, 3);
-            vao_.Unbind();
+            mesh_.Draw();   // binds the VAO, draws the 3 vertices, unbinds
         }
     }
 
 private:
     std::unique_ptr<gldx::ShaderProgram> program_;
-    gldx::VertexArray vao_;
-    gldx::GLBuffer    vbo_;
+    gldx::Mesh mesh_;
 };
 
 } // namespace

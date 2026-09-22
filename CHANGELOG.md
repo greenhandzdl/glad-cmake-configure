@@ -5,6 +5,13 @@
 
 ## Unreleased
 
+### 基线演示分层：`src/main.cpp` 改走高层 `Mesh`，手搭底层版下放为 demo `hello_triangle`
+
+- **`src/main.cpp`（目标 `GLFW_Template`）改用 `gldx::Mesh` 画 hello-triangle**：默认最小演示应展示绝大多数使用者该走的高层路径——只填 CPU 侧 `MeshData`（3 个 `Vertex`，position+color），`Upload` 一次、逐帧 `Draw`，不再命名 `VertexArray`/`GLBuffer`/`AttachAttribute`。着色器按 `Vertex.h` 固定布局读 location 0（aPos vec3）与 4（aColor vec4），画面与之前逐像素一致。顺带按仓内约定把 std/GLM 文本 include 移到 `import gldx;` 之前（原文件在 import 之后续 `<cstdio>/<memory>/<span>`，是 MSVC 重定义反模式的幸存者而非例外）。
+- **新增 demo `hello_triangle`**（`src/demo/hello_triangle/main.cpp`）：原 `src/main.cpp` 的手搭版本（`GLBuffer::Create` + `Bind` 作用域内逐属性 `AttachAttribute` + `DrawArrays`）原样迁入，作为“愿意关注底层的用户自己来看”的对照实现，两份源码 diff 即是 `Mesh::Upload` 代劳的全部内容；窗口标题改为「manual VAO/VBO」与主目标区分。demo 由 `add_gldx_demo` 的 GLOB 自动收编，免改 CMake；可执行总数 23→24。
+- **文档同步**：README（首段/产物/目录树/运行效果/Demo 索引表新增 `hello_triangle` 行）与 `AGENTS.md`（TL;DR/命令注释/文件地图）改写基线描述，并顺手把已过时的 demo 计数（16）修正为实际值。
+- **验证**：全量重编零告警；`GLFW_Template` 与 `hello_triangle` `--quit-after 3` 均 rc=0，同一三角形画面。
+
 ## v1.5.0
 
 ### 库线程安全审计 + 纹理格式映射表去重
