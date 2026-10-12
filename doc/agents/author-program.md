@@ -134,8 +134,9 @@ int main(int argc, char** argv) {
 | 着色器 | `gldx::ShaderProgram::CreateFromSource(vs, fs)` → 有 `operator bool`/`.error()` | 常量在 `gldx::shaders::kPbrVertex/kPbrFragment/kDepthVertex/kDepthFragment/kInstancedVertex/kInstancedFragment` |
 | UBO 绑定 | `prog->SetBlockBinding("LightingBlock", gldx::LightBuffer::kBinding)`；`"ShadowBlock", gldx::CascadedShadowMap::kShadowBinding` | **链接后设一次**；不绑=全黑无报错 |
 | 采样器 | `prog->Set("uShadowMap", (int)gldx::texunit::shadowArray)` 等 | `texunit::{shadowArray,irradiance,prefilter,brdfLut,skybox}` |
-| 几何 | `gldx::GeometryFactory::Cube(size)` / `Sphere(radius,segments,rings)` / `Plane(halfExtent)` → `gldx::MeshData` | |
+| 几何 | `gldx::GeometryFactory::Cube(size)` / `Quad(w,h)` / `Sphere(radius,segments,rings)` / `Plane(halfExtent)` → `gldx::MeshData` | **绕序约定：从顶点法向那侧看为 CCW**（`Renderer::Init()` 设 `glFrontFace(GL_CCW)+glCullFace(GL_BACK)`，而引擎着色器无一用 `gl_FrontFacing` 翻转）。自填索引时拿具体顶点算 `cross(v1-v0,v2-v0)` 与该处法向对符号；反了不报错，只会少一半面或画出内壁 |
 | 上传网格 | `gldx::Mesh m; m.Upload(std::move(data));` | 仅渲染线程；move-only |
+| 交给细分阶段 | `glPatchParameteri(GL_PATCH_VERTICES, 3); m.DrawAs(GL_PATCHES);` | `DrawAs` 只为 `GL_PATCHES` 存在；三角形拓扑的索引流（如 `Sphere`）本身就是合法 patch 流，不需要第二份几何。pass 级裸调 `glPatchParameteri` 属约定内（同 `glViewport`） |
 | 材质 | `gldx::PbrMaterial{ baseColor(vec4), metallic, roughness, albedo(Texture2D*), ... }` | `albedo` 可空 |
 | 变换 | `gldx::Transform t; t.translation/t.scale; t.SetAxisAngle(axis, rad);` | |
 | 场景 | `gldx::Scene s; auto& n=s.CreateRoot(t);` `parent->AddChild(t)` `n.SetRenderable(&mesh,&mat)` `n.SetLocalBounds(c,r)` `n.castsShadow` `s.Update()` | 节点存**非拥有**指针 |
@@ -191,6 +192,7 @@ sips -s format png /tmp/shot.bmp --out /tmp/shot.png                            
 - **退出码不是证据**：`--quit-after` 到点 `return 0` 只能证明没崩，证明不了场景出了内容；必须用 `GLDX_SNAPSHOT`（gldxwin 钩子，无需改 demo）或 demo 内主动调 `gldx::CaptureScreenshot(path)`（帧末、swap 前）拿回真实像素再看。
 - 全黑且无报错 → 十有八九漏了 §4 的 `SetBlockBinding`。
 - 只剩天空/清屏色、实体全空、无报错 → shadow/IBL 采样器未装配时悬空被 Apple 驱动吞掉整个 draw（`GeometryPass` 已自动兜底；自建 pass 需自备占位纹理，见 [⑨ 排错](../user/9-troubleshooting.md)速查表）。
+- 画面发闷发暗、或闭合物像一只**开口的碗**，且无报错 → 两个独立原因（绕序 / 缺 sRGB 编码）**经常叠加**，而绕序量级更大。先按 [⑨ 排错 §7](../user/9-troubleshooting.md) 关掉背面剔除、按 `gl_FrontFacing` 看近/远侧明暗定位绕序，确认无误再动 gamma；直接去提亮度会把坑埋深。
 - 崩在 `AssertRenderThread` → 你在非渲染线程碰了 GL（或 owner 在 `glfwTerminate` 后才析构）。
 - 建不出窗（`window.Ok()` 为 false）→ 多为 `glfwInit` 失败或拿不到 GL 4.1 core 上下文；GL 4.1 core hints + macOS forward-compat 已由 `gldxwin` 的 `App` 统一设好，无需自设（§3）。
 

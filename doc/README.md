@@ -20,13 +20,13 @@
 | 🟢 入门 | [user/1-getting-started.md](user/1-getting-started.md) | 前置要求、克隆（含子模块）、各平台依赖、四种构建运行方式、演示操作 |
 | 🟢 ① | [user/2-core-setup.md](user/2-core-setup.md) | 接入 `main.cpp` 的最小骨架：窗口/渲染线程/Renderer/每帧形状 |
 | 🟢 ①·补 | [user/2a-window-input-cli.md](user/2a-window-input-cli.md) | 窗口生命周期钩子、键盘/鼠标/滚轮输入、光标/截图/多窗口与 `gldxcli` 开关（每特性完整代码 + demo） |
-| 🟢 ② | [user/3-geometry-scene.md](user/3-geometry-scene.md) | 网格、材质、场景层级、实例化 |
+| 🟢 ② | [user/3-geometry-scene.md](user/3-geometry-scene.md) | 网格、材质、场景层级、实例化、绕序约定与两种细分（CPU 重网格 / TCS-TES） |
 | 🟡 ③ | [user/4-assets-loading.md](user/4-assets-loading.md) | 贴图/模型的异步两阶段加载与拒收规则 |
-| 🟡 ④ | [user/5-lighting-ubo.md](user/5-lighting-ubo.md) | 光照数据、UBO 绑定第一课、采样器、IBL |
+| 🟡 ④ | [user/5-lighting-ubo.md](user/5-lighting-ubo.md) | 光照数据、UBO 绑定第一课、采样器、IBL、直渲 pass 的 sRGB 往返 |
 | 🟢 ⑤ | [user/6-camera-picking.md](user/6-camera-picking.md) | 相机双控制模型、透视⇄正交、视锥剔除、鼠标拾取 |
 | 🟢 ⑥ | [user/7-voxel-basics.md](user/7-voxel-basics.md) | 体素子系统：方块表/地形/成块网格/射线交互/粒子 |
-| 🔴 进阶 | [user/8-advanced.md](user/8-advanced.md) | 自定义渲染 pass、后期链与运行期开关、GLSL 单一真源、投放约定 |
-| 🧰 排错 | [user/9-troubleshooting.md](user/9-troubleshooting.md) | 坑合集（Homebrew LLVM 工具链、`.idea`、黑屏、forward-compat、资源镜像）＋报错速查表 |
+| 🔴 进阶 | [user/8-advanced.md](user/8-advanced.md) | 自定义渲染 pass、后期链与运行期开关、`ShaderProgram` 全阶段装配与细分防裂、GLSL 单一真源、投放约定 |
+| 🧰 排错 | [user/9-troubleshooting.md](user/9-troubleshooting.md) | 坑合集（Homebrew LLVM 工具链、`.idea`、黑屏、forward-compat、资源镜像、绕序与 sRGB 两条“闷暗”原因）＋报错速查表 |
 
 ### 2. 面向开发者 — [`developer/`](developer/README.md)
 - **[developer/design.md](developer/design.md)**：子系统分层与依赖方向、场景图、线性渲染管线（及为何不用完整 render graph）、材质/光照/UBO、两阶段资源管线、HDR 后期链、以 C++20 named module 交付。

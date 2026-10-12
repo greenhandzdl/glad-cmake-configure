@@ -10,9 +10,9 @@
 
 ## TL;DR 关键事实
 
-- 项目：跨平台 **OpenGL 4.1 Core / PBR 图形引擎**（`gldx`）+ 按功能拆分的演示。仓库名 `glad-cmake-configure`：`src/main.cpp` 只留**最简 hello-triangle**（目标 `GLFW_Template`，最小实现基线，走高层 `Mesh`），其余一个功能一个 demo 在 `src/demo/{feature}/main.cpp`（成品演示 `pbr_showcase` PBR 场景、`voxel_terrain` 体素世界、`hello_triangle` 手搭底层对照、`menger_sponge` 着色阶段生成分形（细分层级是 uniform，另一臂由 GPU 自行细分），另 ~20 个单功能 demo）。
+- 项目：跨平台 **OpenGL 4.1 Core / PBR 图形引擎**（`gldx`）+ 按功能拆分的演示。仓库名 `glad-cmake-configure`：`src/main.cpp` 只留**最简 hello-triangle**（目标 `GLFW_Template`，最小实现基线，走高层 `Mesh`），其余一个功能一个 demo 在 `src/demo/{feature}/main.cpp`（成品演示 `pbr_showcase` PBR 场景、`voxel_terrain` 体素世界、`hello_triangle` 手搭底层对照、`menger_sponge` 着色阶段生成分形（细分层级是 uniform，另一臂由 GPU 自行细分）、`textured_sphere` 贴图球体（同一份 `MeshData` 既能 CPU 重网格也能走 TCS/TES 硬件细分），另 ~20 个单功能 demo）。
 - 语言：**C++23**；引擎以 **C++20 named module `gldx`** 交付（静态库）。
-- 构建：**CMake ≥ 3.28 + Ninja**。产物落 `output/`：`GLFW_Template`（hello-triangle，Mesh 高层路径）+ 每个 `src/demo/{feature}` 一个可执行（`pbr_showcase`、`voxel_terrain`…共 24 个）（Win 加 `.exe`）。
+- 构建：**CMake ≥ 3.28 + Ninja**。产物落 `output/`：`GLFW_Template`（hello-triangle，Mesh 高层路径）+ 每个 `src/demo/{feature}` 一个可执行（`pbr_showcase`、`voxel_terrain`…共 25 个 demo，加 `GLFW_Template` 合计 26 个可执行）（Win 加 `.exe`）。
 - 平台：Windows / macOS / Linux。
 - 依赖：GLFW（系统包）、GLAD（系统优先/子模块回退）、GLM（header-only）、STB（git 子模块内置）、Assimp（git 子模块，可选：`GLDX_ENABLE_ASSIMP` 默认 `ON`）。
 - 子模块：`third_party/glad`、`third_party/stb`、`third_party/assimp`。
@@ -140,7 +140,7 @@ src/gldx/CMakeLists.txt        add_library(gldx STATIC) + FILE_SET CXX_MODULES(g
 src/gldx/gldx.cppm             模块 primary interface：export { #include } 聚合全部公共头
 src/gldx/gmf.hpp              共享 global module fragment（GLAD/GLM/std 预包含；GLuint/glm::vec3 挂 global module）
 src/gldx/core/                Platform.h(GLFW_PLATFORM_* 宏) · RenderContext(线程亲和) · GLBuffer · VertexArray(含 `DrawTransformFeedback`) · TransformFeedback(TF 捕获会话 + 非阻塞计数回读) · UniformBuffer · Sampler · Framebuffer
-src/gldx/geometry/            Mesh · InstancedMesh · GeometryFactory(Cube/Sphere/Plane)
+src/gldx/geometry/            Mesh（含 `DrawAs(GLenum)`，只为 `GL_PATCHES` 而存在）· InstancedMesh · GeometryFactory(Cube/Quad/Sphere/Plane；统一绕序约定：从顶点法向那侧看为 CCW，反了不会报错，只会被剔成背面或露出内表面)
 src/gldx/texture/             Texture2D · Texture2DArray · TextureCubeMap · RenderTexture
 src/gldx/voxel/               BlockRegistry · Chunk · ChunkMesher（纯 CPU 网格化）· VoxelMeshGpu
 src/gldx/util/                Noise（Perlin 2D/3D + fBm，seeded、无全局状态）
@@ -158,6 +158,7 @@ src/demo/pbr_showcase/       成品 PBR 场景演示（原 src/main.cpp）：HDR
 src/demo/hello_triangle/     基线对照 demo（原 src/main.cpp 的手搭版）：VertexArray+GLBuffer+AttachAttribute 画同一个三角形，展示 Mesh::Upload 背后发生了什么；窗口标题标「manual VAO/VBO」
 src/demo/voxel_terrain/      体素演示入口（原 src/voxel_main.cpp）：chunk 流式生成/网格化 + 方块编辑（保留本地时钟保帧序，仅换窗口生命周期，输入全走 gldxwin 代理不再直调 glfw）；拆为 `main.cpp`（装配+帧循环）+ `World.{h,cpp}`（常量/`World`/`WaterSim`/`GenerateChunk`）+ `Streaming.{h,cpp}`（`ChunkStreamer`：线程池+生成/网格化双队列）+ `Input.{h,cpp}` + `Hud.{h,cpp}`（`VoxelHudPass`）
 src/demo/menger_sponge/      着色阶段生成几何：`main.cpp`（两条臂装配 + `RunQueue` pass 链）+ `MengerShaders.h`（内嵌 GLSL）。穷举臂 = `gl_VertexID` 的 20 进制解码（`uniform int uLevel` 即循环上界，零顶点缓冲/零属性/零 Mesh）；默认臂 = transform feedback 自细分队列（CPU 只上传 1 个种子立方体，每 pass 当场画掉已完成的、只 capture 还要细分的子块，绘制数取 `PRIMITIVES_GENERATED`）。CLI `--level/--size/--distance/--minpx` + `--off subdivide,cull,hud,spin`，`Up`/`Down`/`+`/`-` 运行时改档
+src/demo/textured_sphere/    一条索引流、两种细分的贴图球体（`main.cpp` 单文件）：CPU 侧按键只置 `view.dirty`、下一帧在 `Execute` 里重建（`Mesh::Update` 保留 VAO 只换 buffer，这才是“逐次按键重网格”便宜的原因）；硬件侧把**同一个** `MeshData` 以 `Mesh::DrawAs(GL_PATCHES)` 送进 TCS/TES（球的索引流本来就是每 3 个索引一个三角形，一个三角形就是一个 3 控制点 patch，零额外几何代码；`glPatchParameteri(GL_PATCH_VERTICES, 3)` 属 pass 级裸调，与 `glViewport` 同类），所以 `G` 键切换是在同一份缓冲上对照；自适应 level 只由边的**两端点对称地**算出，否则相邻 patch 会在共享边上裂开（故用 `equal_spacing`）；`GL_MAX_TESS_GEN_LEVEL` 启动时读一次、CPU 侧夹住再传给 TCS（超范围是 UB）；patch 程序链接失败只打 `stderr` + 降级到 CPU 网格，不阻断 demo；三张 512² 程序化 equirectangular 贴图（UV 网格 / 带原点象限标记的 checker / `Noise::Fbm3` 沿圆周采样故经度无缝的 planet）经 `Texture2D::Upload`，零外部资源文件、三平台通用；手写 GLSL 410 一对只读 location 0/1/2，并完整做了 sRGB 往返（贴图 `srgb=true` 上传 → 采样即线性值 → 写回非 sRGB 默认帧缓冲前要 `pow(1/2.2)` 编码，否则颜色写对了也发闷：任何直渲窗口的自定义 lit pass 都适用这条。但“发闷发暗”常有**两个独立原因**，另一个是绕序，别只查一半就下结论）。可执行名 `textured_sphere`；CLI `--segments/--rings/--texture uv|checker|planet/--tess-level/--sphere-radius/--yaw/--pitch/--orbit/--snapshot/--snap-at` + features `--on/--off wireframe,hud,tess,adaptive,cull`（功能开关只能 `--on/--off`，写 `--wireframe` 会被 Flags 报 unknown argument；`segments`/`rings` 这类要转整型的选项必须用 `flags.integer()` 不是 `static_cast<int>(flags.number())`——后者碰到 `inf`/`1e300` 是 UB）。注意 zsh **不做未加引号变量的词分割**：把命令行串存进 `$ARGS` 再 `./exe $ARGS` 会整串当一个 argv 传入 → Flags 报 unknown argument，取证脚本要么写死参数要么逐行执行。两个要写 `view_` 的 pass 成员必须是 `View&` 而非 `const View&`，且 `RenderPass` 无默认构造、派生类得显式 `: RenderPass("Name")`；GLSL 410 里函数体内的 `const vec3 n = normalize(...)` 编译不过（const 初始值必须是常量表达式）。
 src/demo/{feature}/          单功能入门 demo：import gldx/gldxwin/gldxcli，用 gldx::win::App+Window 钩子（OnCreate 建 Renderer/MarkAsRenderThread，OnFrame 填 RenderFrame+Render）+ gldx::cli::Flags；只装配它演示的那个子系统；新增一个目录免改 CMake
 src/demo/CMakeLists.txt      add_gldx_demo(<name>)：d_<name>→OUTPUT_NAME=<name>→link gldx/gldxwin/gldxcli；GLOB(CONFIGURE_DEPENDS) 遍历含 main.cpp 的子目录
 src/assets/                  运行期内容（不编译）：models/ 投放目录 · shaders/ 只读参考镜像（不加载）
@@ -183,7 +184,7 @@ AGENTS.md                    本文件（agent 速查，留在仓库根便于自
 
 - **加一个渲染 pass**：继承 `gldx::RenderPass`，`void Execute(gldx::RenderFrame&) override`，`renderer.AddPass(std::make_unique<...>())`。GL 工作在渲染线程执行（`Renderer::Render` 保证）。要“一个 for 循环装配多个不同子类”参考 `src/demo/render_passes/`（`Passes.{h,cpp}` 定义 `ShapePass` 基类 + Triangle/Quad/Line/Point 子类 + `ShapeSpec` 工厂表，`View::Create` 遍历表逐行 `AddPass`；多窗各自 context-private Renderer 共设一个 `SharedState` 原子时钟）。
 - **多窗口**：一 GLFW 窗 = 一 GL context = 一私有对象命名空间，跨窗只共享 CPU 真值（`std::atomic` + 后台 worker）。每窗全部 GL 资源在各自 `OnCreate` 建（首行 `MarkAsRenderThread()`）、`OnDestroy` 毁；`Window` 必须先于其 `View`/renderer 析构。同步多窗参考 `src/demo/multi_viewport/`（共享一个原子时钟、同一场景）；需要**异步时钟 / per-window 剔除 / LOD 分档 / 完全无关的独立 context**参考 `src/demo/multi_window_levels/`（`Profiles.{h,cpp}` 定义五个“等级”窗：同步窗读共享原子、异步窗用 `FrameInfo::dt` 各自累积；接 `Frustum` 进 `GeometryPass` 后同一场逐窗 `visible/total` 不同；island 窗不建 `Renderer`、只 `glClear`+`DebugDraw`，证明 context 可彻底互不相干）。
-- **加几何**：`gldx::GeometryFactory::Cube/Sphere/Plane` 或自填 `gldx::MeshData` → `Mesh::Upload(std::move(data))`（渲染线程）。
+- **加几何**：`gldx::GeometryFactory::Cube/Sphere/Plane` 或自填 `gldx::MeshData` → `Mesh::Upload(std::move(data))`（渲染线程）。“几何形状会变但资源不重建”（改细分档位、chunk remesh）走 `Mesh::Update(std::move(data))`：整缓冲 orphan 重传、VAO 与属性接线保留，所以能便宜到逐次按键实时重网格；惯例是输入回调只置 `dirty` 标志，重建放在 `Execute` 里（上下文已当前、且紧邻要用它的那次 draw），而 `Execute` 的首帧 guard 要写成“先建再判 `valid()`”——先 `if (!mesh_.valid()) return;` 会永远不建（参考 `src/demo/textured_sphere/`：`Sphere(radius, segments, rings)` 的两个整数即细分，HUD 直接打印换算出的 verts/idx）。**绕序是填索引时的硬约定**：`Renderer::Init()` 设的是 `glFrontFace(GL_CCW) + glCullFace(GL_BACK)`，而引擎着色器无一使用 `gl_FrontFacing` 做双面翻转，所以自填 `MeshData` 时必须保证“从顶点法向所指那一侧看为 CCW”（用具体顶点拿 `cross(v1-v0, v2-v0)` 和该处法向对一下符号即可）；反了不会任何报错，只会少一半面或画出闭合形体的内壁。要把几何交给细分阶段时不必做第二份数据：`GeometryFactory::Sphere` 的索引流本来就是 3 索引/三角形，同一份缓冲 `Mesh::Draw()` 画三角形、`Mesh::DrawAs(GL_PATCHES)` 就是一个三角形一个 patch（配 `glPatchParameteri(GL_PATCH_VERTICES, 3)`，属 pass 级裸调）。
 - **画东西（OpenGL 封装边界）**：句柄对象的操作走 RAII 包装（`VertexArray`/`GLBuffer`/`Texture`…，别裸调 `glGen/Bind/Delete`）。绘制原语收在 `VertexArray`：绑定后用 `vao.DrawArrays(mode,first,count)` / `vao.DrawElements(...)` / `vao.DrawElementsInstanced(...)`，**不要**在 demo/pass 里直接 `glDraw*`（全仓 `glDraw*` 只应出现在 `VertexArray.cpp`）。但 `glViewport`/`glBindFramebuffer`/`glClear` 这些**帧级/pass 级**操作**刻意保持裸调**（属本 pass 自身、非某对象，封进去就是透传包装反模式），别去“补封装”。理由见 `doc/developer/design.md` §9。
 - **加载模型/贴图**：`AssetManager::RequestModel/RequestTexture(key, path)`（key 由调用方命名，重复 key 被忽略），每帧 `ProcessUploads()`，就绪前 `Get*` 返回 `nullptr`。纹理引用必须落在模型目录内、图片边长≤`kMaxTextureSide`（16384，解码前校验），两条越界都会被拒。
 - **改 GLSL**：改 `src/gldx/shader/*Shaders.h`（单一真源），**不要**改 `src/assets/shaders/`（顶层 `.glsl` 已全部废除为只剩注释的镜像；真正从磁盘加载的 demo 着色器住在各 demo 的 `src/demo/{feat}/assets/shaders/` 下）。要 demo/用户从外部 `.glsl` 热加载用 opt-in 的 `ShaderProgram::CreateFromFiles(vertPath, fragPath)`（仅读入后转发 `CreateFromSource`；不破坏内嵌单一真源，普通构建仍零运行期路径依赖）。
@@ -205,6 +206,11 @@ AGENTS.md                    本文件（agent 速查，留在仓库根便于自
 | `glad/gl.h file not found`（仅 IDE 静态分析报） | include 路径在构建期由 CMake 提供 | 忽略；以真实 `cmake --build` 为准 |
 | 粒子/点精灵画成一个像素的方点 | macOS 默认不开 `GL_PROGRAM_POINT_SIZE`，着色器的 `gl_PointSize` 被驱动忽略 | 画点前 `glEnable` 该 cap 并在退出时恢复（见 `ParticleBatch::Draw`） |
 | 截图对比量到 0 差异，但开关确实改了状态 | 被测内容不在默认视野内（实例化场、天空、雾），或时间驱动内容随帧率漂移 | 用 `--yaw/--pitch/--rise` 把镜头转过去；把模拟挂到固定步长 + `--freeze-at` |
+| 全量重编时每个 TU 都报 `clang-scan-deps: No such file or directory` | `brew upgrade llvm` 后旧构建目录的缓存仍钉着带版本号的 Cellar 实路径（`…/Cellar/llvm/<ver>/bin`） | 用预设新开一个构建目录重新配置（`cmake --preset Release` → `cmake --build cmake-build-Release`），别动 CLion 的 debug 目录 |
+| 贴图颜色写对了、画面却整体发闷发暗（无任何报错） | 按 sRGB 上传的贴图采样出来是线性值，而默认帧缓冲不是 sRGB 的，写回前缺了编码。**但“发暗”常有两个独立原因**，先排绕序（下一行）再改 gamma，不然会去提亮度把坑埋深 | 在线性域算完光照后 `pow(c, vec3(1.0 / 2.2))` 再写 `FragColor`（走 `PostProcessChain` 的链已由 ACES+gamma 收尾，只有绕过它的 pass 要自己做） |
+| 球体/闭合物画成一只**开口的碗**，或近侧整面消失（无报错，顶点法向看着完全正常） | 绕序 inside-out：三角形从外侧看是顺时针，`glCullFace(GL_BACK)` 把整个可见面剔掉，剩下的是远侧内壁（`GeometryFactory::Sphere` 旧索引序就踩过这个，波及 10 个用 `Sphere` 的 demo） | 把背面剔除关掉、在 fragment 里按 `gl_FrontFacing` 压暗：近侧亮远侧暗 = 绕序对，反过来 = 反了，把索引序每三角形反一个面（参考 `textured_sphere` 的 `C` 键） |
+| 开了自适应细分，相邻 patch 之间裂开一条缝（T-junction） | 共享边的 `gl_TessLevelOuter` 两端点算出了不同值——`outer[i]` 是顶点 i 的**对边**，且 level 必须只依赖这条边**两端点**的对称函数 | 把判据写成对边长度/深度这类对称量（别用“当前顶点自己的深度”）；用 `equal_spacing` 而非 `fractional_*`，前者把边点放在精确分数处，level 一致即闭合 |
+| GLSL 410 编译报 `Initializer not allowed` | 函数体内 `const` 变量的初始化器必须是常量表达式，`const vec3 n = normalize(…)` 不合法 | 去掉 `const`（同一基线下 `half` 是保留字，不能当变量名） |
 
 ## CI / 发布
 

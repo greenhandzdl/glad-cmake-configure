@@ -1,11 +1,11 @@
 # GLFW + GLAD CMake 图形引擎
 
-跨平台（Windows / macOS / Linux）的 **现代 OpenGL 图形引擎 / PBR 渲染器**，源自一个用 **GLFW** 建窗、**GLAD** 加载函数的 CMake 起步模板，现已成长为一套分层的 `gldx` 引擎子系统。演示按功能拆分：`src/main.cpp` 只留**最简 hello-triangle**（自定义 `RenderPass` + 内联 GLSL + 高层 `gldx::Mesh` 直渲窗口，不碰任何引擎子系统）作为“最小实现”基线，其余一个功能一个入门 demo，集中在 `src/demo/{feature}/main.cpp`（含成品演示 `pbr_showcase`、可玩体素世界 `voxel_terrain`、手写底层 VAO/VBO 的对照 demo `hello_triangle`、着色阶段生成分形的 `menger_sponge`）。依赖通过 CMake 自动探测，内置 `build/run/clean` 脚本与 GitHub Actions 手动发布流水线。
+跨平台（Windows / macOS / Linux）的 **现代 OpenGL 图形引擎 / PBR 渲染器**，源自一个用 **GLFW** 建窗、**GLAD** 加载函数的 CMake 起步模板，现已成长为一套分层的 `gldx` 引擎子系统。演示按功能拆分：`src/main.cpp` 只留**最简 hello-triangle**（自定义 `RenderPass` + 内联 GLSL + 高层 `gldx::Mesh` 直渲窗口，不碰任何引擎子系统）作为“最小实现”基线，其余一个功能一个入门 demo，集中在 `src/demo/{feature}/main.cpp`（含成品演示 `pbr_showcase`、可玩体素世界 `voxel_terrain`、手写底层 VAO/VBO 的对照 demo `hello_triangle`、着色阶段生成分形的 `menger_sponge`、把 CPU 重网格与硬件 TCS/TES 细分并排对比且贴图为程序化生成的 `textured_sphere`）。依赖通过 CMake 自动探测，内置 `build/run/clean` 脚本与 GitHub Actions 手动发布流水线。
 
 - 语言标准：C++23；引擎以 **C++20 named module `gldx`** 交付（静态库），另有两个应用侧 named module 库：`gldxwin`（引擎无关的 GLFW 窗口/帧循环：`App` 单例 + 多窗口 `Window`）与 `gldxcli`（命令行开关 `Flags`）。消费者统一 `import gldx; import gldxwin; import gldxcli;`
 - OpenGL：**4.1 Core Profile**（GLSL `#version 410 core`；macOS 对应 "4.1 Metal"）
 - 构建系统：CMake ≥ 3.28（配合 Ninja），需支持 named modules 的编译器（Clang ≥ 19 / GCC ≥ 14 / 最新 MSVC）
-- 产物：`output/GLFW_Template`（来自 `src/main.cpp` 的 hello-triangle 最小演示，走高层 `Mesh`）+ `src/demo/` 下每个 feature demo（`output/pbr_showcase`、`output/voxel_terrain` 等，共 24 个）；Windows 加 `.exe`
+- 产物：`output/GLFW_Template`（来自 `src/main.cpp` 的 hello-triangle 最小演示，走高层 `Mesh`）+ `src/demo/` 下每个 feature demo（`output/pbr_showcase`、`output/voxel_terrain` 等，共 25 个）；Windows 加 `.exe`
 
 **已实现的图形能力**：PBR 金属/粗糙工作流、级联阴影（CSM + PCF）、基于图像的照明（IBL：辐照度/预滤波/BRDF LUT）、HDR + MSAA + Bloom + ACES 色调映射、精灵批次 + 位图字体 HUD、实例化绘制、视锥剔除、调试线框、CPU 拾取、帧性能分析、两阶段异步资源管线，以及场景层级（`Scene`/`SceneNode`/`Transform`）+ 渲染管线（`Renderer`/`RenderPass`）。
 
@@ -54,6 +54,7 @@
 │   │   ├── instancing/ particles/ text_hud/ camera_picking/ debug_draw/            # 各能力单功能 demo
 │   │   ├── geometry_upload/ model_loading/                                       # 几何上传 / 异步模型 demo
 │   │   ├── texture_samplers/ #   采样器 demo（main + SamplerPass.{h,cpp}：VertexArray/GLBuffer/Sampler RAII，无裸 GL 脚手架）
+│   │   ├── textured_sphere/  #   贴图球体 demo：一条索引流、两种细分——`GeometryFactory::Sphere(radius, segments, rings)` 的两个整数即 CPU 细分档位（键盘实时改 + `Mesh::Update` 原地重网格），同一份 MeshData 以 `Mesh::DrawAs(GL_PATCHES)` 送进 TCS/TES 做硬件细分（`G` 切换、`1`–`9` 设 level、`A` 屏幕空间自适应）；三张程序化 equirectangular 贴图（UV 网格 / checker / 噪声 planet）免外部文件
 │   │   ├── shader_file/      #   从磁盘加载 GLSL（CreateFromFiles 两文件版）：坏路径 exit 1、无路径退回内嵌源
 │   │   ├── geometry_shader/  #   选择性装配几何阶段：CreateFromSources({Vertex,Geometry,Fragment})，喂 GL_POINTS 扩成方块阵
 │   │   ├── geometry_shader_file/ #  多阶段从文件加载：CreateFromFiles({{Vertex},{Geometry},{Fragment}}) 从磁盘装配含几何阶段的程序（无路径时退回内嵌源）
@@ -204,6 +205,10 @@ AddressSanitizer + UndefinedBehaviorSanitizer 的对抗输入自检（NaN / inf 
 
 **体素演示 `voxel_terrain`**（`./scripts/run.sh voxel_terrain`）是体素原语的验收场：fBm 高度场地形 + 沙滩 + 湖泊 + 树冠，worker 线程生成与网格化、渲染线程限量上传，雾随距离收掉视距边缘。世界层（chunk 网格、流式策略、地形生成在 `World.{h,cpp}`，输入回调在 `Input.{h,cpp}`，HUD pass 在 `Hud.{h,cpp}`）全部写在 `src/demo/voxel_terrain/` 内（`main.cpp` 只留窗口/帧循环装配），引擎只提供原语、不含任何世界概念。**操作**：鼠标转向（指针捕获）；`W`/`A`/`S`/`D` 飞行、`Space`/`Ctrl` 上下（`Shift` 减速）；左键破坏、右键放置；`1`–`8` 选方块；`F` 切换飞行/轨道相机；`[`/`]` 太阳方位、`-`/`=` 太阳高度；`P` 粒子；`Tab` 透视/正交；`X` 退出。
 
+**贴图球体 `textured_sphere`**（`./scripts/run.sh textured_sphere`）把「细分」这件事变成看得见、量得出、而且**能比较**的东西。它有两套细分通路跑在**同一份 `MeshData`、同一个 VBO/EBO** 上：CPU 侧是 `GeometryFactory::Sphere(radius, segments, rings)` 的两个整数（经线条数与纬线圈数），键盘按下去就换一个 `MeshData`，`Mesh::Update` 原地换缓冲而保留同一个 VAO，所以改档便宜到可以逐次按键实时生效，HUD 同时打印换算出的 `verts`/`idx`，让「更平滑」的代价是一个数而不是一种感觉（48×24→1225/6912，10×5→66/300）；硬件侧是细分控制/求值阶段（TCS/TES）——同一份索引流以 `Mesh::DrawAs(GL_PATCHES)` 交出，每个三角形就是一个 3 控制点的 patch，**不需要第二份几何**。`G` 在两条通路之间切换是做对照的唯一诚实方式：把笼压到 12×6（91 顶点）关掉细分，轮廓是**多边形**；`G` 打开、level 设 3，还是那 91 个顶点，轮廓变成**真正的圆**（HUD 报 `~1296 tris from 144 patches`）——粗笼变圆是 TES 把重心插值得到的弦上点 `normalize(p) * radius` **重投影回球面**的结果，不是 CPU 又生成了顶点。`A` 进一步按边的**屏幕像素长度**逐边定 level（朝镜一侧密、轮廓侧疏；共享边的 level 必须由两端点对称地算出，否则相邻 patch 之间会裂开，这也是这里选 `equal_spacing` 的原因）。
+
+三张贴图全部在代码里生成、不依赖磁盘文件：UV 网格图（u 由红渐变到绿、v 加蓝、每 10% 一条十分度线，是「球面参数化」最诚实的可视化——经线必然对齐 segment 列，而每一根极点行无论网格多密都塌成同两个三角形）、带原点象限标记的彩色 checker、以及用 `gldx::Noise` 沿圆周采样（因此经度方向无缝）的噪声 planet。着色器是手写的 GLSL 410（location 0/1/2 = position/normal/uv、单个 half-lambert 项保证贴图读得清、一个绑到 unit 0 的 `sampler2D`），刻意不走 `GeometryPass`/PBR；也正因为它绕开了引擎管线，它必须自己处理两件 API **从不汇报**的事：一是 **sRGB 往返**——贴图按 sRGB 上传 ⇒ 采样得到线性辐射，光照在线性域做，写回默认帧缓冲（glfw 不请求 `GLFW_SRGB_CAPABLE` 就不是 sRGB 的）前还要 `pow(c, vec3(1.0/2.2))` 编码一次；二是**绕序**——`Renderer::Init()` 设 `glFrontFace(GL_CCW) + glCullFace(GL_BACK)`，所以一个从外侧看呈顺时针的网格，它整个可见表面都会被判成背面而剔掉，或者让你看见闭合形体远侧的内表面，而顶点法向看起来完全正常。**画面发闷发暗往往是这两个原因叠加的结果**（本 demo 就是先只修了 sRGB、发现球阵仍然不对，才用关掉剔除的方式定位到绕序）；`C` 键切掉背面剔除、让着色器按 `gl_FrontFacing` 压暗远侧，就是**找出反向网格的方法本身**——近侧亮远侧暗说明绕序对，反过来就是反了。**操作**：拖拽轨道旋转 / 滚轮缩放；`[`·`]`（或 `←`·`→`）改 segments，`-`·`+`（或 `↑`·`↓`）改 rings；`G` 切 GPU 细分、`1`–`9` 设细分 level、`A` 切自适应、`C` 切背面剔除；`T` 循环贴图、`W` 切 wireframe（细分笼 + 线框正是看清生成格阵与其接缝的组合）、`H` 切 HUD、`Esc` 退出。初值亦可由 `--segments/--rings/--texture uv|checker|planet/--tess-level/--sphere-radius/--yaw/--pitch/--orbit` 与 `--on tess --on adaptive --off cull --on wireframe` 给定，`--snapshot PATH [--snap-at SEC]` 可无头出图做细分扫描的像素对照；若驱动链不出可用的 patch 程序，demo 会打一条 `stderr` 并把 `tess` 关掉降级到 CPU 网格，而不是开一个空窗。
+
 ### Demo 索引
 
 每个 demo 都只装配它演示的那一个子系统，其余留缺省（正好验证按需装配）；`./scripts/run.sh <demo>` 运行，`--quit-after N` 无头自检，`--help` 列出该 demo 的开关与选项。
@@ -225,6 +230,7 @@ AddressSanitizer + UndefinedBehaviorSanitizer 的对抗输入自检（NaN / inf 
 | `geometry_upload` | GeometryFactory → MeshData → Mesh::Upload（无光照纯色） | `./scripts/run.sh geometry_upload` |
 | `hello_triangle` | 基线对照：手搭 VertexArray/GLBuffer/AttachAttribute 画 `src/main.cpp` 同一个三角形 | `./scripts/run.sh hello_triangle` |
 | `texture_samplers` | Texture2D + Sampler（NEAREST vs LINEAR 对照） | `./scripts/run.sh texture_samplers` |
+| `textured_sphere` | 两种细分共用一条索引流：CPU 侧重网格（`segments`/`rings` 即经线纬线数，`Mesh::Update` 原地重网格）↔ 硬件 TCS/TES（同一 MeshData 以 `Mesh::DrawAs(GL_PATCHES)` 画，粗笼由 TES 重投影回球面）+ 三张程序化 equirectangular 贴图（UV 网格/checker/噪声 planet）+ `C` 关剔除读绕序 | `./scripts/run.sh textured_sphere` |
 | `model_loading` | AssetManager 异步 + GLDX_ENABLE_ASSIMP=OFF 优雅降级 | `./scripts/run.sh model_loading` |
 | `multi_viewport` | 多窗口同步视图：每窗独立 context 各自上传、单线程串行重渲、原子共享时钟/轨道（拖任一窗全窗同步） | `./scripts/run.sh multi_viewport` |
 | `render_passes` | 多窗口 + for 循环装配不同 `RenderPass` 子类（Clear/Triangle/Quad/Line/Point），各窗独立 context 共设同一原子时钟 | `./scripts/run.sh render_passes` |

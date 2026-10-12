@@ -91,6 +91,27 @@ glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 | 模型加载成功但没有贴图 | 材质里的纹理引用用了绝对路径或 `..` 走出模型目录，被 `ModelLoader` 拒收 | 把贴图放模型同目录（或其子目录），材质里用相对引用；stderr 有 `[ModelLoader] ... names a path outside the model's own directory` 诊断行 |
 | 模型"不见了"（无崩溃无 GL 报错） | 顶点位置含 NaN/inf：合法上传但永不光栅化；或面索引越界被整面丢弃（静默，不打诊断） | 看 stderr 的 `[ModelLoader] ... positions are not finite` 行；无该行则用建模工具重导模型（越界面丢弃是为保住"索引只指向本 mesh 顶点"的不变式） |
 | 图片加载失败 | 边长超 `kMaxTextureSide`（16384），解码前读头部即被拒（防解压炸弹） | 缩小图片；拒收走 `std::expected` 错误串 `image too large: ... is WxH`，带真实尺寸与上限，由调用方自行落日志 |
+| 球体/闭合物画成一只**开口的碗**，或近侧整面消失（无报错，顶点法向看着正常） | 绕序 inside-out：`glCullFace(GL_BACK)` 把整个可见面剔掉了 | 见 [§7](#7-画面发闷发暗的两条独立原因绕序与-srgb)：先关剔除、按 `gl_FrontFacing` 压暗定位，再把索引序每三角形反一个面 |
+| 贴图颜色写对了、画面却整体发闷发暗（无任何报错） | 缺 sRGB 往返的最后一次编码（但先按上一行排掉绕序） | 见 [§7](#7-画面发闷发暗的两条独立原因绕序与-srgb)：线性域算完光照后 `pow(c, vec3(1.0 / 2.2))` |
+| 开了自适应细分，网格里有随视角变化的破口 | 共享边的 `gl_TessLevelOuter` 两端点算出了不同值 | 见 [🔴 进阶 §5.1](8-advanced.md#51-细分阶段真正难的是不裂不是接线)：level 只依赖该边两端点的对称函数，并用 `equal_spacing` |
+
+---
+
+## §7 画面发闷发暗的两条独立原因：绕序与 sRGB
+
+“没报错但整个画面闷、暗、发灰”这一个症状背后有两个完全不同的根因，而且**经常叠加**。本仓真实踩过的顺序就很有代表性：先认定是 sRGB、修完发现球阵仍然不对，才反过来定位到绕序。所以**查的顺序应当是绕序在前、色彩链路在后**。
+
+**原因一：绕序。** `Renderer::Init()` 设的是 `glEnable(GL_CULL_FACE) + glCullFace(GL_BACK) + glFrontFace(GL_CCW)`，而引擎着色器**无一**使用 `gl_FrontFacing` 做双面翻转。一个从外侧看呈顺时针的网格，它整个可见表面都会被判定为背面：要么面直接消失，要么你看到的是闭合形体**远侧的内表面**（光照/采样器看起来都“对”，但亮度与细节都不对）。`GeometryFactory::Sphere` 的旧索引序就是这种 inside-out，波及所有用 `Sphere` 的 demo。
+
+**原因二：sRGB 往返。** 贴图按 `Texture2DDesc::srgb = true` 上传后，`texture()` 出来的是线性辐射；而 glfw 未请求 `GLFW_SRGB_CAPABLE` 的默认帧缓冲并**不会**在写回时做编码。省掉 `pow(c, vec3(1.0 / 2.2))` 这一笔，一个颜色值完全写对的 albedo 也会显得闷而暗。走 `PostProcessChain` 的链已由 ACES + gamma 收尾，所以**只有绕过它的 pass** 需要自己编码。
+
+**怎么一次分清两者**：把背面剔除关掉，并在 fragment 里按 `gl_FrontFacing` 把背面压暗。
+
+- 近侧亮、越过轮廓露出的远侧暗 ⇒ 绕序正确，剩下的闷暗就该去查色彩链路。
+- 明暗分布反过来（远侧亮、近侧像被压暗）⇒ 绕序反了，把索引序每三角形反一个面。
+- 两者都正常、但整张图就是发灰 ⇒ 缺 gamma 编码。
+
+这个鉴别手法在 [`../../src/demo/textured_sphere/main.cpp`](../../src/demo/textured_sphere/main.cpp) 里就是 `C` 键（`--off cull`），绕序约定写在 [② 几何 §1.1](3-geometry-scene.md)，sRGB 往返的完整叙述在 [④ 光照 §3](5-lighting-ubo.md)。
 
 ---
 

@@ -54,7 +54,14 @@ albedo.Apply(0);      // 绑到 texture unit 0
 
 引擎的 `PbrPass` 对 albedo/metal-rough/normal/emissive **一律按 sRGB 采样**；数据贴图（法线/遮罩等）要精确数值时须走自己的 pass 并显式配 `GL_LINEAR`。
 
-🔗 **现场演示**：[`../../src/demo/texture_samplers/main.cpp`](../../src/demo/texture_samplers/main.cpp)——同一张 `Texture2D` 绑不同 `Sampler`（NEAREST vs LINEAR）分屏对比，Sampler 对象在 `SamplerPass.{h,cpp}`。
+自己写 lit pass 且**直渲到窗口**时记住 sRGB 是个往返：`Texture2DDesc::srgb = true` 上传后，`texture()` 出来的是线性辐射，而 glfw 没请求 `GLFW_SRGB_CAPABLE` 的默认帧缓冲并不做编码，所以在线性域算完光照要自己 `pow(c, vec3(1.0/2.2))` 再写 `FragColor`。少掉这步不会报错、也不会“看起来不对得显而易见”——只会整个画面发闷发暗，于是很容易去改贴图颜色或提亮度，把坑越埋越深（`PostProcessChain` 那条路径已由 ACES + gamma 收尾，所以只有绕过它的 pass 需要自己编码）。
+
+但“发闷发暗”**常有两个独立原因**，而另一个量级更大：绕序。`Renderer::Init()` 设 `glFrontFace(GL_CCW) + glCullFace(GL_BACK)`，一个从外侧看呈顺时针的网格会把整个可见面剔掉，或者让你画出闭合形体**远侧的内表面**——症状同样是“没报错但闷暗”，而顶点法向看着完全正常。正确的鉴别顺序是**先查绕序、后改 gamma**：把背面剔除关掉，让 fragment 按 `gl_FrontFacing` 压暗背面——近侧亮远侧暗说明绕序对，反过来就是反了；确认绕序无问题再动色彩链路。两边都可能是真原因（本仓的 `textured_sphere` 就是先只修了 sRGB、发现球阵仍然不对，才用关掉剔除的手法定位到 `GeometryFactory::Sphere` 的旧索引序是 inside-out 的），所以别只查一半就下结论。绕序约定本身见 [② 几何 §1.1](3-geometry-scene.md)。
+
+🔗 **现场演示**：
+- 采样器对比：[`../../src/demo/texture_samplers/main.cpp`](../../src/demo/texture_samplers/main.cpp)——同一张 `Texture2D` 绑不同 `Sampler`（NEAREST vs LINEAR）分屏对比，Sampler 对象在 `SamplerPass.{h,cpp}`。
+- 程序化生成贴图（不读盘）+ 完整 sRGB 往返的直渲 pass：[`../../src/demo/textured_sphere/main.cpp`](../../src/demo/textured_sphere/main.cpp)（三张 equirectangular 贴图含用 `Noise::Fbm3` 沿圆周采样以消除经度接缝的 planet 图）。
+- 用 `gl_FrontFacing` 读绕序（上面那个鉴别手法的可操作版本，`C` 键开关背面剔除）：同上 [`../../src/demo/textured_sphere/main.cpp`](../../src/demo/textured_sphere/main.cpp)。
 
 ## 4. 环境光（IBL）与天空：`EnvironmentMap`
 

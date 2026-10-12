@@ -136,12 +136,30 @@ st.vao.DrawArrays(GL_PATCHES, 0, 4);         // 4 个控制点
 
 > ⚠️ macOS 上同时挂细分 + 几何会触发驱动的 `SW vertex processing for EVAL_PROG + GEOM_PROG` 提示——这是**良性的软件回退说明、不是错误**，画面照常出。
 
+### 5.1 细分阶段真正难的是“不裂”，不是接线
+
+上面的五阶段装配只证明管线能拼起来。一旦你要按屏幕细节**自适应**地改 level，就会撞上细分阶段唯一会静默出错的地方：相邻 patch 在共享边上裂开（T-junction），画面上是网格里一道道随视角变化的破口，而 GL 什么都没报。三条必须同时成立的规矩：
+
+- `gl_TessLevelOuter[i]` 是**顶点 i 的对边**（不包含顶点 i 的那条边），不是“与顶点 i 相连的边”。配对算错不会报错，只会让密度分布跟你想的反一层。
+- 一条边被两个 patch 共用，而两个控制点**各自独立地**跑自己的 TCS：所以这条边的 level 必须只依赖**该边两端点**的**对称**函数（长度、或 `z0+z1` 这类不区分顺序的深度项）。一旦把“当前顶点自己的深度”写进判据，两个邻居就会算出不同值，缝必然裂。
+- 选 `equal_spacing`：它把边上的生成点放在边的**精确分数处**，因此只要两端 level 一致就闭合。`fractional_odd/even_spacing` 的内部分布更平滑，但匹配 level 时不总能补上。
+
+`layout(vertices = N) out` 的 `N` 必须等于 `glPatchParameteri(GL_PATCH_VERTICES, N)`；两个值一个在 GLSL 里一个在 C++ 里，改其一忘其二是“patch 画不出东西”最常见的原因。
+
+两个容易漏的运行时事实：
+
+- **level 有上限**。`glGetIntegerv(GL_MAX_TESS_GEN_LEVEL, &cap)` 启动时读一次，CPU 侧夹住后再传给 TCS——直接写一个超出驱动承诺的值是 UB，不是“被静默丢弃”。
+- **patch 管线里顶点阶段不能写最终的 `gl_Position`**（那是 TES 的产物）。这意味着 VS/TES 共用不了一个 VS，“一个程序既画三角形又画 patch”做不到——要两条通路实时对照就得建两个 `ShaderProgram` 按模式选。
+
+把已有网格交给细分不需要第二份几何：三角形拓扑的索引流（如 `GeometryFactory::Sphere`，3 索引一个三角形）本身就是合法的 patch 流，`Mesh::DrawAs(GL_PATCHES)` + `glPatchParameteri(GL_PATCH_VERTICES, 3)` 即可。求值阶段拿到的是重心坐标，对球类形体应该把插值得到的**弦上点**重投影回表面（`normalize(p) * radius`）而不是直接用插值位置——后者只会把粗笼“拉平”，而法向也应取重投影方向而非插值粗笼法向。
+
 🔗 **现场演示**：
 - ① 两文件加载：[`../../src/demo/shader_file/main.cpp`](../../src/demo/shader_file/main.cpp)（GLSL 在 `src/demo/shader_file/assets/shaders/`）。
 - ② 选择性几何阶段：[`../../src/demo/geometry_shader/main.cpp`](../../src/demo/geometry_shader/main.cpp)（V+Geom+F 内嵌）。
 - ②' 多阶段**从文件**加载（V+Geom+F 全走 `CreateFromFiles({...})`）：[`../../src/demo/geometry_shader_file/main.cpp`](../../src/demo/geometry_shader_file/main.cpp)。
 - ③ 全 5 阶段：[`../../src/demo/shader_stages/main.cpp`](../../src/demo/shader_stages/main.cpp)（GLSL 在 `Stages.h`）。
 - ④ 阶段不只变换、还能**生成**几何：[`../../src/demo/menger_sponge/main.cpp`](../../src/demo/menger_sponge/main.cpp)（GLSL 在 `MengerShaders.h`）。门格海绵 level-L 恰有 20^L 个等大子立方体 ⇒ 索引就是一个 20 进制数，`gl_VertexID` 解码出中心、几何阶段展成立方体，`uniform int uLevel` **就是**解码循环的上界——调层级不重建任何东西，CPU 每帧只上传一个循环次数，全仓零顶点缓冲。同一 demo 的另一条臂用 transform feedback 把工作队列放在 GPU 上自行细分（`gldx::TransformFeedback` + `VertexArray::DrawTransformFeedback`）：捕获目标只能用 `CreateFromSources({...}, TransformFeedbackDesc{...})` 在链接前声明，因为 `layout(xfb_buffer)` 是 GLSL 4.30、超出 4.1 core 基线。
+- ⑤ 把**现成的 `Mesh`** 当 patch 流画，并与 CPU 重网格在同一份缓冲上实时对照（`G`）：[`../../src/demo/textured_sphere/main.cpp`](../../src/demo/textured_sphere/main.cpp)——三段细分 GLSL 全内嵌在 `main.cpp`，`A` 键就是 §5.1 那三条防裂规矩的开关，`GL_MAX_TESS_GEN_LEVEL` 的读取与夹住也在其中；patch 程序链不出来时只打一条 `stderr` 并降级到 CPU 网格，而不是画空。
 
 ---
 

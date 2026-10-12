@@ -9,13 +9,13 @@
 | 🟢 **入门** | [1-getting-started.md](1-getting-started.md) | 从零把项目克隆、装依赖、配置、构建、运行，看懂演示界面与按键 |
 | 🟢 **① 核心骨架** | [2-core-setup.md](2-core-setup.md) | 用最少的代码接进自己的 `main.cpp`：窗口、渲染线程声明、`Renderer` 初始化、每帧的形状 |
 | 🟢 **①·补 窗口·输入·命令行** | [2a-window-input-cli.md](2a-window-input-cli.md) | `gldxwin` 生命周期钩子、键盘/鼠标/滚轮输入、光标控制、截图、多窗口，与 `gldxcli` 脚本化开关——每个特性都配完整代码与现场 demo |
-| 🟢 **② 几何与场景** | [3-geometry-scene.md](3-geometry-scene.md) | 造网格、给材质、挂场景层级、批量实例化 |
+| 🟢 **② 几何与场景** | [3-geometry-scene.md](3-geometry-scene.md) | 造网格（含绕序约定）、给材质、挂场景层级、批量实例化、两种细分（CPU 重网格 / TCS-TES 硬件细分） |
 | 🟡 **③ 贴图与模型加载** | [4-assets-loading.md](4-assets-loading.md) | `AssetManager` 异步两阶段：`Request*` → `ProcessUploads` → `Get*`，以及三条资产拒收规则 |
-| 🟡 **④ 光照与 UBO** | [5-lighting-ubo.md](5-lighting-ubo.md) | `LightSetup`/雾、灌 UBO 并绑定（黑屏第一课）、采样器、IBL 环境图 |
+| 🟡 **④ 光照与 UBO** | [5-lighting-ubo.md](5-lighting-ubo.md) | `LightSetup`/雾、灌 UBO 并绑定（黑屏第一课）、采样器、IBL 环境图、直渲 pass 的 sRGB 往返与绕序两条“闷暗”原因 |
 | 🟢 **⑤ 相机与拾取** | [6-camera-picking.md](6-camera-picking.md) | orbit/fly 双控制模型、透视⇄正交、视锥剔除、鼠标点中物体三步 |
 | 🟢 **⑥ 体素世界** | [7-voxel-basics.md](7-voxel-basics.md) | 方块表→噪声地形→成块网格→上传绘制→射线挖方块→AABB 碰撞站立→粒子点缀 |
-| 🔴 **进阶** | [8-advanced.md](8-advanced.md) | 自定义渲染 pass、后期链与运行期开关、GLSL 单一真源、投放目录约定 |
-| 🧰 **排错** | [9-troubleshooting.md](9-troubleshooting.md) | 遇到黑屏 / CLion 无配置 / `clang-scan-deps` 缺失等坑时，按"症状→根因→修复"速查 |
+| 🔴 **进阶** | [8-advanced.md](8-advanced.md) | 自定义渲染 pass、后期链与运行期开关、`ShaderProgram` 全阶段装配与细分防裂、GLSL 单一真源、投放目录约定 |
+| 🧰 **排错** | [9-troubleshooting.md](9-troubleshooting.md) | 遇到黑屏 / 画面发闷发暗 / 球体画成开口的碗 / CLion 无配置 / `clang-scan-deps` 缺失等坑时，按"症状→根因→修复"速查 |
 
 ①～⑥ 之间互相引用很少、可单独跳读；但第一次通读建议按顺序（①→①·补→④→⑤ 是最短主线）。
 
@@ -31,13 +31,16 @@
 | 多窗口同步（N 个 context 共享原子时钟） | [2a §7](2a-window-input-cli.md) | `multi_viewport`、`render_passes` |
 | 多窗口异步 / per-window 剔除 / LOD 分档 / 独立 context | [2a §7.1–§7.4](2a-window-input-cli.md) | `multi_window_levels` |
 | 命令行开关（`--off/--on/--quit-after`） | [2a §8](2a-window-input-cli.md) | `pbr_showcase`、`multi_viewport` |
-| 网格上传 / `Update` | [3](3-geometry-scene.md) | `geometry_upload` |
+| 网格上传 / `Update`（含细分实时可调的重网格）/ `DrawAs(GL_PATCHES)` | [3 §1](3-geometry-scene.md) | `geometry_upload`、`textured_sphere` |
+| 硬件细分（TCS/TES）与 CPU 重网格的同缓冲对照 / 自适应 level 防裂 | [3 §1.2](3-geometry-scene.md) + [8 §5.1](8-advanced.md) | `textured_sphere`、`shader_stages` |
+| 绕序约定与“球体画成开口的碗”的诊断 | [3 §1.1](3-geometry-scene.md) / [5 §3](5-lighting-ubo.md) | `textured_sphere`（`C` 键） |
 | 实例化 | [3](3-geometry-scene.md) | `instancing` |
 | 场景层级 / 变换传播 | [3](3-geometry-scene.md) | `pbr_showcase` |
 | 异步两阶段资源加载 | [4](4-assets-loading.md) | `model_loading` |
 | 光照 UBO 绑定 | [5](5-lighting-ubo.md) | `pbr_lighting` |
 | 级联阴影 | [5](5-lighting-ubo.md) / [8](8-advanced.md) | `shadow_csm` |
 | 采样器 | [5](5-lighting-ubo.md) | `texture_samplers` |
+| 程序化生成贴图 / 直渲 pass 的 sRGB 往返（与绕序两个“闷暗”原因并列） | [5 §3](5-lighting-ubo.md) | `textured_sphere` |
 | IBL / 天空盒 | [5](5-lighting-ubo.md) | `ibl_environment`、`skybox` |
 | 后期 Bloom / ACES | [8 §2](8-advanced.md) | `postprocess_bloom` |
 | 相机与拾取 / 视锥剔除 | [6](6-camera-picking.md) | `camera_picking` |
