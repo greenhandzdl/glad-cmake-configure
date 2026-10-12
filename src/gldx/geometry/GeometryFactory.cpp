@@ -80,7 +80,14 @@ MeshData GeometryFactory::Sphere(float radius, int segments, int rings) {
         for (int s = 0; s < segments; ++s) {
             const std::uint32_t i0 = r*stride + s;
             const std::uint32_t i1 = i0 + stride;
-            out.indices.insert(out.indices.end(), {i0, i1, i0+1, i1, i1+1, i0+1});
+            // Wound counter-clockwise as seen from *outside*, which is the
+            // convention Renderer::Init() sets up (glFrontFace(GL_CCW) +
+            // glCullFace(GL_BACK)). The ring index grows north -> south, so the
+            // outward-facing order of a cell is (top-left, top-right, bottom-left)
+            // and (bottom-left, top-right, bottom-right) - the other diagonal
+            // order makes every triangle's right-hand normal point *into* the
+            // sphere, which turns the whole visible skin into a back face.
+            out.indices.insert(out.indices.end(), {i0, i0+1, i1, i1, i0+1, i1+1});
         }
     }
     return out;
@@ -94,7 +101,9 @@ MeshData GeometryFactory::Plane(float halfExtent) {
         {{ halfExtent,0, halfExtent},{0,1,0},{1,1}},
         {{-halfExtent,0, halfExtent},{0,1,0},{0,1}},
     };
-    out.indices = {0,2,1, 0,3,2};  // CW so front face is +y under default cull setup
+    // Both triangles' right-hand normal is +y, i.e. the upper side is the front
+    // face under Renderer::Init()'s glFrontFace(GL_CCW) + glCullFace(GL_BACK).
+    out.indices = {0,2,1, 0,3,2};
     return out;
 }
 
