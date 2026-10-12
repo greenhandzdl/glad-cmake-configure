@@ -102,4 +102,20 @@ void Mesh::DrawRange(const GeometryRange& range) const {
     vao_.Unbind();
 }
 
+void Mesh::DrawAs(GLenum mode) const {
+    RenderContext::AssertRenderThread("Mesh::DrawAs");
+    if (!vao_.valid()) return;
+    vao_.Bind();
+    // Patch mode is the only reason this exists, and a patch grid is always one
+    // mesh: ranges (Assimp submeshes) are deliberately not walked here - a
+    // partial draw would cut the index stream mid-patch unless the offset happened
+    // to land on a glPatchParameteri(GL_PATCH_VERTICES) boundary.
+    if (ebo_.valid()) {
+        vao_.DrawElements(mode, static_cast<GLsizei>(indexCount_), GL_UNSIGNED_INT, nullptr);
+    } else {
+        vao_.DrawArrays(mode, 0, static_cast<GLsizei>(vertexCount_));
+    }
+    vao_.Unbind();
+}
+
 } // namespace gldx

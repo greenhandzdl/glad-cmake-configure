@@ -60,6 +60,16 @@ public:
     void Draw() const;                       // whole mesh (or all implicit range)
     void DrawRange(const GeometryRange& range) const;
 
+    // Whole mesh again, but with the primitive mode spelled out. This exists for
+    // exactly one mode: GL_PATCHES, i.e. handing the index stream to the
+    // tessellation stages as consecutive groups of glPatchParameteri
+    // (GL_PATCH_VERTICES) control points instead of as triangles. Every other
+    // mode already has a dedicated owner (instancing -> InstancedMesh, GPU-decided
+    // counts -> VertexArray::DrawTransformFeedback), so this stays one parameter
+    // rather than a method per mode. Ignores ranges_ (a patch grid is one mesh).
+    // Render-thread only.
+    void DrawAs(GLenum mode) const;
+
     [[nodiscard]] bool valid() const noexcept { return vao_.valid(); }
     [[nodiscard]] std::size_t vertexCount() const noexcept { return vertexCount_; }
     [[nodiscard]] std::size_t indexCount()  const noexcept { return indexCount_; }
