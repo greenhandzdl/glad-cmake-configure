@@ -1,4 +1,64 @@
 cmake_minimum_required(VERSION 3.28)
+
+# ----------------------------------------------------------------------------
+# Self-heal the clang helper-tool paths. This must run BEFORE project(): the
+# compiler-detection step freezes clang-scan-deps / llvm-ar / llvm-ranlib into
+# CMakeFiles/rules.ninja, and rules.ninja is written from whatever the cache
+# says at that moment -- a guard placed after project() corrects the cache too
+# late and the stale command survives in the generated rules.
+#   CMake resolves these helpers through the compiler's *realpath*, i.e.
+#   Cellar/llvm/<version>. `brew upgrade llvm` removes the old Cellar directory
+#   but leaves the cache pointing into it, and nothing re-resolves them: a plain
+#   `cmake <dir>` keeps the dead value, `-U` empties the command instead (which
+#   then fails as "/bin/sh: : command not found"), and a one-off `-D` is not
+#   guaranteed to rewrite rules.ninja. The failure looks exactly like "the
+#   submodules stopped compiling": every C++20 named-module dependency-scan step
+#   exits 127 / command-not-found, so gldx never builds and every demo linking
+#   it reports errors.
+#   Re-point each helper at the directory of the compiler actually in use --
+#   the opt/llvm symlink, which survives the next upgrade. A no-op when the
+#   helper is already valid, already absent (MSVC / Apple toolchain) or when
+#   this is the first configure (no compiler in the cache yet).
+# ----------------------------------------------------------------------------
+function(gldx_heal_compiler_helper helper_var helper_dir helper_name)
+    set(current_value "${${helper_var}}")
+    if(current_value AND EXISTS "${current_value}")
+        return()
+    endif()
+    set(candidate_value "${helper_dir}/${helper_name}")
+    if(NOT EXISTS "${candidate_value}")
+        return()
+    endif()
+    set(${helper_var} "${candidate_value}" CACHE FILEPATH
+        "Helper tool for ${helper_name}" FORCE)
+    if(current_value)
+        message(STATUS "${helper_var}: '${current_value}' is gone "
+                "(toolchain upgraded?), re-pointed to ${candidate_value}")
+    endif()
+endfunction()
+
+if(CMAKE_CXX_COMPILER OR CMAKE_C_COMPILER)
+    if(CMAKE_CXX_COMPILER)
+        get_filename_component(GLDX_CXX_TOOL_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    else()
+        get_filename_component(GLDX_CXX_TOOL_DIR "${CMAKE_C_COMPILER}" DIRECTORY)
+    endif()
+    if(CMAKE_C_COMPILER)
+        get_filename_component(GLDX_C_TOOL_DIR "${CMAKE_C_COMPILER}" DIRECTORY)
+    else()
+        set(GLDX_C_TOOL_DIR "${GLDX_CXX_TOOL_DIR}")
+    endif()
+    # Written out explicitly (no loop) because these cache variable names do
+    # not derive from the tool name, and any string-parsing scheme would choke
+    # on Windows paths ("C:/...") that already contain a separator character.
+    gldx_heal_compiler_helper(CMAKE_C_COMPILER_CLANG_SCAN_DEPS "${GLDX_C_TOOL_DIR}" clang-scan-deps)
+    gldx_heal_compiler_helper(CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS "${GLDX_CXX_TOOL_DIR}" clang-scan-deps)
+    gldx_heal_compiler_helper(CMAKE_C_COMPILER_AR "${GLDX_C_TOOL_DIR}" llvm-ar)
+    gldx_heal_compiler_helper(CMAKE_CXX_COMPILER_AR "${GLDX_CXX_TOOL_DIR}" llvm-ar)
+    gldx_heal_compiler_helper(CMAKE_C_COMPILER_RANLIB "${GLDX_C_TOOL_DIR}" llvm-ranlib)
+    gldx_heal_compiler_helper(CMAKE_CXX_COMPILER_RANLIB "${GLDX_CXX_TOOL_DIR}" llvm-ranlib)
+endif()
+
 project(GLFW_Template VERSION 1.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
