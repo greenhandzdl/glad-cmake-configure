@@ -10,9 +10,9 @@
 
 ## TL;DR 关键事实
 
-- 项目：跨平台 **OpenGL 4.1 Core / PBR 图形引擎**（`gldx`）+ 按功能拆分的演示。仓库名 `glad-cmake-configure`：`src/main.cpp` 只留**最简 hello-triangle**（目标 `GLFW_Template`，最小实现基线，走高层 `Mesh`），其余一个功能一个 demo 在 `src/demo/{feature}/main.cpp`（成品演示 `pbr_showcase` PBR 场景、`voxel_terrain` 体素世界、`hello_triangle` 手搭底层对照、`menger_sponge` 着色阶段生成分形（细分层级是 uniform，另一臂由 GPU 自行细分）、`textured_sphere` 贴图球体（同一份 `MeshData` 既能 CPU 重网格也能走 TCS/TES 硬件细分），另 ~20 个单功能 demo）。
+- 项目：跨平台 **OpenGL 4.1 Core / PBR 图形引擎**（`gldx`）+ 按功能拆分的演示。仓库名 `glad-cmake-configure`：`src/main.cpp` 只留**最简 hello-triangle**（目标 `GLFW_Template`，最小实现基线，走高层 `Mesh`），其余一个功能一个 demo 在 `src/demo/{feature}/main.cpp`（成品演示 `pbr_showcase` PBR 场景、`voxel_terrain` 体素世界、`hello_triangle` 手搭底层对照、`menger_sponge` 着色阶段生成分形（细分层级是 uniform，另一臂由 GPU 自行细分）、`textured_sphere` 贴图球体（同一份 `MeshData` 既能 CPU 重网格也能走 TCS/TES 硬件细分）、`glass_water` 自由飞行透明场景（五层状态机，四道透明闸门各自可关，透明度是电介质 Cook-Torrance 且 `Tab` 切透视/正交），另 ~20 个单功能 demo）。
 - 语言：**C++23**；引擎以 **C++20 named module `gldx`** 交付（静态库）。
-- 构建：**CMake ≥ 3.28 + Ninja**。产物落 `output/`：`GLFW_Template`（hello-triangle，Mesh 高层路径）+ 每个 `src/demo/{feature}` 一个可执行（`pbr_showcase`、`voxel_terrain`…共 25 个 demo，加 `GLFW_Template` 合计 26 个可执行）（Win 加 `.exe`）。
+- 构建：**CMake ≥ 3.28 + Ninja**。产物落 `output/`：`GLFW_Template`（hello-triangle，Mesh 高层路径）+ 每个 `src/demo/{feature}` 一个可执行（`pbr_showcase`、`voxel_terrain`…共 26 个 demo，加 `GLFW_Template` 合计 27 个可执行）（Win 加 `.exe`）。
 - 平台：Windows / macOS / Linux。
 - 依赖：GLFW（系统包）、GLAD（系统优先/子模块回退）、GLM（header-only）、STB（git 子模块内置）、Assimp（git 子模块，可选：`GLDX_ENABLE_ASSIMP` 默认 `ON`）。
 - 子模块：`third_party/glad`、`third_party/stb`、`third_party/assimp`。
@@ -82,9 +82,15 @@ sips -s format png /tmp/shot.bmp --out /tmp/shot.png                            
 
 前提：`--freeze-at` 之后 demo 状态是"时钟的纯函数"，而**不是**帧率的函数——体素碎屑走固定
 120 Hz 步长、脚本节拍锁在绝对步数边界上、动画时钟用"距启动秒数"而非 `glfwGetTime()` 绝对值。
-新增任何时间驱动的东西都要遵守这条，否则截图对比失效。另外：被测特性必须在默认画面里可见，
-否则量到的只是 0（实例化场偏 +x、雾/天空需要远景视角，都得靠 `--yaw/--pitch/--rise` 把镜头转过去）。
-还有一条同样致命的前提：脚本化验证跑起来时程序不能拥有指针。Fly 相机原本无条件 `GLFW_CURSOR_DISABLED`（现经 `Window::SetCursorCaptured(true)` 代理），
+新增任何时间驱动的东西都要遵守这条，否则截图对比失效。另有三条同等致命、且容易只做到一半：
+
+- **`--freeze-at SEC` 必须不晚于 `--snap-at`**。时钟停在 freeze 时刻，那么 freeze **之后**拍的快照仍在动的东西（`glass_water` 的海面）就会让两次同参数运行差出几千像素；先拿这个往回查，不要先怀疑渲染开关本身没生效。
+- **对比时必须 `--off hud`**。HUD 里通常有实时 fps / CPU ms 数字，留着它等于每次都比一遍文字，噪声底永远不为 0（`glass_water` 的 HUD 还打印提交顺序，那部分是有意的证据，但只在肉眼读图时开）。两条都满足后 `glass_water --off hud --freeze-at 2 --snap-at 2.5` 两次运行 `cmp` 全等，像素差才敢当测量用。
+- **指针未捕获时，整个输入层都不许驱动仿真**（不只是鼠标）。`--snapshot` 运行不捕获指针，但窗口仍然是 frontmost：键盘事件照样进来，而滚轮回调是无条件注册的。一条杂散按键（或桌面上一段滚动）就能把相机开走，实测差出 36% 像素，看起来像“渲染器不确定”而不是“输入没闸门”。约定：`HandleKeys`/`ReadFlyIntent`/`MouseCallback`/`ScrollCallback` 先查 `captured`，只留释放指针与退出那几个键（`F`/`Esc`/`X`）活着。
+
+被测特性必须在默认画面里可见，
+否则量到的只是 0（实例化场偏 +x、雾/天空需要远景视角，都得靠 `--yaw/--pitch/--rise` 把镜头转过去）；`glass_water` 这里还多一层：“被吃掉的像素”必须是一个**在正确帧里清清楚楚可见**的透明物体，所以水下那只箱子专门放在开阔水面下而不是玻璃板后面——被逐层衰减到看不见的伪证什么都证明不了，而同框的不透明桥墩是对照组（它先画、 blend 层的任何错误都吃不掉它）。但**别把“哪个开关在起作用”当成“哪个开关单独就能复现”**：正确排序下箱子先于盖它的水面 tile 提交，先画的东西不会被后来的深度值拒掉，所以 `--on depthwrite` 单独打开时先消失的是最后画的那两盏 additive 灯（Glow 层不写深度，但深度测试一直接着），“箱子整块没了”需要 `--off sort` 与 `--on depthwrite` 同时打开。报告像素差时要把“是哪几个开关的组合”写进同一行，否则下一个人复现不出来。
+还有一条前提同样常被忘掉：脚本化验证跑起来时程序不能拥有指针。Fly 相机原本无条件 `GLFW_CURSOR_DISABLED`（现经 `Window::SetCursorCaptured(true)` 代理），
 而 `OnCursor` 回调把鼠标增量写进 `yaw/pitch`——同机的人动一下鼠标，准星就离开 `--yaw/--pitch` 放的位置，
 `--auto-break` 数出来的 `blocks broken` 会整组失真。`--freeze-at` 因此同时意味着不捕获指针。
 
@@ -160,13 +166,14 @@ src/demo/voxel_terrain/      体素演示入口（原 src/voxel_main.cpp）：ch
 src/demo/menger_sponge/      着色阶段生成几何：`main.cpp`（两条臂装配 + `RunQueue` pass 链）+ `MengerShaders.h`（内嵌 GLSL）。穷举臂 = `gl_VertexID` 的 20 进制解码（`uniform int uLevel` 即循环上界，零顶点缓冲/零属性/零 Mesh）；默认臂 = transform feedback 自细分队列（CPU 只上传 1 个种子立方体，每 pass 当场画掉已完成的、只 capture 还要细分的子块，绘制数取 `PRIMITIVES_GENERATED`）。CLI `--level/--size/--distance/--minpx` + `--off subdivide,cull,hud,spin`，`Up`/`Down`/`+`/`-` 运行时改档
 src/demo/textured_sphere/    一条索引流、两种细分的贴图球体（`main.cpp` 单文件）：CPU 侧按键只置 `view.dirty`、下一帧在 `Execute` 里重建（`Mesh::Update` 保留 VAO 只换 buffer，这才是“逐次按键重网格”便宜的原因）；硬件侧把**同一个** `MeshData` 以 `Mesh::DrawAs(GL_PATCHES)` 送进 TCS/TES（球的索引流本来就是每 3 个索引一个三角形，一个三角形就是一个 3 控制点 patch，零额外几何代码；`glPatchParameteri(GL_PATCH_VERTICES, 3)` 属 pass 级裸调，与 `glViewport` 同类），所以 `G` 键切换是在同一份缓冲上对照；自适应 level 只由边的**两端点对称地**算出，否则相邻 patch 会在共享边上裂开（故用 `equal_spacing`）；`GL_MAX_TESS_GEN_LEVEL` 启动时读一次、CPU 侧夹住再传给 TCS（超范围是 UB）；patch 程序链接失败只打 `stderr` + 降级到 CPU 网格，不阻断 demo；三张 512² 程序化 equirectangular 贴图（UV 网格 / 带原点象限标记的 checker / `Noise::Fbm3` 沿圆周采样故经度无缝的 planet）经 `Texture2D::Upload`，零外部资源文件、三平台通用；手写 GLSL 410 一对只读 location 0/1/2，并完整做了 sRGB 往返（贴图 `srgb=true` 上传 → 采样即线性值 → 写回非 sRGB 默认帧缓冲前要 `pow(1/2.2)` 编码，否则颜色写对了也发闷：任何直渲窗口的自定义 lit pass 都适用这条。但“发闷发暗”常有**两个独立原因**，另一个是绕序，别只查一半就下结论）。可执行名 `textured_sphere`；CLI `--segments/--rings/--texture uv|checker|planet/--tess-level/--sphere-radius/--yaw/--pitch/--orbit/--snapshot/--snap-at` + features `--on/--off wireframe,hud,tess,adaptive,cull`（功能开关只能 `--on/--off`，写 `--wireframe` 会被 Flags 报 unknown argument；`segments`/`rings` 这类要转整型的选项必须用 `flags.integer()` 不是 `static_cast<int>(flags.number())`——后者碰到 `inf`/`1e300` 是 UB）。注意 zsh **不做未加引号变量的词分割**：把命令行串存进 `$ARGS` 再 `./exe $ARGS` 会整串当一个 argv 传入 → Flags 报 unknown argument，取证脚本要么写死参数要么逐行执行。两个要写 `view_` 的 pass 成员必须是 `View&` 而非 `const View&`，且 `RenderPass` 无默认构造、派生类得显式 `: RenderPass("Name")`；GLSL 410 里函数体内的 `const vec3 n = normalize(...)` 编译不过（const 初始值必须是常量表达式）。
 src/demo/{feature}/          单功能入门 demo：import gldx/gldxwin/gldxcli，用 gldx::win::App+Window 钩子（OnCreate 建 Renderer/MarkAsRenderThread，OnFrame 填 RenderFrame+Render）+ gldx::cli::Flags；只装配它演示的那个子系统；新增一个目录免改 CMake
+src/demo/glass_water/        自由飞行的透明/深度对照场景，一个小型多文件工程：`main.cpp`（装配 + 相机 + 截图）+ `Shaders.h`（一份 GLSL 410，透明度由 uniform 参数化，五层共用它）+ `Scene.{h,cpp}`（物品表 + 程序化贴图 + 水面 tile）+ `Input.{h,cpp}`（飞行相机与四个闸门键）+ `BlendPass.{h,cpp}`（五层状态机）+ `Hud.{h,cpp}`（`GlassHudPass`）。不用 `BuildPbrPipeline()`，而是手工 `AddPass`：`BlendPass → PostProcessPass → GlassHudPass`。关键约定：① **混合只在 HDR 线性 target 里做**（8 位整数会舍入每个中间值并截顶 additive），编码留给 `PostProcessPass`，所以 pass 本身不 `pow(1/2.2)`；`glBlendFuncSeparate` 的 alpha 用 `GL_ZERO, GL_ONE` 钉住目标 alpha。② **排序粒度必须匹配几何**：水面是 36 个索引连续的 `GeometryRange` tile（`MakeWaterGrid` 按 tile 逐块发索引，顶点仍共用一张网），tile 与物体塞同一张排序表，否则“排序已开”仍会在一个跨几米的大 quad 内部错序。③ 关排序时走 `Mesh::Draw()`（按声明序遍历 ranges），得到的就是同一批三角形的错误顺序，不需要第二份几何。④ 闭合壳双趟（`GL_FRONT` 再 `GL_BACK`，均不写深度）只在 `shellTwoPass` 的 item 上生效；关掉剔除时该机制退化，所以 `C` 与 `3` 不是两个无关开关。⑤ pass 析构前必须恢复 GL 默认状态（深度写/混合/剔除），`Execute` 末尾显式做，不能依赖下一个 pass 自己设。⑥ `Scene::Add` 返回 `items_` 里的引用，而 pass 长期持有它们，所以 `Build()` 必须 `reserve` 覆盖全场景（超出时 `Add` 会往 `stderr` 报警，不静默悬垂）；`Item::label` 是 borrowed `const char*`，需要拼字符串时得用 `static const char* const[]` 而不是临时缓冲。⑦ **透明度是守恒推出来的，不是四个手调旋钮**：`Surface` 只有 `ior`/`roughness`/`absorption`+`pathLen`/`baseAlpha`/`fresnelToAlpha`，F0 由 IOR 推导（`((ior-1)/(ior+1))²`），fragment 是一份电介质 Cook-Torrance（`D_GGX` + `V_SmithGGXCorrelated` 把 `1/(4NoVNoL)` 折进可见度项，故**刻意没有独立 G 项** + 矢量 `F_Schlick`）；`coverage = mirror·fresnelToAlpha + (1-mirror)·absorb`，`absorb` 来自 Beer-Lambert 斜程 `exp(-absorption·pathLen/max(NoV,0.12))`，`fresnelToAlpha = 1` 时 alpha 严格等于 `1-(1-F)T`，`< 1` 只有一层含义“这块表面在谎报自己的反射率”。`uPremultiply` 与混合方程是**配对关系**：只有方程为 `(ONE, 1-SRC_ALPHA)` 的那一层（Blend）置 1，Sky/Opaque/Cutout/Glow 为 0，所以 `premul_` 必须按层给、不能做成全局；标量 alpha 下 straight 与 premultiplied 逐字节相同，坏的是错配的一对（都不乘→刷白，都乘→a² 衰减）。水面那片“白沫”是亚像素高光火点，用 Karis 解析 AA 压（`fwidth(n)` 按平方和展宽 lobe + 按太阳立体角裁剪峰值，两步缺一不可；调大 roughness 蒙混会连带毁掉要演示的镜面）。太阳立体角写 `PI*θ²` 而非 `2*PI*(1-cos θ)`——后者在 float 里是两个七位有效数字相同的数相减。⑧ **正交下 `viewDir` 取 `-normalize(uCamForward)`**：正交 frustum 没有眼位，透视式在这里不是粗糙近似而是未定义，硬套会让 NoV→菲涅耳→alpha 随屏幕位置漂移（投影伪影）。投影每帧按 `input.ortho` 重设 `SetPerspective`/`SetOrthographic`（resize、滚轮、`Tab` 三处都会动；重设而不是按键时设一次，帧末状态才等于 HUD 报的那个），顶点阶段没有任何分支；`Tab` 翻转那帧按 `orthoHeight = 2·d·tan(fov/2)`（d = 相机到 `kViewTarget` 的距离）把取景交过去，滚轮乘法式缩放当前生效量（fov 8..110、盒 2..80）。⑨ 默认混合模式已是 **premultiplied**（不是 straight），且指针未捕获时整个输入层都不驱动仿真——见上面「验证一个渲染开关是否真的还生效」的第三条前提。可执行名 `glass_water`；CLI features `bloom,hud,sort,depthwrite,shell,cull,wireframe,glow,capture,ortho` + options `blend,yaw,pitch,pos-x,pos-y,pos-z,speed,wave,fov,ortho-height,freeze-at,snapshot,snap-at`；末帧固定打一行 `N blend submissions, M total draws` 供回归比对。
 src/demo/CMakeLists.txt      add_gldx_demo(<name>)：d_<name>→OUTPUT_NAME=<name>→link gldx/gldxwin/gldxcli；GLOB(CONFIGURE_DEPENDS) 遍历含 main.cpp 的子目录
 src/assets/                  运行期内容（不编译）：models/ 投放目录 · shaders/ 只读参考镜像（不加载）
 third_party/                 glad · stb · assimp（子模块）
 scripts/                     build.sh.in / run.sh.in / clean.sh.in（CMake 配置期生成 .sh）
 .github/workflows/           release.yml（手动触发的三平台构建+发布）
 CMakeLists.txt（根，~60 行 orchestrator：project/标准/option → include(cmake/) → add_subdirectory(src) → 脚本生成 + Summary） · CMakePresets.json
-doc/                         README(入口) · user/(入门 + API 分章: 骨架/几何场景/资源加载/光照UBO/相机拾取/体素 + 进阶 + 排错) · developer/(design + thread-safety) · agents/(setup-environment + author-program)
+doc/                         README(入口) · user/(入门 + API 分章: 骨架/几何场景/资源加载/光照UBO/相机拾取/体素 + 进阶 + 排错 + 10-demos.md Demo 画廊：逐 demo 画面叙述/键位/索引表) · developer/(design：含 §10 仓库目录树 + thread-safety + release：CI 与版本号锚点) · agents/(setup-environment + author-program)
 AGENTS.md                    本文件（agent 速查，留在仓库根便于自动发现）
 ```
 
@@ -218,9 +225,12 @@ AGENTS.md                    本文件（agent 速查，留在仓库根便于自
 - 矩阵：Linux / macOS / Windows，统一 Ninja，产物 `GLFW_Template-{linux-x64,macos-arm64,windows-x64}.zip`。
 - 输入：`build_type` / `release_tag`（空则 `ci-<日期>-<sha>`）/ `prerelease` / `draft`。
 - CI **不使用 `--preset`**（用显式 `cmake -S/-B`），故 `CMakePresets.json` 的 Darwin 条件对 Linux/Windows 无影响。
+- Windows job **钉死 `windows-2022` 镜像**：更新镜像带来的新 MSVC 在 named module 的 `import` 侧触发 STL 重定义编译风暴；解除条件=确认新工具链能过模块。逐平台其他硬约束见 [`doc/developer/release.md`](doc/developer/release.md)。
+- 版本号锚点共 6 处（两个 `kAppVersion`、`project(... VERSION)`、README 的配置摘要行与“当前正式版”链接、本文件的 tag），用 `scripts/release.sh <X.Y.Z>` 一次性重写；**删改 README 时留意这两个锚点**，脚本靠 grep 它们工作（命中不了只会报 `unchanged`，不报错）。
 
 ## 约定
 
+- **根 `README.md` 长期保持在 ≤30 行**：只放一句话定位、少量硬事实、快速开始与文档导航。长段落、表格、逐 demo 叙述一律写进 `doc/`（画廊在 `doc/user/10-demos.md`，开关总表在 `doc/user/2a-window-input-cli.md` §8.1，目录树在 `doc/developer/design.md` §10，发布在 `doc/developer/release.md`），不要塞回 README；新增 demo 时改画廊与 `doc/user/README.md` 的覆盖矩阵，而不是 README。
 - 提交/推送遵循仓库既有风格（`type: 摘要` + 正文）。**不要**把 `build/`、`cmake-build-*/`、`output/`、`.idea/` 入库（已 gitignore）。
 - 自有 `src/**` 代码保持零告警（Homebrew clang 23 基线）；显式 include，不依赖传递包含。
 - 触碰会拥有/调用 GL 的代码前，先读 [`doc/developer/thread-safety.md`](doc/developer/thread-safety.md)。
