@@ -41,10 +41,83 @@ renderer.AddPass(std::make_unique<TintPass>());      // 追加到链尾；不 bu
 - **帧级/pass 级 GL 刻意裸调**（`glBindFramebuffer/glViewport/glClear`），但**句柄走 RAII**（`ShaderProgram/VertexArray/GLBuffer/Texture2D`）、**绘制走 `VertexArray` 成员**——不要自己 `glGenBuffers`。
 - 为什么是**线性链而非完整 render graph**：本项目只有一个离屏 HDR target + 少量固定后处理，依赖关系简单，显式线性顺序比 graph 的调度开销与心智负担更划算。取舍详见 [../developer/design.md](../developer/design.md) §3。
 
+### 1.1 透明层：一个 pass 里的四道闸门
+
+透明是“自定义 pass”最常见的第一个真实需求，因为它几乎无法只靠改 `GeometryPass` 的一个开关做对：一个 blended 片段会写深度，于是 `GL_LESS` 把同一条视线上的后续东西全拒掉，“玻璃把后面的物体吃掉”就是这么来的。正确的修法不是一行，而是**四道各自独立的闸门**，每一道守一个不同的保证，所以每一道都得能单独关掉才能看出它在守什么（`../../src/demo/glass_water/` 的 `1`/`2`/`3`/`4` 键与 `--off sort` / `--on depthwrite` / `--off shell` / `--blend X` 就是这四道）：
+
+| 闸门 | 做什么 | 单独关掉后的症状 |
+| --- | --- | --- |
+| `1` 远→近排序 | blend 层按平方距离降序提交 | 叠加顺序反了，透过度与预期不符；与下一道同时关掉时最易读（两者叠加才是“吃掉”） |
+| `2` 不写深度 | blend 层 `glDepthMask(GL_FALSE)` | 先提交的透明物把后提交的整块拒掉——“物体直接消失”，而不是“颜色不对”。但别把它当成“一个键就能复现消失”：单独打开时先被拒掉的是最后画的那两盏 additive 灯（`Glow` 层自己不写深度，可深度测试一直接着），要看到水面 tile 吃掉水下箱子得让 `1` 先错序 |
+| `3` 闭合壳双趟 | `GL_FRONT` 再 `GL_BACK`，均不写深度 | 一个闭合透明体只合成一层，读不出“玻璃有多厚”，也看不到内外表面叠加 |
+| `4` 混合方程 | straight / premultiplied / additive | 着色器与 `glBlendFunc` 对“a=0.5 是什么”给出不同答案，整场透过度错一个量级 |
+
+排序那道还有一个附条件，它不是第五个开关而是同一个开关的一半：**排序粒度必须匹配几何**。把水面当成“一个物体”排，一个跨几米的大 quad 内部依旧错序，而 HUD 会告诉你“排序已开”。所以 demo 把水面切成 36 个索引连续的 tile，与物体塞同一张排序表。
+
+三条容易踩的坑，都是“API 从不报错”型：
+
+- **受害者不可能是任何不透明物体**。不透明层先画且写深度，透明物在它之后通过深度测试——所以“玻璃把石柱吃掉”在正确的层序下压根不会发生。会被吃掉的只有 **blend 层内部的兄弟图元**（盖住水下箱子的那片水面 tile）。想验证自己修好了，得拿一个透明物体当受害者，而不是拿背景里的不透明物——后者永远绿。
+- **混合必须发生在线性 HDR target 里**。8 位整数会把每个中间值舍入，并把 additive 的发光体截顶（`1 + 1` 不再是 2）；编码交给 `PostProcessPass` 的 exposure + ACES，所以透明 pass 自己**不要**再 `pow(1/2.2)`（与 [5 §3](5-lighting-ubo.md) 的直渲窗口情形正好相反，区别就在链上有没有后期）。`glBlendFuncSeparate` 的 alpha 通道用 `GL_ZERO, GL_ONE` 钉住目标 alpha，否则天空与地面的 alpha 会被逐层抹平，下游依赖它的 pass 全错。
+- **cutout 不属于透明层**。用 `discard` 挖洞的格栅/栅栏既不写色也不写深度，因此它留在不透明侧、照常写深度、不需要排序——“有洞”不是“透明”，是“不存在”。把两者混为一谈是“栅栏把后面物体吃掉”的根源。本 demo 里它还有一个已知伪影：`Texture2D::Upload` 总是生成完整 mip 链，每级都把木条与孔洞平均，所以远处的栅栏会往不透明方向淡出（要修得做 coverage-aware mip，属另一个课题）。
+
+一个反直觉但合法的例外：**additive 的发光层不需要排序**。加法可交换且与背景无关，所以它可以固定画在最后（`Glow` 层）。但“最后”意味着没有任何东西能再合成到它上面，所以一旦某个 glow 应该出现在透明面**之后**，它就必须回到 Blend 层参加排序——“顺序无关”只在层内成立，不是跨层的免罪符。
+
+还有一条取证纪律，是这一节所有数字能读的前提：**“哪个开关在起作用”不等于“哪个开关单独就能复现症状”**。正确排序下箱子先于盖它的水面 tile 提交，先画的东西不会被后来的深度值拒掉，所以深度写与排序各管“吃掉”这件事的一半；报告像素差时必须把“是哪几个开关的组合”写在同一行，否则下一个人照着文档复现不出来。关掉单个闸门、与参考帧逐像素对比（`--off hud` + `--freeze-at` 不晚于 `--snap-at`，判据“灰度差 > 0.6% 满量程”，1600×1200 = 1,920,000 px）：
+
+| 对照 | 差异像素 | 对照 | 差异像素 |
+| --- | --- | --- | --- |
+| `--off sort` | 57,429（2.99%） | `--off shell` | 328,795（17.12%） |
+| `--on depthwrite` | 24,827（1.29%） | `--off cull` | 389,302（20.28%） |
+| 两者同开（“被吃掉”帧） | 29,551（1.54%） | `--blend additive` | 617,657（32.17%） |
+
+同一批运行里 `--blend straight` 与默认帧**逐字节相同**（0 像素差）——不是开关坏了，是标量 alpha 下 premultiplied 与 straight 本来就是同一处算术的两种写法，见 §1.2。提交计数也在自证：默认 47 次 blend 提交 / 79 次绘制，关排序 12 / 44，关壳双趟 47 / 71。
+
 🔗 **现场演示**：
 - 一个 pass 装完全自定义链（不 `BuildPbrPipeline`，手工 `AddPass`）：[`../../src/demo/texture_samplers/SamplerPass.cpp`](../../src/demo/texture_samplers/SamplerPass.cpp)。
 - **一个 for 循环给不同窗装配不同 `RenderPass` 子类**（Clear/Triangle/Quad/Line/Point）：[`../../src/demo/render_passes/Passes.cpp`](../../src/demo/render_passes/Passes.cpp) + [`View.cpp`](../../src/demo/render_passes/View.cpp)。
 - pass 里回写 HUD（读 `f.visibleCount/f.selected`）：[`../../src/demo/camera_picking/main.cpp`](../../src/demo/camera_picking/main.cpp) 的 `PickHudPass`。
+- **一个 pass 里装完整五层透明状态机**（Sky/Opaque/Cutout/Blend/Glow + 四道闸门 + HUD 回读真实 GL 状态）：[`../../src/demo/glass_water/BlendPass.cpp`](../../src/demo/glass_water/BlendPass.cpp)，配套 [`Scene.cpp`](../../src/demo/glass_water/Scene.cpp) 的水面 tile 划分与 [`Shaders.h`](../../src/demo/glass_water/Shaders.h) 的电介质 Cook-Torrance 透明度。
+
+### 1.2 alpha 是守恒推出来的，不是“有人选的值”
+
+四道闸门管的是“谁先画、写不写深度、怎么合”，但还留下一个更难的问题：一个 blended 片段的 alpha **到底该是多少**。如果 alpha 和着色器里的反射、高光各算各的，同一块玻璃可以既“高光很尖”又“菲涅耳很平”，于是一张透明度梯子只是四个互不相干的旋钮在互相拆台。`glass_water` 的取舍是：全场景只留一份**电介质 Cook-Torrance**，alpha 从能量守恒里掉出来：
+
+```glsl
+vec3  f0 = vec3(F0FromIor(uIor));                 // ((ior-1)/(ior+1))²：水 2.0%、玻璃 4.0%、肥皂膜 2.9%
+vec3  F  = F_Schlick(NoV, f0);                    // 矢量菲涅耳，三个通道各自趋近 1
+float mirror = clamp(dot(F, THIRD), 0.0, 1.0);
+vec3  trans  = exp(-uAbsorption * (uPathLen / max(NoV, 0.12)));   // Beer-Lambert 斜程
+float absorb = 1.0 - dot(trans, THIRD);
+float coverage = mirror * uFresnelToAlpha + (1.0 - mirror) * absorb;
+float alpha      = clamp(uBaseAlpha + coverage + NoV * NoV * NoV * uCoreToAlpha, 0.0, 1.0);
+```
+
+入射光里 F 被反射、`(1-F)` 穿进去后被吸收 `absorb`、剩下 `(1-F)·T` 打到背景，所以 `uFresnelToAlpha = 1` 时 coverage 严格等于 `1-(1-F)T`，两项之和恒为 1——**表面无法在合成时凭空造光**。这条性质就是五块板 + 湖面 + 泡泡叠在一起仍读作“玻璃”而不是“一堆灰色”的原因。`uFresnelToAlpha < 1` 也从此有了唯一含义：这块表面在谎报自己的反射率（磨砂板 0.12、彩色箱 0.4）。两个直接推论：水的 `baseAlpha` 从 0.34 掉到 0.05（那 0.34 里绝大部分本来在冒充反射和吸收）；斜程吸收一行就换掉一张贴图——正看读得出池底格子、斜看是一堵绿墙、远岸总比近处暗，三个现象都是同一次 `exp` 的结果。
+
+剩下的是本项目踩过的最严一个坑：**`uPremultiply` 与混合方程是配对关系，不是两个独立选项**。
+
+```glsl
+vec3 rgbOut = (uPremultiply > 0.0) ? c * alpha : c;   // 与 (ONE, 1-SRC_ALPHA) 配对
+FragColor   = vec4(rgbOut, alpha);
+```
+
+`(ONE, 1-SRC_ALPHA)` **不缩放源色**，所以 shader 必须自己 `rgb *= alpha`；否则每一层都把**全额**辐射叠到刚被它放行的 `(1-a)` 背景上，五块“10% 玻璃”就刷白一帧——这不是调参问题，是把衰减写成了相加。反过来 Straight `(SRC_ALPHA, …)` 是**同一处算术写在固定功能单元里**，所以 shader 侧要把 `uPremultiply` 关掉。两个坑对称：两边都不乘→刷白，两边都乘→a² 衰减（最先被抹掉的是远岸镜带）。标量 alpha 下两种写法**逐像素相同**（按 `4` 切过去 `cmp` 能直接确认），所以“straight 也能过”不能拿来证明 premultiply 没在用——要让 rgb 与 alpha 用不同权重时才分得出。
+
+因此 `premul_` 必须由 pass **按层给**（`BlendPass::Execute` 里只有 Blend 层为 1，Sky/Opaque/Cutout/Glow 为 0），而不是一个全局开关；把它做成全局就是上面那个过曝 bug 的成因。另外镜面高光的峰值在 roughness 0.06 时高达 ~2.4e4，而波面法线只在**顶点**上采样，MSAA 会把亚像素火点摊成一池白雾；修法是两个解析步骤缺一不可：用 `fwidth(n)` 测出三角形内缺失的斜率方差、按平方和展宽 lobe，再按“lobe 比太阳圆盘宽就按两者立体角之比缩放贡献”裁剪峰值（否则表面越粗糙高光反而越亮而不是越铺开）。靠把 roughness 调大蒙混会一并毁掉镜面，也就毁掉这一节要演示的菲涅耳。
+
+### 1.3 透视 ↔ 正交：换的是 `uViewProj`，而 shader 还得知道视线方向
+
+`glass_water` 用 `Tab` 互切两种投影，每帧按开关重设 `cam.SetPerspective(...)` / `cam.SetOrthographic(...)`（相机侧 API 见 [⑤ 相机与拾取 §2](6-camera-picking.md)），顶点阶段**没有任何分支**——“改顶点的 projection 投影方式”到这里就结束了。但有一个量是投影矩阵本身带不过去的：
+
+```glsl
+vec3 viewDir = uOrthographic > 0.5
+                 ? -normalize(uCamForward)     // 正交：每条光线平行，无眼位
+                 : normalize(uEye - vWorldPos); // 透视：眼位到像素
+```
+
+正交 frustum 里没有“眼位到像素的向量”——这不是一个粗糙近似，而是**未定义**。硬套透视式会让 NoV→菲涅耳→守恒 alpha 随屏幕位置漂移（边缘最亮），纯属投影伪影；而 §1.2 整节的说服力都建在“NoV 决定一切”上，伪影会直接把它演示的东西抹掉。于是 `orthographic` 与 `camForward` 随 `RenderFrame` 透传，掠射镜带在正交下变均匀——那不是需要打的 bug，那就是“去掉透视”这件事的含义本身。
+
+切换本身还有一个容易被忽略的交接：**取景要跟着过**。`Tab` 翻转那一帧按 `orthoHeight = 2·d·tan(fov/2)`（d = 相机到场景中心的距离）把透视取景换算成正交盒高，反向时 fov 保持原值；不做这一步，一个“只换标签”的切换看起来就像把场景搞坏了。滚轮缩放归投影不归飞行：乘法式（×0.9/×1.1）只缩放当前生效的那个量，各自夹区间（fov 8..110、盒高 2..80）。CLI 侧对应 feature `ortho` 与选项 `--ortho-height`，`--fov` 也从“只设初值”变成与滚轮共用的活量。HUD 要打印的是真正定义投影的那两个数（`fov 55.0 deg` 还是 `box height 12.4 m`），于是取景交接可以直接读出来核对。
 
 ---
 
@@ -225,5 +298,5 @@ profiler_.BeginFrame();  /* ...这段的 GL 工作... */  profiler_.EndFrame();
 
 - 出问题了（黑屏、CLion 无配置、缺 `clang-scan-deps`、模型加载不出来）→ [🧰 排错](9-troubleshooting.md)
 - 两阶段资源管线的用法与拒收规则在 [③ 贴图与模型加载](4-assets-loading.md)；macOS forward-compat 与"为什么 Platform.h 是 include"在 [① 核心骨架](2-core-setup.md)
-- 要发版本 / 触发 CI → 根 [../../README.md](../../README.md) 与 [../../AGENTS.md](../../AGENTS.md) 的 CI 段
+- 要发版本 / 触发 CI → [开发者文档的发布手册](../developer/release.md) 与 [AGENTS.md](../../AGENTS.md) 的 CI 段
 - 想读权威用法 → [`../../src/main.cpp`](../../src/main.cpp)（hello-triangle）与 [`../../src/demo/`](../../src/demo/) 下的 `pbr_showcase` / `voxel_terrain` / 单功能 demo

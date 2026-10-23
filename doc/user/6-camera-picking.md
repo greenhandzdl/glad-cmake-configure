@@ -25,6 +25,8 @@ auto p = cam.ToggleProjection();                        // 运行期互切（dem
 
 切换时 near/far 保留，正交视盒按当前环绕半径取景。正交模式下天空盒仍用透视投影画（`Camera::SkyboxViewProj()` 内部处理，你不用管）；拾取在两种投影下都正确（见下）。矩阵经 `ViewMatrix()/ProjectionMatrix()/ViewProjection()` 取缓存值——只读访问器可安全共享给 worker 线程。
 
+一个只有自定义着色器才会碰到的坑：正交 frustum **没有眼位**，所以片元里那个“视线方向”不能无条件写 `normalize(eye - worldPos)`——它不是粗糙近似，而是未定义。任何由它派生的量（菲涅耳、斜程吸收、因此还有透明度）都会随屏幕位置漂移。把这种情况知会到 shader 侧（透传一个前向向量与一个投影标志）的做法与后果见 [进阶 §1.3](8-advanced.md)。
+
 ## 3. 视锥剔除：`Frustum`
 
 ```cpp
