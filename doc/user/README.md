@@ -7,6 +7,7 @@
 | 顺序 | 文档 | 读完你能 |
 | --- | --- | --- |
 | 🟢 **入门** | [1-getting-started.md](1-getting-started.md) | 从零把项目克隆、装依赖、配置、构建、运行，看懂演示界面与按键 |
+| 🟢 **Demo 画廊** | [10-demos.md](10-demos.md) | 查某个 demo 到底演示哪个子系统、画面里该看见什么、按什么键、无头取证留下多少像素差（含全部 demo 的索引表） |
 | 🟢 **① 核心骨架** | [2-core-setup.md](2-core-setup.md) | 用最少的代码接进自己的 `main.cpp`：窗口、渲染线程声明、`Renderer` 初始化、每帧的形状 |
 | 🟢 **①·补 窗口·输入·命令行** | [2a-window-input-cli.md](2a-window-input-cli.md) | `gldxwin` 生命周期钩子、键盘/鼠标/滚轮输入、光标控制、截图、多窗口，与 `gldxcli` 脚本化开关——每个特性都配完整代码与现场 demo |
 | 🟢 **② 几何与场景** | [3-geometry-scene.md](3-geometry-scene.md) | 造网格（含绕序约定）、给材质、挂场景层级、批量实例化、两种细分（CPU 重网格 / TCS-TES 硬件细分） |
@@ -31,6 +32,8 @@
 | 多窗口同步（N 个 context 共享原子时钟） | [2a §7](2a-window-input-cli.md) | `multi_viewport`、`render_passes` |
 | 多窗口异步 / per-window 剔除 / LOD 分档 / 独立 context | [2a §7.1–§7.4](2a-window-input-cli.md) | `multi_window_levels` |
 | 命令行开关（`--off/--on/--quit-after`） | [2a §8](2a-window-input-cli.md) | `pbr_showcase`、`multi_viewport` |
+| 共享开关总表（`--freeze-at/--snapshot/--auto-break/--blend/--ortho-height`…） | [2a §8.1](2a-window-input-cli.md) | 全部 demo |
+| 逐 demo 的画面叙述 / 键位 / 取证像素差 | [10](10-demos.md) | 全部 demo（索引表） |
 | 网格上传 / `Update`（含细分实时可调的重网格）/ `DrawAs(GL_PATCHES)` | [3 §1](3-geometry-scene.md) | `geometry_upload`、`textured_sphere` |
 | 硬件细分（TCS/TES）与 CPU 重网格的同缓冲对照 / 自适应 level 防裂 | [3 §1.2](3-geometry-scene.md) + [8 §5.1](8-advanced.md) | `textured_sphere`、`shader_stages` |
 | 绕序约定与“球体画成开口的碗”的诊断 | [3 §1.1](3-geometry-scene.md) / [5 §3](5-lighting-ubo.md) | `textured_sphere`（`C` 键） |
@@ -46,6 +49,10 @@
 | 相机与拾取 / 视锥剔除 | [6](6-camera-picking.md) | `camera_picking` |
 | 体素世界（地形/挖/碰撞/粒子） | [7](7-voxel-basics.md) | `voxel_terrain`、`particles` |
 | 自定义 `RenderPass` 链 | [8 §1](8-advanced.md) | `render_passes`、`texture_samplers` |
+| 透明层序 / 深度写入 / 排序粒度 / 混合方程（“深度测试吃掉后方像素”的四道闸门） | [8 §1.1](8-advanced.md) | `glass_water`、`voxel_terrain`（水面） |
+| cutout（`discard`）与透明的分界：有洞≠透明 | [8 §1.1](8-advanced.md) | `glass_water`（栅栏/格栅屏） |
+| 电介质 PBR 透明：alpha 由矢量菲涅耳 + Beer-Lambert 吸收守恒推出，`uPremultiply` 与混合方程配对 | [8 §1.2](8-advanced.md) | `glass_water`（水面/玻璃板/泡泡） |
+| 透视 ↔ 正交切换：每帧换投影矩阵，正交下视线方向改取相机前向 | [8 §1.3](8-advanced.md) / [6 §2](6-camera-picking.md) | `glass_water`、`pbr_showcase`、`voxel_terrain` |
 | `ShaderProgram` 四入口与全阶段装配 | [8 §5](8-advanced.md) | `shader_file`、`geometry_shader`、`geometry_shader_file`、`shader_stages` |
 | 文字 HUD / 调试绘制 / 帧耗时 | [8 §6](8-advanced.md) | `text_hud`、`debug_draw` |
 

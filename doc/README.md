@@ -17,7 +17,8 @@
 
 | 难度 | 文档 | 内容 |
 | --- | --- | --- |
-| 🟢 入门 | [user/1-getting-started.md](user/1-getting-started.md) | 前置要求、克隆（含子模块）、各平台依赖、四种构建运行方式、演示操作 |
+| 🟢 入门 | [user/1-getting-started.md](user/1-getting-started.md) | 前置要求、克隆（含子模块）、各平台依赖与解析策略、四种构建运行方式、演示操作 |
+| 🟢 Demo 画廊 | [user/10-demos.md](user/10-demos.md) | 逐 demo 的画面叙述、操作键位、命令行选项与索引表（从根 README 拆出） |
 | 🟢 ① | [user/2-core-setup.md](user/2-core-setup.md) | 接入 `main.cpp` 的最小骨架：窗口/渲染线程/Renderer/每帧形状 |
 | 🟢 ①·补 | [user/2a-window-input-cli.md](user/2a-window-input-cli.md) | 窗口生命周期钩子、键盘/鼠标/滚轮输入、光标/截图/多窗口与 `gldxcli` 开关（每特性完整代码 + demo） |
 | 🟢 ② | [user/3-geometry-scene.md](user/3-geometry-scene.md) | 网格、材质、场景层级、实例化、绕序约定与两种细分（CPU 重网格 / TCS-TES） |
@@ -29,15 +30,16 @@
 | 🧰 排错 | [user/9-troubleshooting.md](user/9-troubleshooting.md) | 坑合集（Homebrew LLVM 工具链、`.idea`、黑屏、forward-compat、资源镜像、绕序与 sRGB 两条“闷暗”原因）＋报错速查表 |
 
 ### 2. 面向开发者 — [`developer/`](developer/README.md)
-- **[developer/design.md](developer/design.md)**：子系统分层与依赖方向、场景图、线性渲染管线（及为何不用完整 render graph）、材质/光照/UBO、两阶段资源管线、HDR 后期链、以 C++20 named module 交付。
+- **[developer/design.md](developer/design.md)**：子系统分层与依赖方向、场景图、线性渲染管线（及为何不用完整 render graph）、材质/光照/UBO、两阶段资源管线、HDR 后期链、以 C++20 named module 交付，末尾附**仓库目录树**。
 - **[developer/thread-safety.md](developer/thread-safety.md)**：把"GL 只在渲染线程"这条不变量落到代码的每一处机制——线程亲和断言、两阶段管线、锁的划分、move-only RAII、`std::expected` 错误传播，附新代码检查清单。
+- **[developer/release.md](developer/release.md)**：三平台手动触发的构建/发布流水线、平台差异（含 Windows 镜像钉死），以及 `scripts/release.sh` 的版本号锚点清单。
 
 ### 3. 面向 Agent — [`../AGENTS.md`](../AGENTS.md) + [`agents/`](agents/setup-environment.md)
 - 仓库根 [`../AGENTS.md`](../AGENTS.md)（**自动发现入口**）：面向检索的速查——关键事实、逐平台命令、文件地图、硬约束、常见报错→修复。
 - [`agents/setup-environment.md`](agents/setup-environment.md)：agent **替用户搭环境**的幂等流程（检测→安装→配置构建→验证，带成功判据）。
 - [`agents/author-program.md`](agents/author-program.md)：agent **替用户写/改程序**的运行手册（消费 `gldx` 的接线、子系统按需装配与极简管线、已验证 API 速查、异步加载、交付自检）。
 
-命令与标识符保持原文，便于精确匹配。**入口 `AGENTS.md` 刻意留在仓库根**——那是 agent 自动发现的标准位置。
+命令与标识符保持原文，便于精确匹配。**入口 `AGENTS.md` 刻意留在仓库根**——那是 agent 自动发现的标准位置。根 [README](../README.md) 只保留 ≤30 行的最小事实与快速开始（以及 `scripts/release.sh` 要改写的两个版本号锚点）；**其余细节一律写进本文档树**，新增长篇叙述或表格时请先找它属于哪一篇，不要塞回 README。
 
 ## 阅读顺序建议
 

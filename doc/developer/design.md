@@ -215,3 +215,71 @@ pass 中，从而让整帧（场景*与*自发光*与*天空盒）被一致地�
 
 一句话：**能表达“是谁的 GL 状态”的就封进那个对象，只属于“本 pass 这一帧怎么画”的保
 持开放。** 这与 `gldxwin` 对 GLFW 的“薄适配器 + 选择性封装”是同一套判断（见 §8）。
+
+## 10. 仓库布局
+
+§1 的分层说的是**依赖方向**，目录则按“一个目录一个概念、一个 demo 一个可执行”组织。机器可读的版本在仓库根 [AGENTS.md](../../AGENTS.md) 的“文件地图”（比这份更细，带逐文件的约定），这里是给人读的全景：
+
+```
+.
+├── cmake/                   # CMake 辅助模块（由根 CMakeLists include）：Dependencies.cmake(glfw/glad/glm/stb 探测) · Assimp.cmake(assimp 子项目)
+├── src/                      # 三个库 + 全部可执行，各自独立 CMakeLists，经根 add_subdirectory(src) 递归编排
+│   ├── CMakeLists.txt        #   编排：add_subdirectory(gldx/gldxwin/gldxcli) + GLFW_Template 可执行 + demo
+│   ├── main.cpp              # 最简 hello-triangle：import gldx/gldxwin/gldxcli，自定义 RenderPass + 内联 GLSL + 高层 Mesh 直渲窗口（最小实现基线，目标 GLFW_Template）
+│   ├── gldx/                 # 引擎子系统（分层，仅向下依赖），整体编译为 named module `gldx`（静态库）
+│   │   ├── CMakeLists.txt    #   add_library(gldx STATIC) + FILE_SET CXX_MODULES(gldx.cppm) + PUBLIC 传递 glfw/glad/glm
+│   │   ├── gldx.cppm         #   primary interface：export { #include } 聚合全部公共头
+│   │   ├── gmf.hpp           #   共享 global module fragment（GLAD/GLM/std 预包含）
+│   │   ├── core/             #   Platform.h(窗口/GLFW) · RenderContext(线程亲和)/GLBuffer/VertexArray/UBO/Sampler/Framebuffer
+│   │   ├── geometry/         #   Mesh / InstancedMesh / GeometryFactory
+│   │   ├── texture/          #   Texture2D / Texture2DArray / TextureCubeMap / RenderTexture
+│   │   ├── material/         #   PbrMaterial
+│   │   ├── shader/           #   ShaderProgram + 内嵌 GLSL（ShaderLib/… Shaders.h，单一真源）
+│   │   ├── camera/ light/ shadow/   # Camera(orbit+飞行) / VoxelRay(DDA) / LightBuffer(UBO) / CascadedShadowMap / EnvironmentMap
+│   │   ├── voxel/            #   BlockRegistry / Chunk / ChunkMesher / VoxelMeshGpu（纯 CPU 网格化 + 上传记录）
+│   │   ├── util/             #   Noise（Perlin 2D/3D + fBm，确定性、无全局状态）
+│   │   ├── scene/            #   Scene / SceneNode / Transform（纯 CPU 层级）
+│   │   ├── render/           #   Renderer / RenderPass / RenderFrame / 后期链 / SpriteBatch / TextRenderer / ParticleBatch / Voxel 两 pass
+│   │   ├── text/ assets/ debug/     # 字体·异步资源·DebugDraw/Profiler/Picking/Frustum
+│   │   ├── ...               #   引擎各 .cpp 均为 `module gldx;` 实现单元
+│   │   └── third_party/      #   stb_image_impl.cpp（唯一第三方实现 TU，非模块接口）
+│   ├── gldxwin/              # 引擎无关窗口库：named module `gldxwin`（gldx::win::App 单例 + 多窗口 Window + 帧循环），仅链 glfw+GLAD，不 import gldx
+│   │   ├── CMakeLists.txt    #   add_library(gldxwin STATIC App.cpp Window.cpp)
+│   │   ├── gldxwin.cppm      #   App / Window / WindowDesc / FrameInfo / RunOptions（OnCreate/OnFrame/OnDestroy 钩子）
+│   │   ├── App.cpp / Window.cpp / gmf.hpp
+│   ├── gldxcli/              # 命令行开关库：named module `gldxcli`（gldx::cli::Flags），纯标准库、零链接依赖（原 demo_cli.h 迁入）
+│   │   ├── CMakeLists.txt    #   add_library(gldxcli STATIC gldxcli.cpp)
+│   │   ├── gldxcli.cppm / gldxcli.cpp
+│   ├── demo/                 # 一个功能一个入门 demo；每个含 main.cpp 的子目录被 add_subdirectory 自动收为一个可执行（import gldx/gldxwin/gldxcli）
+│   │   ├── CMakeLists.txt    #   add_gldx_demo(<name>) + GLOB 遍历含 main.cpp 的子目录（新增 demo 免改 CMake）
+│   │   ├── pbr_showcase/     #   成品演示：HDR/PBR/CSM/IBL/Bloom/天空盒/实例化/HUD 全开的交互场景（main + Input.{h,cpp} + Scene.{h,cpp}）
+│   │   ├── hello_triangle/   #   基线对照 demo：与 src/main.cpp 同一个三角形，但手搭 VertexArray/GLBuffer/AttachAttribute（Mesh 底层发生了什么）
+│   │   ├── voxel_terrain/    #   成品演示：可玩体素世界（main + World.{h,cpp} + Input.{h,cpp} + Hud.{h,cpp} + Streaming.{h,cpp}，世界层在 demo 侧）
+│   │   ├── glass_water/      #   成品演示：自由飞行的玻璃/水面场景，五层透明状态机（main + Scene.{h,cpp} + Input.{h,cpp} + BlendPass.{h,cpp} + Hud.{h,cpp} + Shaders.h），四道正确性闸门各自可关，材质是电介质 Cook-Torrance，`Tab` 切透视/正交
+│   │   ├── pbr_lighting/ shadow_csm/ ibl_environment/ postprocess_bloom/ skybox/   # 各渲染子系统单功能 demo
+│   │   ├── instancing/ particles/ text_hud/ camera_picking/ debug_draw/            # 各能力单功能 demo
+│   │   ├── geometry_upload/ model_loading/                                       # 几何上传 / 异步模型 demo
+│   │   ├── texture_samplers/ #   采样器 demo（main + SamplerPass.{h,cpp}：VertexArray/GLBuffer/Sampler RAII，无裸 GL 脚手架）
+│   │   ├── textured_sphere/  #   贴图球体 demo：一条索引流、两种细分——CPU 侧 `segments`/`rings` 实时重网格，同一份 MeshData 以 `Mesh::DrawAs(GL_PATCHES)` 送进 TCS/TES 做硬件细分；三张程序化 equirectangular 贴图免外部文件
+│   │   ├── shader_file/      #   从磁盘加载 GLSL（CreateFromFiles 两文件版）：坏路径 exit 1、无路径退回内嵌源
+│   │   ├── geometry_shader/  #   选择性装配几何阶段：CreateFromSources({Vertex,Geometry,Fragment})，喂 GL_POINTS 扩成方块阵
+│   │   ├── geometry_shader_file/ #  多阶段从文件加载：CreateFromFiles({{Vertex},{Geometry},{Fragment}}) 从磁盘装配含几何阶段的程序（无路径时退回内嵌源）
+│   │   ├── shader_stages/    #   全 5 阶段集成：CreateFromSources 装配 Vertex+TessControl+TessEval+Geometry+Fragment，画 GL_PATCHES 细分线框（main + Stages.h）
+│   │   ├── menger_sponge/    #   着色阶段生成几何：`gl_VertexID` 做 20 进制解码（`uLevel` 就是细分层级，调档不重建）+ transform feedback 自细分队列（GPU 决定还有多少块要分）（main + MengerShaders.h）
+│   │   ├── multi_viewport/   #   多窗口同步视图：每窗独立 context 串行重渲同一场景（main 接线 + SharedState.{h,cpp} + View.{h,cpp}，atomic 共享态 + 后台 worker，线程/上下文安全验收场）
+│   │   ├── render_passes/    #   多窗口 + for 循环装配不同 RenderPass 子类：ClearPass + Triangle/Quad/Line/Point（main + SharedState.{h,cpp} + Passes.{h,cpp} + View.{h,cpp}，一表多态、各窗独立 context 同步时钟）
+│   │   └── multi_window_levels/  # 多窗口的同步↔异步、per-window 剔除、LOD/视距分档、完全无关的独立 context：五个“等级”窗（main + Profiles.{h,cpp} + SharedState.{h,cpp} + View.{h,cpp}）
+│   └── assets/               # 内容资源（不被编译）：GLSL 参考镜像 + 模型投放目录，与 gldx 代码同级
+│       ├── shaders/          #   内嵌 GLSL 的只读参考镜像（不被编译/加载）
+│       └── models/           #   FBX/OBJ/glTF 投放目录（运行期经 AssetManager 异步加载）
+├── doc/                      # 使用者(user/，含 Demo 画廊) + 开发者(developer/: 设计+线程安全+发布)；agent 速查见根 AGENTS.md
+├── third_party/
+│   ├── glad/                 # 子模块：glad2 生成器（OpenGL 4.1 Core 绑定）
+│   ├── stb/                  # 子模块：header-only 图像/字体
+│   └── assimp/               # 子模块：模型导入（源码内置构建）
+├── scripts/                  # build.sh / run.sh / clean.sh（由 CMake 生成）+ release.sh（版本号单源同步）
+├── .github/workflows/        # 手动触发的三平台构建 + 发布流水线（见 release.md）
+└── CMakeLists.txt            # 根：~60 行 orchestrator（project/标准/option → include(cmake/) → add_subdirectory(src) → 脚本生成 + Summary）
+```
+
+逐 demo 演示什么、仍回 [使用者文档的 Demo 画廊](../user/10-demos.md)。

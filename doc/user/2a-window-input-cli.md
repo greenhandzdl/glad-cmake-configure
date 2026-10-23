@@ -436,7 +436,34 @@ const double quit = flags.quitAfter();                        // --quit-after �
 
 未识别的开关/特性会往 stderr 打一行提示（`--help lists the switches`），拼错的脚本参数不会静默通过。`--quit-after` 与 `run.sh`、CI 无头扫描配套：`Run({flags.quitAfter()})` 到点自关。
 
-🔗 **现场演示**：`--help` 看全表在 [`../../src/demo/pbr_showcase/main.cpp`](../../src/demo/pbr_showcase/main.cpp)（features/options 全列表）；`--windows/--shot-at/--shot-prefix` 用法见 [`../../src/demo/multi_viewport/main.cpp`](../../src/demo/multi_viewport/main.cpp)（第 61–69 行）。命令行开关与键位总表见 [根 README](../../README.md#命令行功能开关无键盘自检)。
+### 8.1 共享开关总表（无键盘自检）
+
+所有 demo（`src/demo/{feature}/`，含成品 `pbr_showcase` / `voxel_terrain`）都接受同一组共享开关，用途是脚本化地逐项开关渲染功能并截图对比——回归验证与“某个开关静默失效”的唯一可靠查法：
+
+```bash
+./output/voxel_terrain  --off fog,water,sky,particles --quit-after 8
+./output/pbr_showcase   --on instances,debug,ortho --off ibl --quit-after 8
+./output/shadow_csm     --off shadow --quit-after 3   # 单功能 demo 只列它演示的那个开关
+```
+
+| 开关 | 作用 |
+|------|------|
+| `--off a,b` / `--on a,b` | 关闭/打开列出的功能（PBR：`shadow,ibl,bloom,debug,instances,sky,ortho`；体素：`particles,fog,water,sky,ortho,double-sided`；透明：`sort,depthwrite,shell,cull,wireframe,glow,bloom,hud,capture,ortho`） |
+| `--quit-after SEC` | SEC 秒后自行退出 |
+| `--freeze-at SEC` | 把动画/物理时钟停在启动后 SEC 秒：两次同参数运行逐像素相同，截图才可对比（并且不捕获指针，视角停在 `--yaw/--pitch` 处） |
+| `--yaw/--pitch/--radius` | 设定 PBR 轨道相机朝向（实例化场在 +x 方向，默认视角看不到它，也看不到地平线） |
+| `--yaw/--pitch/--rise` | 设定体素飞行相机的朝向与出生高度（默认俯角下准星射线落在交互距离之外，脚本挖掘需要更陡的俯角） |
+| `--auto-break N` / `--auto-place N` | 脚本化挖 N 块 / 放 N 块，走与点击完全相同的路径（DDA 拾取 → 编辑 → remesh → 碎屑） |
+| `--select ID` | 预选方块类型（`7` = 水，配合 `--auto-place` 造出可验证的水面） |
+| `--pos-x/--pos-y/--pos-z` + `--yaw/--pitch` | 设定 `glass_water` 飞行相机的出生点与朝向（透明错序只在“视线穿过两层以上”时可见，所以取证视角必须钉死） |
+| `--blend straight\|premultiplied\|additive` | 选混合方程（`glass_water`，**默认 `premultiplied`**：三种方程对“a=0.5 是什么”给三种答案，additive 是排序开关的对照组；标量 alpha 下 straight 与 premultiplied 逐字节相同） |
+| `--wave N` / `--speed N` | 海面波幅 / 飞行速度（`glass_water`，全部夹在合法区间内） |
+| `--on ortho` + `--fov N` / `--ortho-height N` | `glass_water` 的投影：`--on ortho` 直接以正交取景出生（把掠射渐变拿掉，是菲涅耳项的对照组），`--fov`（8..110）与 `--ortho-height`（盒高 2..80 m）是同一个滚轮在两种模式下驱动的两个量，`Tab` 在交互里切换 |
+| `--snapshot PATH` [--snap-at SEC] | 无头出一张图（不弹窗），与 `--freeze-at` 配合做像素对照 |
+
+拿这些开关做过的事（逐 demo 的取证像素差、退出统计行、畸形 argv 的对抗输入自检）记在 [Demo 画廊 §4](10-demos.md) 与 [进阶 §1.1](8-advanced.md)。
+
+🔗 **现场演示**：`--help` 看全表在 [`../../src/demo/pbr_showcase/main.cpp`](../../src/demo/pbr_showcase/main.cpp)（features/options 全列表）；`--windows/--shot-at/--shot-prefix` 用法见 [`../../src/demo/multi_viewport/main.cpp`](../../src/demo/multi_viewport/main.cpp)（第 61–69 行）。逐 demo 的键位与画面叙述见 [Demo 画廊](10-demos.md)。
 
 ---
 

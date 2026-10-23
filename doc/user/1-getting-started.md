@@ -57,13 +57,23 @@ vcpkg install glfw3 glm
 pip install jinja2         # 生成 GLAD 需要
 ```
 
-依赖解析策略：GLFW 走系统包；GLAD **系统优先、子模块回退**；GLM header-only；STB/Assimp 由子模块内置构建。最终可执行文件只依赖 GLFW（共享库）+ GLAD（静态、运行期动态加载 GL），无需手动链接 OpenGL/X11/Cocoa。
+依赖解析策略一览：
+
+| 依赖 | 来源 | 解析方式 |
+|------|------|----------|
+| **GLFW** | 系统包管理器 | `find_package(glfw3)`，使用导入目标 `glfw`（Homebrew / apt / vcpkg 均导出该目标） |
+| **GLAD** | 系统优先，子模块回退 | 先 `find_package(glad CONFIG)`；未找到时用 `third_party/glad` 生成 OpenGL **4.1 Core** 绑定并编译为静态库 `glad_gl_core_41` |
+| **GLM** | 系统包管理器 | `find_path(GLM_INCLUDE_DIR glm/glm.hpp)`，header-only |
+| **STB** | git 子模块 | header-only，提供 `stb` INTERFACE 目标；由 `src/gldx/third_party/stb_image_impl.cpp` 实例化图像/字体解码 |
+| **Assimp** | git 子模块（可选） | 由 `GLDX_ENABLE_ASSIMP`（默认 `ON`）控制：`ON` 时 `add_subdirectory` 源码内置构建（导入器 only）、链接 `assimp::assimp`；`OFF` 时整个 assimp 依赖不构建、`ModelLoader::Load` 降级为“模型导入不可用”，体素/程序化几何/PBR 不受影响（`model_loading` demo 在 OFF 下会优雅提示不可用而非崩溃） |
+
+> GLAD 采用「系统优先、仓库回退」：系统装有 GLAD 时直接链接 `glad::glad`；否则现场调用子模块内的 glad2 生成器（需 Python 3 + jinja2，缺失时回退到隔离的 `uv` venv）生成绑定。无论走哪条路径，最终可执行文件只依赖 GLFW（共享库）与 GLAD（静态库，运行期动态加载 GL），因此无需再手动链接 OpenGL / X11 / Cocoa 等系统库。
 
 ---
 
 ## 4. 构建与运行
 
-四种方式任选其一。产物固定在 `output/`：`GLFW_Template`（`src/main.cpp` 的 hello-triangle 最小演示）与 `src/demo/` 下每个 feature demo 一个可执行（`pbr_showcase`、`voxel_terrain`…共 16 个）（Windows 加 `.exe`）。
+四种方式任选其一。产物固定在 `output/`：`GLFW_Template`（`src/main.cpp` 的 hello-triangle 最小演示）与 `src/demo/` 下每个 feature demo 一个可执行（`pbr_showcase`、`voxel_terrain`…共 26 个）（Windows 加 `.exe`）。
 
 ### 4.1 命令行（跨平台通用）
 
@@ -74,7 +84,13 @@ cmake --build build
 ./output/pbr_showcase         # 任一功能 demo：./output/<demo>
 ```
 
-配置结束会打印依赖摘要，例如 `GLAD : submodule (OpenGL 4.1 Core)`。
+配置结束会打印依赖解析摘要，便于确认 GLAD 与 Assimp 的来源（形状为 `GLFW_Template <版本> configuration:` 加两行 `GLAD : submodule (OpenGL 4.1 Core)` / `Assimp : submodule (static, bundled zlib)`，各项都可替为 `system` 或 `DISABLED`）。
+
+不需要模型导入时，可用 `-DGLDX_ENABLE_ASSIMP=OFF` 去掉这个重依赖（连子模块都不必拉）：
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGLDX_ENABLE_ASSIMP=OFF
+```
 
 ### 4.2 CMake Presets（macOS 便捷路径，推荐）
 
@@ -93,12 +109,19 @@ cmake --build --preset Debug
 配置阶段会由 `scripts/*.sh.in` 生成：
 
 ```bash
-./scripts/build.sh [debug|release]   # 配置并构建
-./scripts/run.sh [demo]                # 运行 output 下的可执行（默认 GLFW_Template=hello-triangle，例 run.sh pbr_showcase）
+./scripts/build.sh [debug|release]   # 配置并构建（全部 demo）
+./scripts/run.sh                     # 运行默认目标 GLFW_Template（hello-triangle）
+./scripts/run.sh pbr_showcase        # 运行指定 demo（其后参数原样传给程序）
+./scripts/run.sh pbr_lighting --quit-after 3   # 无头自检：3 秒后自行退出
 ./scripts/clean.sh                   # 清理构建产物
 # 等价的 CMake 目标：
 cmake --build build --target clean-project
 ```
+
+`build.sh` 会自动挑一个能扫模块依赖的组合：有 `ninja` 就用 `-G Ninja`；在 macOS 上若未指定
+`$CXX` 且缓存里还指向 Apple 工具链，则导出 Homebrew LLVM 的 `CC/CXX`（与 CI 一致）。
+生成器或编译器与既有 `CMakeCache.txt` 不符时自动加 `--fresh` 重配置，不必手动清理。
+想用自己指定的工具链，照旧显式导出即可（`CXX=... ./scripts/build.sh`），脚本不覆盖。
 
 ### 4.4 用 CLion 打开
 
@@ -123,12 +146,13 @@ CLion 会自动导入 `CMakePresets.json`。**macOS 上唯一要做的**：在 `
 
 在 `pbr_showcase` 里能看到球阵和阴影、按 `1..6` 与 `Tab` 有明显画面变化，就说明**整条工具链 + 运行库都通了**。
 
-另两个成品演示：`voxel_terrain`（`./scripts/run.sh voxel_terrain`）是可玩的体素世界，验收引擎的体素原语。此外 `src/demo/` 下还有一批单功能入门 demo（`pbr_lighting`、`shadow_csm`、`ibl_environment`、`postprocess_bloom`、`skybox`、`instancing`、`particles`、`text_hud`、`camera_picking`、`debug_draw`、`geometry_upload`、`texture_samplers`、`model_loading`），每个只装配一个子系统。着色器装配与多窗口专项：`shader_file`（从磁盘加载 GLSL、两文件版）、`geometry_shader_file`（多阶段从磁盘加载：V+Geom+F 全走 `CreateFromFiles({...})`）、`geometry_shader`（选择性挂几何阶段）、`shader_stages`（一次集成全 5 个图形阶段、画 GL_PATCHES 细分线框）、`multi_viewport`（N 窗独立 context 同步重渲同一场景）、`render_passes`（N 窗 + 一个 for 循环装配 Clear/Triangle/Quad/Line/Point 多个不同 `RenderPass` 子类、共设一个原子时钟）。操作键位与可脚本化的命令行开关（`--off/--on/--freeze-at/--quit-after`，`--help` 看全表）见 [根 README](../../README.md#命令行功能开关无键盘自检)。
+另两个成品演示：`voxel_terrain`（`./scripts/run.sh voxel_terrain`）是可玩的体素世界，验收引擎的体素原语。此外 `src/demo/` 下还有一批单功能入门 demo（`pbr_lighting`、`shadow_csm`、`ibl_environment`、`postprocess_bloom`、`skybox`、`instancing`、`particles`、`text_hud`、`camera_picking`、`debug_draw`、`geometry_upload`、`texture_samplers`、`model_loading`），每个只装配一个子系统。着色器装配与多窗口专项：`shader_file`（从磁盘加载 GLSL、两文件版）、`geometry_shader_file`（多阶段从磁盘加载：V+Geom+F 全走 `CreateFromFiles({...})`）、`geometry_shader`（选择性挂几何阶段）、`shader_stages`（一次集成全 5 个图形阶段、画 GL_PATCHES 细分线框）、`multi_viewport`（N 窗独立 context 同步重渲同一场景）、`render_passes`（N 窗 + 一个 for 循环装配 Clear/Triangle/Quad/Line/Point 多个不同 `RenderPass` 子类、共设一个原子时钟）。操作键位与可脚本化的命令行开关（`--off/--on/--freeze-at/--quit-after`，`--help` 看全表）见 [①·补 §8.1 共享开关总表](2a-window-input-cli.md)，逐 demo 的画面叙述、键位与索引表在 [Demo 画廊](10-demos.md)。
 
 ---
 
 ## 下一步
 
 - 想在自己的程序里用 `gldx` → [🟢 ① 核心骨架](2-core-setup.md)，紧接着看 [🟢 ①·补 窗口·输入·命令行](2a-window-input-cli.md)（键盘/鼠标/多窗口/截图/`--开关`）；后续 API 章（几何/资源/光照/相机/体素/进阶）见 [user 目录](README.md)
+- 想知道某个 demo 到底演示什么、按什么键 → [🟢 Demo 画廊](10-demos.md)
 - 想知道"为什么全黑 / 为什么 CLion 没配置" → [🧰 排错](9-troubleshooting.md)
 - 想理解引擎为什么这样设计 → [../developer/design.md](../developer/design.md)

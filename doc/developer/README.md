@@ -4,8 +4,9 @@
 
 | 文档 | 讲什么 |
 | --- | --- |
-| [design.md](design.md) | 分层子系统与依赖方向、场景图、线性渲染管线（及为何不用完整 render graph）、材质/光照/UBO、两阶段资源管线、HDR 后期链、以 C++20 named module 交付 |
+| [design.md](design.md) | 分层子系统与依赖方向、场景图、线性渲染管线（及为何不用完整 render graph）、材质/光照/UBO、两阶段资源管线、HDR 后期链、以 C++20 named module 交付；§10 附仓库目录树 |
 | [thread-safety.md](thread-safety.md) | 把"GL 只在渲染线程"这条不变量落到代码每一处的机制：线程亲和断言、两阶段管线、锁的划分、move-only RAII、`std::expected` 错误传播；附**新代码检查清单** |
+| [release.md](release.md) | 三平台手动触发的构建/发布流水线（输入参数、矩阵行为、制品命名）、平台差异（Windows 镜像钉死、Linux 显式 include、macOS Homebrew LLVM），以及 `scripts/release.sh` 改写的版本号锚点清单 |
 
 ## 贡献前的最短路径
 
