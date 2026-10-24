@@ -4,6 +4,9 @@
 /build-*/
 /cmake-build-*/
 
+# 取证截图、快照与实验报告等本地产物，一律不入库
+/outputs/
+
 # Generated scripts
 /scripts/build.sh
 /scripts/clean.sh
