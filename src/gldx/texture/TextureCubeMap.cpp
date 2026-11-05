@@ -6,15 +6,6 @@ module gldx;
 
 namespace gldx {
 
-namespace {
-// Cube face targets in the canonical order +X -X +Y -Y +Z -Z.
-constexpr GLenum kFaceTargets[6] = {
-    GL_TEXTURE_CUBE_MAP_POSITIVE_X, GL_TEXTURE_CUBE_MAP_NEGATIVE_X,
-    GL_TEXTURE_CUBE_MAP_POSITIVE_Y, GL_TEXTURE_CUBE_MAP_NEGATIVE_Y,
-    GL_TEXTURE_CUBE_MAP_POSITIVE_Z, GL_TEXTURE_CUBE_MAP_NEGATIVE_Z,
-};
-} // namespace
-
 TextureCubeMap::~TextureCubeMap() {
     if (id_ != 0) {
         RenderContext::AssertRenderThread("~TextureCubeMap");
@@ -60,7 +51,7 @@ void TextureCubeMap::Upload(const TextureCubeDesc& desc) {
         for (int f = 0; f < 6; ++f) {
             const std::uint16_t* face =
                 desc.half.empty() ? nullptr : desc.half.data() + static_cast<std::size_t>(f) * faceHalfs;
-            glTexImage2D(kFaceTargets[f], 0, internal, desc.size, desc.size, 0,
+            glTexImage2D(kCubeFaceTargets[f], 0, internal, desc.size, desc.size, 0,
                          GL_RGBA, GL_HALF_FLOAT, face);
         }
     } else {
@@ -69,7 +60,7 @@ void TextureCubeMap::Upload(const TextureCubeDesc& desc) {
         for (int f = 0; f < 6; ++f) {
             const std::uint8_t* face =
                 desc.rgba.empty() ? nullptr : desc.rgba.data() + static_cast<std::size_t>(f) * faceBytes;
-            glTexImage2D(kFaceTargets[f], 0, internal, desc.size, desc.size, 0,
+            glTexImage2D(kCubeFaceTargets[f], 0, internal, desc.size, desc.size, 0,
                          GL_RGBA, GL_UNSIGNED_BYTE, face);
         }
     }

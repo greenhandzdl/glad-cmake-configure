@@ -10,25 +10,6 @@ namespace gldx {
 
 namespace {
 
-// Cube face targets in the canonical +X -X +Y -Y +Z -Z order.
-constexpr GLenum kFaceTargets[6] = {
-    GL_TEXTURE_CUBE_MAP_POSITIVE_X, GL_TEXTURE_CUBE_MAP_NEGATIVE_X,
-    GL_TEXTURE_CUBE_MAP_POSITIVE_Y, GL_TEXTURE_CUBE_MAP_NEGATIVE_Y,
-    GL_TEXTURE_CUBE_MAP_POSITIVE_Z, GL_TEXTURE_CUBE_MAP_NEGATIVE_Z,
-};
-
-// Per-face orthonormal basis: {right, up, facing}. The sample direction for a
-// quad coordinate c in [-1,1] is c.x*right + c.y*up + facing. Writing and
-// reading faces with the same basis keeps the cube seam-consistent.
-const glm::vec3 kFaceBasis[6][3] = {
-    {{0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f}},    // +X
-    {{0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, {-1.0f, 0.0f, 0.0f}},  // -X
-    {{0.0f, 0.0f, -1.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}},   // +Y
-    {{0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, -1.0f, 0.0f}},   // -Y
-    {{0.0f, 1.0f, 0.0f}, {-1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -1.0f}},  // +Z
-    {{0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}},    // -Z
-};
-
 int MipCount(int baseSize) {
     return static_cast<int>(std::floor(std::log2(static_cast<float>(baseSize)))) + 1;
 }
@@ -99,17 +80,22 @@ bool EnvironmentMap::Compile() {
     return true;
 }
 
+// Every face is written through a fullscreen triangle whose shader maps its quad
+// coordinate c in [-1,1] to normalize(c.x*right + c.y*up + facing), so the frame
+// handed to that shader also has to be the frame a samplerCube read uses. Both come
+// from gldx::CubeFaceAxis - the engine's one cube convention, documented in
+// TextureCubeMap.h.
 void EnvironmentMap::RenderSky() {
     skyGenShader_.Use();
     skyGenShader_.Set("uSunDir", sunDir_);
     emptyVao_.Bind();
     for (int f = 0; f < 6; ++f) {
-        fbo_.AttachCubeFaceColor(sky_, kFaceTargets[f], 0, 0);
+        fbo_.AttachCubeFaceColor(sky_, kCubeFaceTargets[f], 0, 0);
         fbo_.Bind();
         fbo_.Viewport(skySize_, skySize_);
-        skyGenShader_.Set("uRight",   kFaceBasis[f][0]);
-        skyGenShader_.Set("uUp",      kFaceBasis[f][1]);
-        skyGenShader_.Set("uFacing",  kFaceBasis[f][2]);
+        skyGenShader_.Set("uRight",   CubeFaceAxis(f, 0));
+        skyGenShader_.Set("uUp",      CubeFaceAxis(f, 1));
+        skyGenShader_.Set("uFacing",  CubeFaceAxis(f, 2));
         emptyVao_.DrawArrays(GL_TRIANGLES, 0, 3);
     }
 }
@@ -120,12 +106,12 @@ void EnvironmentMap::RenderIrradiance() {
     sky_.Bind(0);
     emptyVao_.Bind();
     for (int f = 0; f < 6; ++f) {
-        fbo_.AttachCubeFaceColor(irradiance_, kFaceTargets[f], 0, 0);
+        fbo_.AttachCubeFaceColor(irradiance_, kCubeFaceTargets[f], 0, 0);
         fbo_.Bind();
         fbo_.Viewport(irradianceSize_, irradianceSize_);
-        irradianceShader_.Set("uRight",  kFaceBasis[f][0]);
-        irradianceShader_.Set("uUp",     kFaceBasis[f][1]);
-        irradianceShader_.Set("uFacing", kFaceBasis[f][2]);
+        irradianceShader_.Set("uRight",  CubeFaceAxis(f, 0));
+        irradianceShader_.Set("uUp",     CubeFaceAxis(f, 1));
+        irradianceShader_.Set("uFacing", CubeFaceAxis(f, 2));
         emptyVao_.DrawArrays(GL_TRIANGLES, 0, 3);
     }
 }
@@ -141,12 +127,12 @@ void EnvironmentMap::RenderPrefilter() {
         prefilterShader_.Set("uRoughness", roughness);
         const int size = (prefilterSize_ >> level) > 0 ? (prefilterSize_ >> level) : 1;
         for (int f = 0; f < 6; ++f) {
-            fbo_.AttachCubeFaceColor(prefilter_, kFaceTargets[f], level, 0);
+            fbo_.AttachCubeFaceColor(prefilter_, kCubeFaceTargets[f], level, 0);
             fbo_.Bind();
             fbo_.Viewport(size, size);
-            prefilterShader_.Set("uRight",  kFaceBasis[f][0]);
-            prefilterShader_.Set("uUp",     kFaceBasis[f][1]);
-            prefilterShader_.Set("uFacing", kFaceBasis[f][2]);
+            prefilterShader_.Set("uRight",  CubeFaceAxis(f, 0));
+            prefilterShader_.Set("uUp",     CubeFaceAxis(f, 1));
+            prefilterShader_.Set("uFacing", CubeFaceAxis(f, 2));
             emptyVao_.DrawArrays(GL_TRIANGLES, 0, 3);
         }
     }
