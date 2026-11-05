@@ -1,0 +1,180 @@
+#ifndef NIGHT_FOREST_SCENE_H
+#define NIGHT_FOREST_SCENE_H
+
+/**
+ * @file Scene.h
+ * @brief The night_forest world: everything that is drawn, as instances.
+ *
+ * The demo's claim is that a forest is cheap, and the claim lives here. The whole
+ * world is five GPU objects and they are all of them `InstancedMesh`: one ground
+ * plane (one instance), two tree species (~700 instances each), one crate (one
+ * instance, re-uploaded every frame) and one lantern (four instances). Fourteen
+ * hundred trees are two draw calls because a tree is *one* mesh: trunk and three
+ * canopy tiers are merged into a single vertex buffer on the CPU, and the two flat
+ * tones come from the vertex colour the engine's InstancedMesh now forwards to
+ * location 9. Had the tones come from the instance instead, bark and leaves
+ * would have needed separate instance arrays and the field would have cost four
+ * draws rather than two - which is the mistake this file exists to avoid making.
+ *
+ * Per-instance data is only ever a rigid transform plus a tint: translation, a
+ * rotation about Y, and ONE uniform scale. That is not a stylistic limit, it is
+ * what the vertex stage can do without an inverse (see kWorldVertex - it uses
+ * mat3(aInstance) and normalise() as the normal matrix, which is only correct
+ * while the scale is isotropic). Any squash wanted in the shape itself, like a
+ * broadleaf canopy flattened into a loaf, is baked into the mesh here on the CPU
+ * where affineInverse() is available.
+ *
+ * The vertex colour's alpha is not opacity. It is a per-vertex material mask -
+ * emissive strength and, through it, how much of a surface may be spent on the
+ * environment cube - because a per-draw uniform cannot say "this half of the
+ * mesh is a flame and this half is the iron around it" and the lantern needs
+ * exactly that. Shaders.h documents the other side of the arrangement.
+ *
+ * The crate's wander is a table, not an integrator. `MakeRoamTable` advances a
+ * fixed step from a seeded RNG once at startup and stores every pose; sampling
+ * it is a lookup and a lerp. That is what makes a randomly-moving object
+ * screenshot-reproducible: `--freeze-at` picks a table index rather than hoping
+ * the frame rate was the same twice, and the same seed at the same second is the
+ * same pose on any machine.
+ *
+ * NOTE: names gldx engine types, so include AFTER `import gldx;`.
+ */
+
+#include <cstdint>
+#include <vector>
+
+#include <glm/glm.hpp>
+
+namespace night_forest {
+
+// ---- the crate's scripted wander ------------------------------------------
+struct Pose {
+    glm::vec3 pos{0.0f, 0.0f, 0.0f};
+    float yaw = 0.0f;       // radians about +Y; the crate's face leads
+};
+
+struct Wander {
+    double startAt     = 3.0;    // "a certain moment": still before this, moving after
+    double stepSeconds = 0.1;    // fixed, so a pose is a table index rather than a dt sum
+    double horizon     = 600.0;  // seconds of path precomputed at startup
+    float  speed       = 1.15f;  // metres per second
+    float  radius      = 16.0f;  // roam area; the path steers back at the edge
+    float  turnChance  = 0.05f;  // per-step probability of a heading nudge
+    float  turnMax     = 0.85f;  // radians
+    float  size        = 1.25f;  // cube edge in metres
+};
+
+// The full path, from the seed alone. Deterministic by construction: one
+// mt19937, one fixed step, no dependence on how many frames were rendered.
+std::vector<Pose> MakeRoamTable(const Wander& w, std::uint32_t seed);
+
+// The pose at wall-clock `seconds`. Before `w.startAt` this is the parked pose,
+// and past the table's end it is the last one, so a long-running session cannot
+// walk off the array.
+Pose SampleRoam(const std::vector<Pose>& table, const Wander& w, double seconds);
+
+// Instance matrix for a crate pose. Translation + Y rotation + one uniform
+// scale, which is the contract kWorldVertex's normal handling depends on.
+glm::mat4 CrateTransform(const Pose& p, float size);
+
+// ---- scene configuration (Stage A, read once by Build) --------------------
+struct Config {
+    int    treeCount = 1400;
+    std::uint32_t seed = 20261104u;
+    float  ringMin   = 9.0f;     // inner edge of the tree band (metres)
+    float  ringMax   = 95.0f;    // outer edge; fog swallows anything past ~160
+    float  scaleMin  = 0.65f;
+    float  scaleMax  = 2.30f;
+    int    firShare  = 58;       // percent of the field that is conifer
+    float  clearing  = 6.5f;     // kept treeless, so the crate has room to be seen
+    float  minSpacing = 3.1f;    // rejection radius, keeps canopies from merging
+    float  groundHalf = 200.0f;  // the plane's instance scale
+    int    grassTile  = 48;      // uv repeats across the whole plane
+    Wander wander;
+};
+
+// ---- CPU-side geometry (Stage A) ------------------------------------------
+// A conifer: a tapered trunk and three faceted cones, each with its own vertex
+// colour. Faceted rather than smooth on purpose - under a Gooch band a flat
+// shade IS the brush stroke, and a smooth canopy turns the three cone tiers into
+// one green bulb.
+gldx::MeshData MakeFirMesh();
+// A broadleaf: the same trunk, one sphere canopy flattened into a loaf. The
+// squash is baked here (non-uniform scale), not handed to the instance.
+gldx::MeshData MakeBroadleafMesh();
+// The crate: a cube whose faces each carry the full 0..1 uv, so the plank map
+// lands one panel per face, and whose alpha channel is 1 - the per-vertex
+// emissive mask (Shaders.h) says "this surface may spend some of its pixels on
+// the environment cube".
+gldx::MeshData MakeCrateMesh();
+// A lantern: an iron frame (mask 0) around a glowing core (mask 1). Four of
+// these are also four point lights, so the geometry and the light setup in
+// main.cpp must come from the same positions - Scene keeps that list.
+gldx::MeshData MakeLanternMesh();
+// Ground: the engine's Plane, which is 4 vertices in the XZ plane with uv 0..1
+// across the whole sheet. Size arrives as an instance scale, so the tiling has
+// to come from the uv scale uniform rather than from the vertex data.
+gldx::MeshData MakeGroundMesh();
+
+// ---- CPU-side textures (Stage A) -----------------------------------------
+gldx::Texture2DDesc MakeWhiteDesc();
+gldx::Texture2DDesc MakeGrassDesc(int size = 512, std::uint32_t seed = 0x9e37u);
+gldx::Texture2DDesc MakeWoodDesc(int size = 512);
+
+// The world. Owns the GPU resources; Build() must run on the render thread and
+// the object must die before the context does (main.cpp keeps it inside the
+// lambda that owns the window's scope).
+class Scene {
+public:
+    Config config;
+
+    // Uploads geometry + textures and fills every instance array. The tree
+    // scatter runs here, so `config.seed` alone decides the forest - and two runs
+    // of one seed draw the same triangles in the same order.
+    void Build();
+
+    // Repositions the crate. Render-thread only: it re-uploads ONE instance, so
+    // the moving object costs a 32-byte buffer write while the forest behind it
+    // is never touched again.
+    void UpdateCrate(double seconds, bool roaming);
+
+    // The four lantern positions, which main.cpp turns into point lights. Shared
+    // by construction with the geometry, so a glow cannot sit where no lamp is.
+    [[nodiscard]] const std::vector<glm::vec3>& lanterns() const noexcept { return lanternPos_; }
+
+    [[nodiscard]] const gldx::InstancedMesh& ground()    const noexcept { return ground_; }
+    [[nodiscard]] const gldx::InstancedMesh& fir()       const noexcept { return fir_; }
+    [[nodiscard]] const gldx::InstancedMesh& broadleaf() const noexcept { return broadleaf_; }
+    [[nodiscard]] const gldx::InstancedMesh& crate()     const noexcept { return crate_; }
+    [[nodiscard]] const gldx::InstancedMesh& lantern()   const noexcept { return lantern_; }
+
+    [[nodiscard]] const gldx::Texture2D& grass()  const noexcept { return grass_; }
+    [[nodiscard]] const gldx::Texture2D& wood()   const noexcept { return wood_; }
+    [[nodiscard]] const gldx::Texture2D& white()  const noexcept { return white_; }
+
+    [[nodiscard]] int grassTile() const noexcept { return config.grassTile; }
+    [[nodiscard]] Pose cratePose() const noexcept { return cratePose_; }
+    [[nodiscard]] const std::vector<Pose>& roamTable() const noexcept { return roam_; }
+
+    // Evidence for the HUD: what the field actually ended up holding. The
+    // scatter rejects candidates that are too close or outside the band, so the
+    // requested count and the planted count differ, and a panel that printed the
+    // request would be printing a wish.
+    [[nodiscard]] std::uint32_t plantedFir()  const noexcept { return fir_.count(); }
+    [[nodiscard]] std::uint32_t plantedBroad() const noexcept { return broadleaf_.count(); }
+    [[nodiscard]] std::uint32_t rejected()   const noexcept { return rejected_; }
+    [[nodiscard]] float groundHalf() const noexcept { return config.groundHalf; }
+    [[nodiscard]] float crateSize() const noexcept { return config.wander.size; }
+
+private:
+    gldx::InstancedMesh ground_, fir_, broadleaf_, crate_, lantern_;
+    gldx::Texture2D grass_, wood_, white_;
+    std::vector<glm::vec3> lanternPos_;
+    std::vector<Pose> roam_;
+    Pose cratePose_;
+    std::uint32_t rejected_ = 0;
+};
+
+} // namespace night_forest
+
+#endif // NIGHT_FOREST_SCENE_H
