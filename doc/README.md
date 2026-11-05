@@ -18,7 +18,7 @@
 | 难度 | 文档 | 内容 |
 | --- | --- | --- |
 | 🟢 入门 | [user/1-getting-started.md](user/1-getting-started.md) | 前置要求、克隆（含子模块）、各平台依赖与解析策略、四种构建运行方式、演示操作 |
-| 🟢 Demo 画廊 | [user/10-demos.md](user/10-demos.md) | 逐 demo 的画面叙述、操作键位、命令行选项与索引表（从根 README 拆出） |
+| 🟢 Demo 画廊 | [user/10-demos.md](user/10-demos.md) | 逐 demo 的画面叙述、操作键位、命令行选项与索引表（从根 README 拆出；末尾 §5 是 cube 面约定的取证手法） |
 | 🟢 ① | [user/2-core-setup.md](user/2-core-setup.md) | 接入 `main.cpp` 的最小骨架：窗口/渲染线程/Renderer/每帧形状 |
 | 🟢 ①·补 | [user/2a-window-input-cli.md](user/2a-window-input-cli.md) | 窗口生命周期钩子、键盘/鼠标/滚轮输入、光标/截图/多窗口与 `gldxcli` 开关（每特性完整代码 + demo） |
 | 🟢 ② | [user/3-geometry-scene.md](user/3-geometry-scene.md) | 网格、材质、场景层级、实例化、绕序约定与两种细分（CPU 重网格 / TCS-TES） |

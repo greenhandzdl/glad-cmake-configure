@@ -144,7 +144,7 @@ int main(int argc, char** argv) {
 | 视锥剔除 | `gldx::Frustum fr; fr.Extract(viewProj);` | GeometryPass 用它剔可见 |
 | 后期 | `gldx::PostProcessChain post; post.Init(); post.SetExposure(x);` | |
 | 阴影 | `gldx::CascadedShadowMap csm; csm.Init(2048);` | |
-| 环境/天空 | `gldx::EnvironmentMap env; env.Generate(travel,256,32,256);` `gldx::SkyboxRenderer sky; sky.Init();` | |
+| 环境/天空 | `gldx::EnvironmentMap env; env.Generate(travel,256,32,256);` `gldx::SkyboxRenderer sky; sky.Init();` | 形参叫 `sunDir` 但传的是**行进方向**（`-向太阳`）。要自己往 cube 写面：六面基与 target 枚举全仓只有一份（`src/gldx/texture/TextureCubeMap.h` 的 `gldx::CubeFaceAxis`/`kCubeFaceTargets`，按 GL §8.13），**不得另抄**——写读同表时错表不裂接缝也不报错，只会让落点错（实测旧表差 8°，±Z 两面 `facing` 符号反了差 172°），取证手法见 `doc/user/10-demos.md` §5 |
 | 光照 | `gldx::LightBuffer lb; lb.Init(); gldx::LightSetup s; s.sun.{direction,color,intensity}; s.ambient; lb.Update(s, camPos);` | |
 | 实例化 | `gldx::InstancedMesh im; if (!im.Create(std::move(geo), std::move(insts))) {...}` | **成员函数非静态**，返回 `bool`；`gldx::Instance{model(mat4),color(vec4)}` |
 | 拾取 | `gldx::PickRay(px,py,fbw,fbh,invViewProj)` → `gldx::Ray`；`gldx::PickNearest(ray, spheres)`→index | 像素是 framebuffer 坐标（Retina 下先从 GLFW 窗口坐标乘 scale）；`spheres: vector<pair<vec3,float>>`，取自 `scene.PickTargets()` |

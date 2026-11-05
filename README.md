@@ -1,6 +1,6 @@
 # GLFW + GLAD CMake 图形引擎
 
-跨平台（Windows / macOS / Linux）的 **现代 OpenGL 图形引擎 / PBR 渲染器**：源自一个用 **GLFW** 建窗、**GLAD** 加载函数的 CMake 起步模板，现已成长为一套分层的 `gldx` 引擎子系统。`src/main.cpp` 只留**最简 hello-triangle** 作为“最小实现”基线，其余一个功能一个 demo 在 `src/demo/{feature}/`（成品演示 `pbr_showcase`、可玩体素世界 `voxel_terrain`、五层透明状态机 + 电介质 Cook-Torrance 水面 + 透视/正交切换的 `glass_water`…共 26 个）。
+跨平台（Windows / macOS / Linux）的 **现代 OpenGL 图形引擎 / PBR 渲染器**：源自一个用 **GLFW** 建窗、**GLAD** 加载函数的 CMake 起步模板，现已成长为一套分层的 `gldx` 引擎子系统。`src/main.cpp` 只留**最简 hello-triangle** 作为“最小实现”基线，其余一个功能一个 demo 在 `src/demo/{feature}/`（成品演示 `pbr_showcase`、可玩体素世界 `voxel_terrain`、五层透明状态机 + 电介质 Cook-Torrance 水面 + 透视/正交切换的 `glass_water`、1400 棵树 5 次 draw + 星空 cube + FBO 反射折射的 `night_forest`…共 27 个）。
 
 - **语言与交付**：C++23；引擎以 **C++20 named module `gldx`**（静态库）交付，另有窗口库 `gldxwin` 与命令行库 `gldxcli`——消费者统一 `import gldx; import gldxwin; import gldxcli;`
 - **图形面**：OpenGL **4.1 Core**（GLSL `#version 410 core`）· PBR 金属/粗糙 · 级联阴影 · IBL · HDR + MSAA + Bloom + ACES · 分层透明（alpha 由菲涅耳与吸收守恒推导）· 透视/正交切换 · 实例化 · 视锥剔除 · CPU 拾取 · 异步资源管线 · 体素原语

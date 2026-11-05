@@ -76,6 +76,8 @@ frame.sky.env = &env;       // 之后每帧随 RenderFrame 交给引擎（同一
 
 返回 `false` 表示有 shader 编译失败（会打日志）；`env.valid()` 为真后把 `frame.sky.box`（`SkyboxRenderer`）一并接上、并装一个 `SkyboxPass`，它就兼作背景（IBL 与天空盒两个用途共享 `frame.sky.env`，但由 `frame.ibl.enabled` 与是否装 `SkyboxPass` 各自独立开关）。
 
+两个容易踩的细节：① 形参虽叫 `sunDir`，传进去的却是**行进方向**（`-normalize(向太阳)`），所以上面两个 demo 都写 `Generate(-towardSun, …)`。② 六面的“哪个纹素代表哪个方向”由 OpenGL §8.13 钉死，全仓只有 `src/gldx/texture/TextureCubeMap.h` 那一份表（`gldx::CubeFaceAxis` / `kCubeFaceTargets`）：自己排 pass 或自己往 cube 写东西时消费它，**不要另抄一张**——写读同表时错表不会裂接缝、也不会报错，只会让“涂进天空的光”与“着色指向的光”落在不同的天上，取证手法见 [Demo 画廊 §5](10-demos.md)。
+
 🔗 **现场演示**：
 - IBL 环境光烘焙：[`../../src/demo/ibl_environment/main.cpp`](../../src/demo/ibl_environment/main.cpp)。
 - 天空盒背景：[`../../src/demo/skybox/main.cpp`](../../src/demo/skybox/main.cpp)。

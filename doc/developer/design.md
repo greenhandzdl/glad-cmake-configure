@@ -232,7 +232,7 @@ pass 中，从而让整帧（场景*与*自发光*与*天空盒）被一致地�
 │   │   ├── gmf.hpp           #   共享 global module fragment（GLAD/GLM/std 预包含）
 │   │   ├── core/             #   Platform.h(窗口/GLFW) · RenderContext(线程亲和)/GLBuffer/VertexArray/UBO/Sampler/Framebuffer
 │   │   ├── geometry/         #   Mesh / InstancedMesh / GeometryFactory
-│   │   ├── texture/          #   Texture2D / Texture2DArray / TextureCubeMap / RenderTexture
+│   │   ├── texture/          #   Texture2D / Texture2DArray / TextureCubeMap / RenderTexture（TextureCubeMap.h 兼全仓唯一的 cube 面约定：§8.13 面基表 + kCubeFaceTargets）
 │   │   ├── material/         #   PbrMaterial
 │   │   ├── shader/           #   ShaderProgram + 内嵌 GLSL（ShaderLib/… Shaders.h，单一真源）
 │   │   ├── camera/ light/ shadow/   # Camera(orbit+飞行) / VoxelRay(DDA) / LightBuffer(UBO) / CascadedShadowMap / EnvironmentMap

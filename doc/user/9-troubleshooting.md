@@ -94,6 +94,7 @@ glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 | 球体/闭合物画成一只**开口的碗**，或近侧整面消失（无报错，顶点法向看着正常） | 绕序 inside-out：`glCullFace(GL_BACK)` 把整个可见面剔掉了 | 见 [§7](#7-画面发闷发暗的两条独立原因绕序与-srgb)：先关剔除、按 `gl_FrontFacing` 压暗定位，再把索引序每三角形反一个面 |
 | 贴图颜色写对了、画面却整体发闷发暗（无任何报错） | 缺 sRGB 往返的最后一次编码（但先按上一行排掉绕序） | 见 [§7](#7-画面发闷发暗的两条独立原因绕序与-srgb)：线性域算完光照后 `pow(c, vec3(1.0 / 2.2))` |
 | 开了自适应细分，网格里有随视角变化的破口 | 共享边的 `gl_TessLevelOuter` 两端点算出了不同值 | 见 [🔴 进阶 §5.1](8-advanced.md#51-细分阶段真正难的是不裂不是接线)：level 只依赖该边两端点的对称函数，并用 `equal_spacing` |
+| IBL 高光／天空里的太阳圆盘指向被请求方向**之外**的天，但 cube 六个面的接缝不裂、零报错 | 自己抄了一份 cube 面基 `{right, up, facing}` 表。写侧与读侧共用同一张错表时平滑内容自洽，所以没有局部症状，坏的只是**落点** | 只消费 `gldx::CubeFaceAxis` / `gldx::kCubeFaceTargets`（全仓唯一一份，`src/gldx/texture/TextureCubeMap.h`）；取证得把 GPU 像素拉回来算，见 [Demo 画廊 §5](10-demos.md) |
 
 ---
 

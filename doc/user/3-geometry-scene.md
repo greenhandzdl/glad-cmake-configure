@@ -70,9 +70,12 @@ gldx::InstancedMesh field;
 field.Create(std::move(geo), std::move(instances));   // 返回 bool；gldx::Instance{model, color}
 ```
 
+属性接线是固定的：instance 矩阵占 location 4–7、instance 色在 8（divisor 1），几何自己供 position/normal/uv/顶点色在 0/1/2/9（divisor 0）。顶点色与 instance 色**相乘**而不是替换，而 `GeometryFactory` 把 `Vertex::color` 留成白，所以不填它的调用方逐字节不变；填了它就拿到两个好处——一个实例可以是多色的（一棵树同时是树皮棕与针叶绿，否则每个颜色要一份实例数组加一次 draw），而 alpha 通道顺手能当逐顶点的**材质许可**（谁允许自发光 / 谁允许反射环境），强度则仍是逐次 draw 的 uniform。缩放请保持**统一**：`kInstancedVertex` 用 `normalize(mat3(aInstance) * aNormal)` 当法向矩阵（GLSL 4.10 没有 `inverse()`），非均匀压扁得烘进网格本身。
+
 🔗 **现场演示**：
 - 实例化场（几百个不同变换/颜色）：[`../../src/demo/instancing/main.cpp`](../../src/demo/instancing/main.cpp)。
 - 网格+材质+旋转子层级（carousel，演示场景变换传播）的完整装配：[`../../src/demo/pbr_showcase/main.cpp`](../../src/demo/pbr_showcase/main.cpp)。
+- 两份 `InstancedMesh` 画 1400 棵树（offset + 统一缩放、逐顶点色分树皮与树冠两色、同一个 alpha 当材质掩码）：[`../../src/demo/night_forest/Scene.cpp`](../../src/demo/night_forest/Scene.cpp)。
 
 ---
 
