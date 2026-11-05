@@ -22,15 +22,25 @@ bool InstancedMesh::Create(MeshData geometry, std::vector<Instance> instances) {
     vao_.Create();
     vao_.Bind();
 
-    // Geometry: positions (loc 0) + normals (loc 1), divisor 0 (per vertex).
+    // Geometry: positions (loc 0) + normals (loc 1) + uv (loc 2) + vertex colour
+    // (loc 9), all divisor 0 (per vertex). The uv and the colour are what let an
+    // instanced material be textured and multi-toned - see the class comment.
+    // The tangent (loc 3) is deliberately not bound: no instanced program here
+    // normal-maps, and a disabled attribute is free where a bound one is not.
     geoVbo_.Bind(GL_ARRAY_BUFFER);
     const GLsizei gs = static_cast<GLsizei>(sizeof(Vertex));
     vao_.AttachAttribute(0, 3, GL_FLOAT, GL_FALSE, gs,
                          reinterpret_cast<const void*>(VertexOffsets::position));
     vao_.AttachAttribute(1, 3, GL_FLOAT, GL_FALSE, gs,
                          reinterpret_cast<const void*>(VertexOffsets::normal));
+    vao_.AttachAttribute(2, 2, GL_FLOAT, GL_FALSE, gs,
+                         reinterpret_cast<const void*>(VertexOffsets::uv));
+    vao_.AttachAttribute(9, 4, GL_FLOAT, GL_FALSE, gs,
+                         reinterpret_cast<const void*>(VertexOffsets::color));
     glVertexAttribDivisor(0, 0);
     glVertexAttribDivisor(1, 0);
+    glVertexAttribDivisor(2, 0);
+    glVertexAttribDivisor(9, 0);
 
     // Instance matrix across locations 4-7 (one vec4 column each) + colour at 8,
     // divisor 1 (advance once per instance).

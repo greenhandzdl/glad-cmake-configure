@@ -6,11 +6,21 @@
  * @brief GPU-instanced geometry (plan "InstancedMesh"): one base mesh drawn
  *        many times with a per-instance model matrix + colour.
  *
- * Owns a VAO over a geometry VBO/EBO (positions + normals only are bound) plus
- * an instance buffer whose mat4 occupies vertex attrib locations 4-7 and whose
- * colour sits at location 8, all with divisor 1. Pair with shaders::
- * kInstancedVertex/kInstancedFragment (see ShaderLib.h) and set the block
- * binding LightingBlock->1 like the PBR program.
+ * Owns a VAO over a geometry VBO/EBO plus an instance buffer whose mat4 occupies
+ * vertex attrib locations 4-7 and whose colour sits at location 8, all with
+ * divisor 1. Pair with shaders::kInstancedVertex/kInstancedFragment (see
+ * ShaderLib.h) and set the block binding LightingBlock->1 like the PBR program.
+ *
+ * The geometry VBO also feeds location 2 with the vertex uv and location 9 with
+ * the vertex's own colour (both divisor 0). That is what lets one instance be
+ * textured and carry more than one flat tone - a tree is trunk-brown *and*
+ * canopy-green, so without the colour each tone would need its own instance
+ * array and its own draw. The colour multiplies rather than replaces the
+ * instance colour, and GeometryFactory leaves Vertex::color at white, so a
+ * multiply-by-1 keeps every existing caller pixel-identical. Location 9 rather
+ * than 4: Mesh::Upload already owns 4 for the same attribute, and reusing the
+ * number here is how a program compiled for one layout silently reads garbage
+ * out of the other.
  *
  * Two-phase: MeshData + the instance vector are CPU-side (Stage A); Create /
  * SetInstances do the gl* uploads (Stage B, render thread).

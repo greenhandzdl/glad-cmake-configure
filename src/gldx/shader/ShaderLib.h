@@ -312,6 +312,7 @@ layout(location=0) in vec3 aPos;
 layout(location=1) in vec3 aNormal;
 layout(location=4) in mat4 aInstance;   // consumes locations 4,5,6,7
 layout(location=8) in vec4 aColor;
+layout(location=9) in vec4 aVertexColor;
 
 uniform mat4 uViewProj;
 
@@ -326,7 +327,10 @@ void main() {
     // just the upper 3x3 with the scale factored out by normalise(); GLSL 4.10
     // has no inverse(), so we avoid it deliberately.
     vNormal   = normalize(mat3(aInstance) * aNormal);
-    vColor    = aColor;
+    // Instance tone times the vertex's own. Multiplying rather than picking one
+    // keeps a colourless (all-white) mesh drawing exactly as before while a
+    // multi-toned one - bark, canopy - still answers the instance tint.
+    vColor    = aColor * aVertexColor;
     gl_Position = uViewProj * wp;
 }
 )GLSL";
