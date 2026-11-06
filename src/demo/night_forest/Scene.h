@@ -35,7 +35,16 @@
  * it is a lookup and a lerp. That is what makes a randomly-moving object
  * screenshot-reproducible: `--freeze-at` picks a table index rather than hoping
  * the frame rate was the same twice, and the same seed at the same second is the
- * same pose on any machine.
+ * same pose on any machine. The walking camera uses the same mechanism, which is
+ * the only reason "climbing over ridges and through gullies" can appear in a
+ * documentation screenshot at all - a
+ * keyboard-driven camera moves by `dt`, so its pose belongs to the frame rate.
+ *
+ * The ground is the other half of the experiment: either the engine's single
+ * textured quad (the default, and the sheet every existing screenshot of this demo
+ * was taken on) or a height field built by `Terrain`, in which case the trees, the
+ * lanterns, the crate and the camera are all placed on its surface rather than on
+ * y = 0. Scene.h's `heightAt` is the single question everything asks.
  *
  * NOTE: names gldx engine types, so include AFTER `import gldx;`.
  */
@@ -44,6 +53,8 @@
 #include <vector>
 
 #include <glm/glm.hpp>
+
+#include "Terrain.h"
 
 namespace night_forest {
 
@@ -78,6 +89,24 @@ Pose SampleRoam(const std::vector<Pose>& table, const Wander& w, double seconds)
 glm::mat4 CrateTransform(const Pose& p, float size);
 
 // ---- scene configuration (Stage A, read once by Build) --------------------
+
+// The walking camera's own defaults, so that it does not inherit the crate's:
+// a person's pace rather than a sliding box's, a path that leaves the clearing and
+// crosses the tree band (that is where the hills are), and no cube edge - the
+// wander table does not know what it is carrying, and `size` is the crate's
+// business. Turn nudges are gentler too, because an eye that swings 0.85 rad in one
+// 0.1 s step is a camera the viewer cannot follow.
+inline Wander MakeWalkDefaults() {
+    Wander w;
+    w.speed      = 1.4f;
+    w.radius     = 55.0f;
+    w.size       = 0.0f;
+    w.turnChance = 0.04f;
+    w.turnMax    = 0.55f;
+    w.startAt    = 0.0;
+    return w;
+}
+
 struct Config {
     int    treeCount = 1400;
     std::uint32_t seed = 20261104u;
@@ -91,6 +120,19 @@ struct Config {
     float  groundHalf = 200.0f;  // the plane's instance scale
     int    grassTile  = 48;      // uv repeats across the whole plane
     Wander wander;
+
+    // ---- the height field (Terrain.h): off by default ----------------------
+    // `flat` keeps the single quad above, so every frame this demo has ever been
+    // photographed with is still the frame it is now. The manual's terrain modes
+    // are one switch away, and the two are mutually exclusive by construction:
+    // whichever ground is drawn, `heightAt` is the authority on where it is.
+    TerrainDesc terrain;
+    // Metres of ground map per tile on the height field. 0 derives it from
+    // `grassTile`, so switching to a terrain changes the relief, not the density
+    // of the grass - the two comparisons the documentation then makes stay clean.
+    float  terrainTile = 0.0f;
+    Wander walk = MakeWalkDefaults();   // the walking camera's path
+    float  walkEye = 1.7f;       // metres above the surface
 };
 
 // ---- CPU-side geometry (Stage A) ------------------------------------------
@@ -138,6 +180,27 @@ public:
     // is never touched again.
     void UpdateCrate(double seconds, bool roaming);
 
+    // ---- the ground --------------------------------------------------------
+    // The surface height in metres at world (x, z): `Terrain::GetAveHeight` when a
+    // height field is built, and an exact 0 when the flat sheet is, which is what
+    // lets the scatter, the lanterns, the crate and the walking camera ask one
+    // question without a mode branch each - and what keeps the default frame's
+    // bits unchanged by the whole feature.
+    [[nodiscard]] float heightAt(float x, float z) const noexcept;
+
+    // The walking camera's pose at wall-clock `seconds`: the same fixed-step table
+    // as the crate's, with the ground's height substituted for a `dt` integral, so
+    // Crossing the hills is reproducible rather than frame-rate-shaped. `pos` already
+    // carries the eye height; `yaw` is the heading, and the camera's pitch stays
+    // whoever owns it (the path does not look up and down for you).
+    [[nodiscard]] Pose SampleWalk(double seconds) const;
+
+    [[nodiscard]] const Terrain& terrain() const noexcept { return terrain_; }
+    // uv repeats per unit of vertex uv. Flat ground has uv 0..1 across the sheet
+    // and wants `grassTile` of them; a height field carries the manual's integer
+    // lattice as uv, so its scale is tiles-per-cell instead.
+    [[nodiscard]] float groundUvScale() const noexcept;
+
     // The four lantern positions, which main.cpp turns into point lights. Shared
     // by construction with the geometry, so a glow cannot sit where no lamp is.
     [[nodiscard]] const std::vector<glm::vec3>& lanterns() const noexcept { return lanternPos_; }
@@ -167,10 +230,15 @@ public:
     [[nodiscard]] float crateSize() const noexcept { return config.wander.size; }
 
 private:
+    // The crate's table pose, put on the surface (see Scene.cpp).
+    [[nodiscard]] Pose GroundCratePose(const Pose& p) const;
+
     gldx::InstancedMesh ground_, fir_, broadleaf_, crate_, lantern_;
     gldx::Texture2D grass_, wood_, white_;
+    Terrain terrain_;
     std::vector<glm::vec3> lanternPos_;
     std::vector<Pose> roam_;
+    std::vector<Pose> walk_;      // the camera's path, same shape as roam_'s
     Pose cratePose_;
     std::uint32_t rejected_ = 0;
 };

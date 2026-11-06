@@ -211,7 +211,10 @@ void NightPass::DrawWorld(const glm::mat4& viewProj, const glm::mat4& skyViewPro
         tallyInst_ += m.count();
     };
 
-    draw(s->ground(), s->grass(), static_cast<float>(s->grassTile()), 1.0f, 0.0f, 0.0f);
+    // The ground's tiling comes from the scene: 48 repeats across the sheet when
+    // it is the engine's single quad, or tiles-per-cell when it is a height field
+    // whose uv is the manual's integer lattice (Scene::groundUvScale).
+    draw(s->ground(), s->grass(), s->groundUvScale(), 1.0f, 0.0f, 0.0f);
     draw(s->fir(),   s->white(), 1.0f, 0.0f, 0.0f, 0.0f);
     draw(s->broadleaf(), s->white(), 1.0f, 0.0f, 0.0f, 0.0f);
     // The lanterns carry the scene's only emissive surface, gated per-vertex so the

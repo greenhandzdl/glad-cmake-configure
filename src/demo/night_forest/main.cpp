@@ -32,6 +32,7 @@
  *   1            FBO environment capture     2   refraction as well as reflection
  *   3            lantern point lights        4   night mist
  *   R            release / park the wandering crate
+ *   G            walk the scripted path instead of flying (climbs the terrain)
  *   [ ]          env mix     - =               flight speed
  *   C            back-face culling            V  wireframe
  *   B            bloom       H                HUD
@@ -46,6 +47,16 @@
  *       --snapshot crate-mirrors-sky.png
  *   ./output/night_forest --off hud --env-mix 0.5 --env-lod 0 \
  *       --snapshot crate-is-a-mirror.png
+ *
+ * The ground is the third axis (experiment manual 3.1 / 3.2 / 3.4): it stays the
+ * flat sheet unless `--terrain` names a mode, and the walking camera is the way to
+ * photograph it from inside rather than above.
+ *
+ *   ./output/night_forest --terrain hills --off hud --freeze-at 8 --snap-at 9 \
+ *       --snapshot rolling-ridges.png
+ *   ./output/night_forest --terrain contour --terrain-map height.raw \
+ *       --terrain-levels 4 --on walk --freeze-at 24 --snap-at 25 \
+ *       --snapshot terraced-contour-walk.png
  *
  * Two conditions make those pairs usable as evidence, and both are easy to get
  * wrong. `--freeze-at SEC` parks the clock, and the crate's wander is a table of
@@ -108,13 +119,16 @@ constexpr int kWindowHeight = 600;
 int main(int argc, char** argv) {
     const gldx::cli::Flags flags(argc, argv,
                             {"capture", "refract", "lights", "fog", "roam", "hud",
-                             "bloom", "cull", "wireframe", "cursor"},
+                             "bloom", "cull", "wireframe", "cursor", "walk"},
                             {"stars", "star-size", "seed", "trees", "env-size",
                              "env-mix", "env-lod", "emissive", "ior", "band",
                              "moon-x", "moon-y", "moon-z", "moon-int", "density",
                              "start-at", "speed", "fov", "yaw", "pitch",
                              "pos-x", "pos-y", "pos-z", "freeze-at", "snapshot",
-                             "snap-at"},
+                             "snap-at", "terrain", "terrain-cells", "terrain-cell",
+                             "terrain-relief", "terrain-smooth", "terrain-levels",
+                             "terrain-map", "terrain-tile", "walk-radius",
+                             "walk-speed", "walk-eye"},
                             "night_forest");
     if (flags.wantsHelp()) {
         flags.printUsage();
@@ -184,6 +198,36 @@ int main(int argc, char** argv) {
     scene.config.wander.startAt = flags.real("start-at",
                                              static_cast<float>(scene.config.wander.startAt),
                                              0.0f, 60.0f);
+
+    // ---- the ground: the manual's 3.1 / 3.2 / 3.4, off unless named ---------
+    // An unknown mode is reported rather than dropped into `flat`, because a
+    // screenshot taken with a typo in it looks exactly like a screenshot of the
+    // flat sheet and the documentation would then be citing the wrong experiment.
+    TerrainDesc terrainDesc;
+    terrainDesc.seed = field.seed;   // the same seed drives the sky and the hills
+    const std::string terrainMode = flags.string("terrain");
+    if (!terrainMode.empty() && !ParseTerrainMode(terrainMode, terrainDesc.mode)) {
+        std::fprintf(stderr, "night_forest: --terrain '%s' is not one of"
+                             " flat / random / hills / contour, drawing the"
+                             " flat sheet\n", terrainMode.c_str());
+        terrainDesc.mode = TerrainMode::flat;
+    }
+    terrainDesc.cells     = static_cast<std::uint32_t>(flags.integer("terrain-cells",
+                                                                     static_cast<int>(terrainDesc.cells)));
+    terrainDesc.cell      = flags.real("terrain-cell", terrainDesc.cell, 0.1f, 50.0f);
+    terrainDesc.relief    = flags.real("terrain-relief", terrainDesc.relief, 0.0f, 200.0f);
+    terrainDesc.smoothing = flags.integer("terrain-smooth", terrainDesc.smoothing);
+    terrainDesc.levels    = flags.integer("terrain-levels", terrainDesc.levels);
+    terrainDesc.heightMap = flags.string("terrain-map");
+    scene.config.terrain  = terrainDesc;
+    scene.config.terrainTile = flags.real("terrain-tile", scene.config.terrainTile, 0.0f, 200.0f);
+
+    // The walking path (see Scene.h): its own pace and radius, so it can leave the
+    // clearing and cross the tree band where the relief actually is.
+    scene.config.walk.radius = flags.real("walk-radius", scene.config.walk.radius, 5.0f, 190.0f);
+    scene.config.walk.speed  = flags.real("walk-speed", scene.config.walk.speed, 0.1f, 10.0f);
+    scene.config.walkEye     = flags.real("walk-eye", scene.config.walkEye, 0.5f, 4.0f);
+    input.walk = flags.on("walk", false);
 
     // Input arrives through the gldxwin input surface: gldxwin owns the GLFW
     // trampolines, so the demo records its state pointer and subscribes.
@@ -328,26 +372,40 @@ int main(int argc, char** argv) {
             const FlyIntent fly = ReadFlyIntent(win, input, dt);
 
             camera.SetViewportAspect(aspect);
+            // --freeze-at S parks the clock S seconds after the loop started. Every
+            // moving thing in this scene is a pure function of that clock: the crate
+            // samples a pose *table* indexed by it, so two runs of one seed and one
+            // second land on the same triangle in the same place. Resolved before
+            // the camera moves, because the walking pose comes from the same table
+            // mechanism and a screenshot of the camera climbing a ridge has to name
+            // one second, not one frame rate.
+            const double animTime = freezeAt > 0.0 ? std::min(info.time, freezeAt) : info.time;
+
             // The demo owns the pose, the camera owns the matrices. Input is written
             // by keyboard and mouse alike, so it is pushed in each frame and read
-            // back out afterwards - one position, no second source of truth.
+            // back out afterwards - one position, no second source of truth. With
+            // walking on, the path owns the position and the heading and the keyboard
+            // does not, which is why the three fly moves below are skipped rather
+            // than zeroed: a dt integral left in the pose would make the frame the
+            // capture took depend on how many frames came before it.
+            if (input.walk) {
+                const Pose w = scene.SampleWalk(animTime);
+                input.pos = w.pos;
+                input.yaw = w.yaw;
+            }
             camera.SetYawPitch(input.yaw, input.pitch);
             camera.Translate(input.pos - camera.Position());
-            camera.MoveForward(fly.forward);
-            camera.MoveRight(fly.strafe);
-            camera.MoveUp(fly.rise);
+            if (!input.walk) {
+                camera.MoveForward(fly.forward);
+                camera.MoveRight(fly.strafe);
+                camera.MoveUp(fly.rise);
+            }
             input.pos = camera.Position();
             // Re-asserted every frame because two things move it: the wheel and
             // --fov at startup. The projection is the one piece of camera state the
             // HUD quotes back as a number, so this is also what keeps that number
             // from being a caption rather than a reading.
             camera.SetPerspective(input.fov, aspect, 0.1f, 420.0f);
-
-            // --freeze-at S parks the clock S seconds after the loop started. Every
-            // moving thing in this scene is a pure function of that clock: the crate
-            // samples a pose *table* indexed by it, so two runs of one seed and one
-            // second land on the same triangle in the same place.
-            const double animTime = freezeAt > 0.0 ? std::min(info.time, freezeAt) : info.time;
 
             scene.UpdateCrate(animTime, input.roam);
 

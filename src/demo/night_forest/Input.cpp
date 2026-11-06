@@ -72,6 +72,11 @@ void HandleKeys(gldx::win::Window& win, Input& in, float dt) {
         in.fog = !in.fog;
     if (in.Once(win.KeyIsDown(gldx::win::Key::R), Input::kRoam))
         in.roam = !in.roam;
+    // Walking is the sixth switch rather than a key binding on the flight camera,
+    // because it changes who owns the pose: with it on, main.cpp writes the path's
+    // position and heading every frame and the WASD intent is simply not read.
+    if (in.Once(win.KeyIsDown(gldx::win::Key::G), Input::kWalk))
+        in.walk = !in.walk;
 
     // Diagnostics.
     if (in.Once(win.KeyIsDown(gldx::win::Key::C), Input::kCull))

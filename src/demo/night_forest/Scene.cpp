@@ -4,6 +4,7 @@
 
 import gldx;
 
+#include "Noise.h"
 #include "Scene.h"
 
 #include <algorithm>
@@ -11,6 +12,7 @@ import gldx;
 #include <cstdint>
 #include <cstdio>
 #include <random>
+#include <string>
 #include <vector>
 
 #include <glm/gtc/matrix_inverse.hpp>
@@ -206,55 +208,11 @@ gldx::Texture2DDesc MakeWhiteDesc() {
 
 namespace {
 
-// A 32-bit integer hash, used for both the speckle decisions in the maps and the
-// periodic lattice below.
-std::uint32_t Hash2(std::int32_t x, std::int32_t y, std::uint32_t seed) {
-    std::uint32_t h = seed ^ (static_cast<std::uint32_t>(x) * 0x1f1f1f1fu);
-    h = (h << 11) ^ (h >> 5) ^ static_cast<std::uint32_t>(y) * 0x27d4eb2du;
-    h += h * 3u; h ^= h >> 16;
-    h *= 0x85ebca6bu; h ^= h >> 13;
-    return h;
-}
-
-float U01_2(std::int32_t x, std::int32_t y, std::uint32_t seed) {
-    return static_cast<float>(Hash2(x, y, seed) % 100000u) / 100000.0f;
-}
-
-float Smooth01(float t) { return t * t * (3.0f - 2.0f * t); }
-
-// Value noise that repeats with period 1 in both axes.
-//
-// The wrap is not cosmetic: Texture2D::Upload sets GL_REPEAT, so a map whose left
-// edge disagrees with its right edge draws a visible grid across the ground every
-// 48 tiles. Wrapping the lattice indices (not the output) makes the two edges
-// sample the same cells, which is the cheapest way to be seamless.
-float PNoise(float u, float v, int freq, std::uint32_t seed) {
-    const float fx = u * static_cast<float>(freq), fy = v * static_cast<float>(freq);
-    const int x0 = static_cast<int>(std::floor(fx)), y0 = static_cast<int>(std::floor(fy));
-    const float tx = Smooth01(fx - static_cast<float>(x0));
-    const float ty = Smooth01(fy - static_cast<float>(y0));
-    auto at = [&](int dx, int dy) {
-        const int ix = ((x0 + dx) % freq + freq) % freq;
-        const int iy = ((y0 + dy) % freq + freq) % freq;
-        return U01_2(ix, iy, seed);
-    };
-    const float a = at(0, 0) + (at(1, 0) - at(0, 0)) * tx;
-    const float b = at(0, 1) + (at(1, 1) - at(0, 1)) * tx;
-    return a + (b - a) * ty;
-}
-
-float PFbm(float u, float v, int freq, std::uint32_t seed, int octaves) {
-    float sum = 0.0f, norm = 0.0f, amp = 1.0f;
-    int f = freq;
-    for (int o = 0; o < octaves; ++o) {
-        sum += amp * PNoise(u, v, f, seed + static_cast<std::uint32_t>(o) * 131u);
-        norm += amp;
-        amp *= 0.5f;
-        f *= 2;
-    }
-    return sum / norm;
-}
-
+// The hash and the noise lattices this file used to carry now live in Noise.h,
+// shared with Terrain.cpp: the ground map and the ground relief are two views of
+// the same metres, and one implementation is what keeps the painted bumps and the
+// geometric ones from disagreeing. Only the texel writer stays here - it is about
+// pixels, not about noise.
 void Put(std::vector<std::uint8_t>& px, int size, int i, int j, const glm::vec3& c) {
     const float l = std::clamp(c.x, 0.0f, 1.0f), m = std::clamp(c.y, 0.0f, 1.0f),
                   n = std::clamp(c.z, 0.0f, 1.0f);
@@ -290,16 +248,16 @@ gldx::Texture2DDesc MakeGrassDesc(int size, std::uint32_t seed) {
         const float v = static_cast<float>(j) / static_cast<float>(size);
         for (int i = 0; i < size; ++i) {
             const float u = static_cast<float>(i) / static_cast<float>(size);
-            const float patch = PFbm(u, v, 4, seed, 3);           // clumps
-            const float fine  = PFbm(u, v, 64, seed ^ 0x51edu, 2);
-            const float tufts = PFbm(u, v, 18, seed ^ 0x27d4u, 2);
+            const float patch = noise::PFbm(u, v, 4, seed, 3);           // clumps
+            const float fine  = noise::PFbm(u, v, 64, seed ^ 0x51edu, 2);
+            const float tufts = noise::PFbm(u, v, 18, seed ^ 0x27d4u, 2);
             glm::vec3 c = glm::mix(mossDark, mossDry, patch);
             c = glm::mix(c, litter, std::max(0.0f, tufts - 0.62f) * 2.1f);
             c *= 0.80f + 0.45f * fine;
             // Individual blades: a speckle at texel resolution, which is what
             // keeps the 48x tiling from turning into a smooth olive wash at the
             // far end of the field.
-            if (Hash2(i, j, seed ^ 0x9e37u) % 11u == 0u) c *= 1.35f;
+            if (noise::Hash2(i, j, seed ^ 0x9e37u) % 11u == 0u) c *= 1.35f;
             Put(d.pixels, size, i, j, c);
         }
     }
@@ -321,8 +279,8 @@ gldx::Texture2DDesc MakeWoodDesc(int size) {
             // Grain: stretched along u, so the fibres run the length of a plank
             // instead of ringing the crate. An anisotropic lattice is also what
             // makes the map pass the "does this read as wood at 32 pixels" test.
-            float g = PFbm(u * 0.25f, v, 24, seed, 3);
-            g = g * 0.65f + 0.35f * PFbm(u * 0.25f, v, 96, seed ^ 0x1234u, 2);
+            float g = noise::PFbm(u * 0.25f, v, 24, seed, 3);
+            g = g * 0.65f + 0.35f * noise::PFbm(u * 0.25f, v, 96, seed ^ 0x1234u, 2);
             glm::vec3 c = glm::mix(glm::vec3(0.150f, 0.086f, 0.042f),
                                    glm::vec3(0.330f, 0.200f, 0.104f), g);
             // Four planks per face, with the gap darkened and the edge of each
@@ -464,12 +422,32 @@ void Scene::Build() {
     grass_.Upload(MakeGrassDesc(512, c.seed));
     wood_.Upload(MakeWoodDesc(512));
 
-    // ---- ground: one instance, sized by the matrix, tiled by the uv scale ----
+    // ---- the ground: a height field, or the engine's single sheet -----------
+    // Terrain comes first because everything below asks it where the surface is.
+    // A failed height-map load degrades to the flat sheet with a printed reason
+    // rather than to a half-loaded field: the alternative is a mountain range with
+    // a cliff at the byte where the file stopped, which looks like a mesh bug.
+    std::string terrErr;
+    if (!terrain_.InitTerrain(c.terrain, terrErr)) {
+        std::fprintf(stderr, "night_forest: terrain '%s' failed (%s), drawing the flat sheet\n",
+                     TerrainModeName(c.terrain.mode), terrErr.c_str());
+        TerrainDesc flat = c.terrain;
+        flat.mode = TerrainMode::flat;
+        terrain_.InitTerrain(flat, terrErr);   // cannot fail; the map is not read
+    }
     {
         gldx::Instance g;
-        g.model = glm::scale(glm::mat4(1.0f), glm::vec3(c.groundHalf, 1.0f, c.groundHalf));
         g.color = glm::vec4(1.0f);
-        ground_.Create(MakeGroundMesh(), {g});
+        if (terrain_.reliefActive()) {
+            // The mesh is already in world metres, so the instance is the identity
+            // and the tiling has to come from the uv scale (groundUvScale) - the
+            // height field's uv is the manual's integer lattice, not 0..1.
+            g.model = glm::mat4(1.0f);
+            ground_.Create(terrain_.BuildMeshData(), {g});
+        } else {
+            g.model = glm::scale(glm::mat4(1.0f), glm::vec3(c.groundHalf, 1.0f, c.groundHalf));
+            ground_.Create(MakeGroundMesh(), {g});
+        }
     }
 
     // ---- the forest ----------------------------------------------------------
@@ -504,7 +482,10 @@ void Scene::Build() {
         // a plantation, and the size spread is what a forest's silhouette actually
         // is. It is also the reason the instance scale is the second thing this
         // demo is named for after the offset.
-        inst.model = glm::translate(glm::mat4(1.0f), glm::vec3(x, 0.0f, z))
+        // The trunk base sits on the surface, which on a flat sheet is an exact 0
+        // and leaves the matrix - and the frame - bit-for-bit what it was before
+        // the height field existed.
+        inst.model = glm::translate(glm::mat4(1.0f), glm::vec3(x, heightAt(x, z), z))
                    * glm::rotate(glm::mat4(1.0f), uni(rng) * 6.283185307179586f,
                                  glm::vec3(0.0f, 1.0f, 0.0f))
                    * glm::scale(glm::mat4(1.0f), glm::vec3(scale));
@@ -533,7 +514,8 @@ void Scene::Build() {
             const float ang = 0.785398163f + static_cast<float>(i) * 1.570796327f
                             + Signed(rng) * 0.18f;
             const float rad = rMin + 1.4f + uni(rng) * 2.0f;
-            const glm::vec3 p(rad * std::cos(ang), 0.0f, rad * std::sin(ang));
+            const float lx = rad * std::cos(ang), lz = rad * std::sin(ang);
+            const glm::vec3 p(lx, heightAt(lx, lz), lz);
             lanternPos_.push_back(p + glm::vec3(0.0f, 1.72f, 0.0f));
             gldx::Instance inst;
             inst.model = glm::translate(glm::mat4(1.0f), p)
@@ -546,22 +528,79 @@ void Scene::Build() {
 
     // ---- the crate, at the head of its table --------------------------------
     roam_ = MakeRoamTable(c.wander, c.seed ^ 0x5bf03635u);
-    cratePose_ = SampleRoam(roam_, c.wander, 0.0);
+    cratePose_ = GroundCratePose(SampleRoam(roam_, c.wander, 0.0));
     crate_.Create(MakeCrateMesh(),
                   {gldx::Instance{CrateTransform(cratePose_, c.wander.size), glm::vec4(1.0f)}});
+
+    // ---- the walking camera's path ------------------------------------------
+    // A second table over the same generator, from a different seed, so the crate
+    // and the viewer cannot both be standing at the same pose in every frame.
+    walk_ = MakeRoamTable(c.walk, c.seed ^ 0x2c1b3a7du);
 
     std::printf("night_forest: %u firs + %u broadleafs planted, %d candidates rejected"
                 " (%d draws for the whole world)\n",
                 fir_.count(), broadleaf_.count(), rejected, 5);
+    if (terrain_.reliefActive())
+        std::printf("night_forest: terrain %s, %u x %u cells at %.2f m, %llu verts /"
+                    " %llu indices, %.2f..%.2f m, source %s\n",
+                    TerrainModeName(terrain_.mode()), terrain_.cells(), terrain_.cells(),
+                    terrain_.cell(), static_cast<unsigned long long>(terrain_.vertexCount()),
+                    static_cast<unsigned long long>(terrain_.indexCount()),
+                    terrain_.minHeight(), terrain_.maxHeight(), terrain_.source().c_str());
 }
 
 void Scene::UpdateCrate(double seconds, bool roaming) {
     gldx::RenderContext::AssertRenderThread("Scene::UpdateCrate");
     if (!crate_.valid()) return;
-    cratePose_ = roaming ? SampleRoam(roam_, config.wander, seconds)
-                        : (roam_.empty() ? Pose{} : roam_.front());
+    cratePose_ = GroundCratePose(roaming ? SampleRoam(roam_, config.wander, seconds)
+                                        : (roam_.empty() ? Pose{} : roam_.front()));
     gldx::Instance inst{CrateTransform(cratePose_, config.wander.size), glm::vec4(1.0f)};
     crate_.SetInstances({inst});
+}
+
+// ---------------------------------------------------------------------------
+// Where the ground is
+// ---------------------------------------------------------------------------
+float Scene::heightAt(float x, float z) const noexcept {
+    // The flat sheet is y = 0 by definition, and asking the terrain object would
+    // also answer 0 - just through a clamp and two lerps per tree. With relief off
+    // this demo has 1400 of those questions per build, so the branch is here
+    // rather than at every caller.
+    if (!terrain_.reliefActive()) return 0.0f;
+    return terrain_.GetAveHeight(x, z);
+}
+
+float Scene::groundUvScale() const noexcept {
+    if (!terrain_.reliefActive()) return static_cast<float>(config.grassTile);
+    // Metres of map per tile. The default is whatever the flat sheet was already
+    // doing - 48 tiles across a 400 m field is 8.33 m each - so a frame that turns
+    // the relief on changes the silhouette of the ground and nothing about its
+    // texture, which is the comparison the documentation wants to be able to make.
+    const float tile = config.terrainTile > 0.0f
+        ? config.terrainTile
+        : 2.0f * config.groundHalf / static_cast<float>(config.grassTile);
+    // uv is in cells (the manual's `g_texcoord = (x, z)`), so the scale the shader
+    // multiplies is tiles per cell.
+    return tile > 1e-3f ? terrain_.cell() / tile : 1.0f;
+}
+
+Pose Scene::SampleWalk(double seconds) const {
+    if (walk_.empty()) return {};
+    Pose p = SampleRoam(walk_, config.walk, seconds);
+    p.pos.y = heightAt(p.pos.x, p.pos.z) + config.walkEye;
+    return p;
+}
+
+// The wander table drives its pose in the XZ plane and parks Y at half the cube's
+// edge, which is right on a sheet of water and wrong on anything else. The surface
+// owns the vertical: the crate's clearance is the same half-edge it had on flat
+// ground, now measured from whatever it is resting on - and on the flat sheet the
+// two answers are bit-for-bit the same number, which is what keeps the existing
+// evidence frames reproducible with this code in place.
+Pose Scene::GroundCratePose(const Pose& p) const {
+    Pose q = p;
+    q.pos.y = heightAt(q.pos.x, q.pos.z) + 0.5f * config.wander.size;
+    return q;
 }
 
 } // namespace night_forest

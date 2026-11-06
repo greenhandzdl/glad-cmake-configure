@@ -30,6 +30,12 @@
  *   R roam     - parks or releases the crate. With it parked, no face of the capture
  *                cube changes, so the HUD's faces=0 line and a completely static
  *                reflection are the same event.
+ *   G walk     - hands the camera to the walking path. It is not a camera speed
+ *                change: the pose stops being an integral of `dt` and becomes a
+ *                lookup in a seeded table whose Y comes from the height field, so
+ *                the view climbs a hill in the screenshot and in the next run of
+ *                the same command at the same second. Flying is what makes the
+ *                relief inspectable; walking is what makes it a place.
  *
  * NOTE: names only gldx::win types (Window / Key / Vec2d), never an engine type,
  * which is why this header can be included before or after `import gldx;`.
@@ -48,6 +54,7 @@ struct Input {
     bool lights  = true;    // 3: the lanterns light the scene, not just themselves
     bool fog     = true;    // 4: distance dissolves into the shadow tone
     bool roam    = true;    // R: the crate wanders; parked = the cube stops changing
+    bool walk    = false;   // G: follow the walking path over the relief (needs a terrain)
 
     // ---- diagnostics --------------------------------------------------------
     bool cull      = true;  // C: back-face culling, the one switch that can make the
@@ -66,6 +73,8 @@ struct Input {
     // the four lanterns are behind it. Above the canopy the same frame holds all of
     // them, and the 34 m stand-off keeps the crate inside the mist's start at 45.
     // A positive pitch looks up in the engine's convention, hence the negative.
+    // While `walk` is on, `pos` and `yaw` are written by the path every frame and
+    // only `pitch` is still the user's - see the switch list above.
     glm::vec3 pos{0.0f, 11.0f, 34.0f};
     float yaw = 0.0f, pitch = -0.26f;
     float speed = 6.0f;     // - =
@@ -79,10 +88,10 @@ struct Input {
     // down" and re-arm on release.
     enum Toggle : int {
         kCapture, kRefract, kLights, kFog, kRoam,
-        kCull, kWire, kHud, kBloom, kGrab, kToggleCount
+        kCull, kWire, kHud, kBloom, kWalk, kGrab, kToggleCount
     };
     bool armed[kToggleCount] = {true, true, true, true, true,
-                                true, true, true, true, true};
+                                true, true, true, true, true, true};
 
     // True exactly once per press of the `slot` key.
     bool Once(bool down, int slot) {

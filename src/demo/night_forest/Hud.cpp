@@ -90,6 +90,50 @@ void NightHudPass::Execute(gldx::RenderFrame& f) {
         scene->plantedFir() + scene->plantedBroad()
             < static_cast<std::uint32_t>(scene->config.treeCount) ? kWarn : kDim});
 
+    // ---- the ground ---------------------------------------------------------
+    // The flat sheet gets a line of its own rather than silence, because a panel
+    // that only speaks when there are hills cannot tell a mistyped --terrain from a
+    // terrain that loaded. The second line is the mesh the manual's 3.1 double loop
+    // actually produced, and the third is what the camera is standing on - the
+    // reading that makes a "walking over a ridge" screenshot checkable in numbers.
+    {
+        const Terrain& t = scene->terrain();
+        if (t.reliefActive()) {
+            std::snprintf(buf, sizeof(buf), "terrain %s  %u x %u cells at %.2f m  relief %.1f m",
+                          TerrainModeName(t.mode()), t.cells(), t.cells(), t.cell(), t.relief());
+            lines.push_back({buf, kFg});
+            std::snprintf(buf, sizeof(buf), "  %llu verts / %llu indices  %+.1f..%+.1f m"
+                          "  smooth %d  levels %d",
+                          static_cast<unsigned long long>(t.vertexCount()),
+                          static_cast<unsigned long long>(t.indexCount()),
+                          t.minHeight(), t.maxHeight(), t.smoothing(), t.levels());
+            lines.push_back({buf, kDim});
+            std::snprintf(buf, sizeof(buf), "  %s", t.source().c_str());
+            lines.push_back({buf, kDim});
+            // Gradient of the height field under the eye, sampled two cells apart so
+            // it is the slope the shading uses rather than one vertex's noise spike.
+            const float span = std::max(t.cell(), 0.5f);
+            const float gx = scene->heightAt(in->pos.x + span, in->pos.z)
+                           - scene->heightAt(in->pos.x - span, in->pos.z);
+            const float gz = scene->heightAt(in->pos.x, in->pos.z + span)
+                           - scene->heightAt(in->pos.x, in->pos.z - span);
+            const float grad = std::sqrt(gx * gx + gz * gz) / (2.0f * span);
+            std::snprintf(buf, sizeof(buf), "  under foot %+.2f m  slope %.0f deg",
+                          scene->heightAt(in->pos.x, in->pos.z),
+                          std::atan(grad) * 57.29577951308232f);
+            lines.push_back({buf, kDim});
+        } else {
+            std::snprintf(buf, sizeof(buf), "ground flat sheet  %.0f m half-width  %d uv tiles",
+                          scene->groundHalf(), scene->grassTile());
+            lines.push_back({buf, kDim});
+        }
+    }
+    if (in->walk) {
+        std::snprintf(buf, sizeof(buf), "walk path  t %.1f s  eye %.2f m  heading %.0f deg",
+                      animTime, scene->config.walkEye, in->yaw * 57.29577951308232f);
+        lines.push_back({buf, kFg});
+    }
+
     // ---- what the crate is sampling -----------------------------------------
     // Not the `capture` flag: the texture unit that was bound. With the flag on and
     // the FBO incomplete the pass falls back here, and a panel that printed the
@@ -164,8 +208,9 @@ void NightHudPass::Execute(gldx::RenderFrame& f) {
     const std::vector<Line> keys = {
         {"WASD/Space/Ctrl fly  Shift brake  mouse look", kDim},
         {"1 capture  2 refract  3 lanterns  4 fog  R roam", kDim},
-        {"C cull  V wire  B bloom  H hud  F cursor  wheel fov", kDim},
-        {"[ ] env mix   - = speed   X quit  Esc release", kDim},
+        {"G walk the path  C cull  V wire  B bloom  H hud", kDim},
+        {"F cursor  wheel fov  [ ] env mix  - = speed", kDim},
+        {"X quit  Esc release", kDim},
     };
 
     if (!f.overlay.sprite || !f.overlay.font || !f.overlay.white ||
