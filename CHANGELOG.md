@@ -5,6 +5,25 @@
 
 ## Unreleased
 
+### `night_forest` 的地面从一张平面长成四档高度场：指导书 `CTerrain` 的现代等价类，外加真能爬坡过堑的贴地漫游
+
+- **`Terrain.{h,cpp}`（新增 181 + 501 行）就是实验指导书那个 `CTerrain` 的现代等价**：`SetSize / InitTerrain / LoadRawFile / GetHeight / GetAveHeight / BuildMeshData` 一一对上，四档 `flat / random / hills / contour`。`random` 是指导书的双重循环逐格掷点，`hills` 是同一份噪声加 `--terrain-smooth` 的几次盒式平均，`contour` 从外部读高度。此前这个 demo 的地面是一张 Plane，指导书要的“地面从双重循环里长出来”和“从 `.raw` / 等高线图读高度”两句都没有落点。
+- **`Noise.h`（新增）把草地贴图与高度场合成一份真源**：位混列就是草图那一条。此前会是两套噪声，改不了的旧症状是“地面纹理和地形起伏对不上”——贴图上的草坡与几何上的山脊各说各话。
+- **`contour` 档吃两种容器走同一条归一化路径**：16 位小端无头 `.raw`（`--terrain-map height.raw`）与 png/jpg 灰度高度场（走 stb）。`--terrain-levels N` 做指导书那套梯田量化，band 索引取 `min(floor(...), n-1)` 而不是让它过界——不夹紧时 `v == maxH` 会除出第 n 档，台面中心落到 `maxH + step/2`，越出 `Normalise()` 刚承诺的 ±relief/2 包络半个台阶（40 m relief / 5 档实测到 24 m，HUD 会把它报成“比 relief 还高”）。
+- **指导书原文有四处它自己没做的，这里逐个补掉**：① `MAP_W` 格网格需要 `(MAP_W+1)²` 个顶点，`Vertex + MAP_W` 那套索引配它自己的 `MAP_W²` 数组会越界并把三角斜切；② 固定管线不会自己生法线，跨 tile 沿用上一次 `glNormal3f` ⇒ 山脊涂成山谷，这里逐顶点算；③ 它的高度恒正（`h..2h`）⇒ 整块地面浮在 y=0 之上，这里归一到 ±relief/2；④ `.raw` 无头 ⇒ 靠 `m_nWidth` 假定尺寸就是越界读，这里校验字节数，对不上就报错回落平面。
+- **`heightAt()` 成为全场唯一一处“这个点多高”的答案**，四个消费方都改问它——树根、灯笼柱、木箱路径、漫游相机；第二处“自己算高度”会长成树浮在山头上。地面网格从一张 Plane 换成高度场，uv 仍按整数晶格给，于是草图在任意 relief 下连续不接缝（`groundUvScale()` 交给 pass）。
+- **高度场不增加任何 draw 提交**：`Passes.cpp` 全文件对 terrain 的引用数为 0，它替换的仍是地面那一次提交，末行 `5 world draws / 1406 instances` 在四档地形下一字不变——这一行因此可以当回归用。
+- **`--on walk` / `G`**：相机沿 seed 决定的行走路径表前进，眼睛高度 = `heightAt` + 1.70 m，爬坡过堑是真发生而不是穿模；HUD 加四行读数（脚下高度、坡度、地形档与尺寸、路径时刻）。测试数据由新增的 `make_heightmap.py` 现生成（闭式函数、无 RNG，重生成逐字节相同），产物只落 `outputs/.tmp/`——仓内 `src/` 不保存二进制资源。
+- **验证（口径先说清：逐字节比对只在单发命令下成立）**：Release 构建自有 `src/**` 零告警；默认 `terrain=flat` 时 `heightAt` 返回精确 `0.0f`、地面走原 Plane 路径，天空/箱子线的基线帧单发重跑逐字节全等（`--star-size 128` 那一条连跑 6 次哈希全等于基线）；地形线 42–51 十张帧用固定机位 `--pos-x 0 --pos-y 46 --pos-z 105 --yaw 0.0 --pitch -0.42` 逐字节可复现。以 flat 为参照的像素差 random 74.61%/71.37% max 191、smooth3 66.33%、image 66.80%、raw 66.84%、levels5 55.11%、wire 71.53%、hills 66.06%（可见差均 ≥50%，差异带从天际线 row≈120 起，即“地平线被抬起来了”）；同一座山的两条来源交叉核对——png 与 `.raw` 差 mean 0.226/255、`≥2/255` 仅 1.67%，说明读图与读原始数据落在同一尺度；两条降级实测各打一行 stderr 后回落平面：非法模式名 `--terrain mount`、打不开的 `--terrain-map nope.raw`。
+- **已知抖动（不阻塞发布，但记账）**：把十几条取证命令连跑成一个脚本时，每轮失败的张次都不一样（一轮 31/37/38，另一轮 27/28/31/33/38），而同一命令单发 6 次哈希全等；量级是不满 100 个像素、最大 7–10/255，bbox 落在树与雾那一带——那是 GPU 末位级抖动被连跑放大，不是某一帧坏了。指针输入已排除：`Input.cpp` 里鼠标与滚轮各有一道 `if (!in->captured) return;`，demo 侧 CPU 生成路径无线程/原子。结论写进约定：**仓内取证一律单发逐条**。
+- **文档同步**：`AGENTS.md` 的 `night_forest` 条目（文件地图补 `Terrain.{h,cpp}`/`Noise.h`/`make_heightmap.py`，关键约定新增“高度场不增加 draw”“梯田 band 必须夹紧”“取证只能单发”三条，CLI features 加 `walk`、options 加 9 个 terrain/walk-radius）、`doc/user/10-demos.md` 的 `night_forest` 一节（新增一整段“地面不必是一张平面”，取证段改单发口径，操作行补 `G`）。
+
+### `release.sh` 的版本锚点改为自动发现：后加的 demo 不再漂在旧版本上
+
+- **硬编码的锚点清单是真的漏了**。`kAppVersion` 住在各个 demo 的 `main.cpp` 里，仓内现在有四份（`glass_water` / `night_forest` / `pbr_showcase` / `voxel_terrain`），脚本原先只点名后两份，连末尾的 stale-anchor 自检与 `git add` 也只用这两处——照现状发版会让 `glass_water` 与 `night_forest` 的 HUD 与 `--version` 停在上一版。这正是这个脚本存在的意义被自己违反了一次。
+- **改成枚举而不是点名**：`grep -RlE 'kAppVersion[[:space:]]*=[[:space:]]*"' src/demo --include='main.cpp'` 发现全部锚点，逐文件 patch；旧版本从枚举结果里读，读出不一致时逐条 `WARNING` 报出是哪一份漂了；stale 自检与 `git add` 复用同一份枚举，不再各写一遍清单。注释里写下这条不变量：**每一个会打印版本的 demo 都是一个版本锚点**。
+- **验证**：`bash scripts/release.sh 1.5.0` 同版本空跑输出 `current version (from 4 demo main.cpp): 1.5.0`，四个 `main.cpp` + `CMakeLists.txt` + README 三处 + `AGENTS.md` 全部 `unchanged`、`touched in 0 file(s)`，没有版本文件被改写。
+
 ### cube 面基表不再是“一种口味”：引擎里“涂进天空的光”和“着色指向的光”第一次落在同一个方向（实测 8°/172° → 0.0–0.1°）
 
 - **错的是 `EnvironmentMap` 自带的那张表**。 OpenGL §8.13 把“一个 cube 纹素代表哪个方向”钉死为“取主轴、剩下的两个带符号分量作 (sc, tc)”，即 `s = (1 + sc/|ma|)/2`；写成每面一个 `{right, up, facing}` 基就是另一套写法。仓内以前有五份：两张面基表（`EnvironmentMap.cpp` 的 `kFaceBasis`、`night_forest/Sky.h` 的一张）加三张 `kCubeFaceTargets` 枚举副本（`EnvironmentMap.cpp` / `TextureCubeMap.cpp` / `night_forest/Passes.cpp`）。其中只有 `Sky.h` 那张符合规范——它是上一轮拿驱动实测出来的。

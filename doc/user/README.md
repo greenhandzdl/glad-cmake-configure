@@ -47,6 +47,7 @@
 | IBL / 天空盒 | [5](5-lighting-ubo.md) | `ibl_environment`、`skybox`、`night_forest` |
 | cube 面约定（哪个纹素代表哪个方向）全仓只有一份，与只能回读 GPU 才能发现的落点错 | [5 §4](5-lighting-ubo.md) + [10 §5](10-demos.md) | `ibl_environment`、`skybox`、`night_forest`（`gldx::CubeFaceAxis`） |
 | cube FBO 六面抓取 → 反射 + 折射（写它的同时不采样它） | [8 §1](8-advanced.md) | `night_forest`（`1`/`2` 两道闸门） |
+| 高度场地形：四档生成 / `.raw` 与灰度图两条读入路径 / 梯田量化 / 贴地漫游（且一次 draw 都不多） | [10 §2](10-demos.md) | `night_forest`（`--terrain`、`G`；`Terrain.{h,cpp}` 在 demo 侧，不在引擎里） |
 | 后期 Bloom / ACES | [8 §2](8-advanced.md) | `postprocess_bloom` |
 | 相机与拾取 / 视锥剔除 | [6](6-camera-picking.md) | `camera_picking` |
 | 体素世界（地形/挖/碰撞/粒子） | [7](7-voxel-basics.md) | `voxel_terrain`、`particles` |

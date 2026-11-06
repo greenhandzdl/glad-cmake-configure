@@ -46,15 +46,14 @@ GLFW_Template-windows-x64.zip
 
 | 文件 | 锚点 |
 | --- | --- |
-| `src/demo/pbr_showcase/main.cpp` | `kAppVersion = "X.Y.Z"`（权威源） |
-| `src/demo/voxel_terrain/main.cpp` | `kAppVersion = "X.Y.Z"` |
+| `src/demo/*/main.cpp` | `kAppVersion = "X.Y.Z"`——**靠 grep 枚举，不硬编码清单**：每一个会打印版本的 demo 都是一个锚点（目前 4 份：`glass_water` / `night_forest` / `pbr_showcase` / `voxel_terrain`） |
 | `CMakeLists.txt` | `project(GLFW_Template VERSION X.Y.Z ...)` |
 | `README.md` | 配置摘要样例行 `GLFW_Template X.Y.Z configuration:` 与“当前正式版 `[vX.Y.Z](.../releases/tag/vX.Y.Z)`”链接 |
 | `AGENTS.md` | “当前正式版 tag：`vX.Y.Z`” |
 
-脚本自带校验：改写后若在受管文件里还能搜到旧版本号就打 WARNING 并列出行。**它刻意不 push、不创建 GitHub Release**——那两步是人的决定。可选 `--commit` 顺带提交版本 bump，再加 `--tag` 打 annotated tag `vX.Y.Z`。
+脚本自带校验：旧版本号也从枚举结果里读（所认的锚点数量会打印在开头一行），某一份与其余不一致时逐条 WARNING 指名是哪一份漂了；改写后若在受管文件里还能搜到旧版本号再打一次 WARNING 并列出行。历史教训：这里曾经只点名两个 demo，后来新增的两个 demo 的 HUD 版本就漂在了上一版上——所认清单改成发现而不是维护。**它刻意不 push、不创建 GitHub Release**——那两步是人的决定。可选 `--commit` 顺带提交版本 bump（CHANGELOG 的标题提升需要你自己 `git add` 后一并带上），再加 `--tag` 打 annotated tag `vX.Y.Z`。
 
-> 因为版本锚点只写在 `README.md` 与 `AGENTS.md`，文档正文（含本文与 [入门](../user/1-getting-started.md)）一律用 `<版本>` 占位描述那行配置摘要，避免出现第六处需要同步的地方。
+> 因为文档类锚点只写在 `README.md` 与 `AGENTS.md` 两处，文档正文（含本文与 [入门](../user/1-getting-started.md)）一律用 `<版本>` 占位描述那行配置摘要，避免把需要同步的地方越写越多。
 
 发版后的手动步骤：
 
