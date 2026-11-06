@@ -5,6 +5,8 @@
 
 ## Unreleased
 
+## v1.6.0
+
 ### `night_forest` 的地面从一张平面长成四档高度场：指导书 `CTerrain` 的现代等价类，外加真能爬坡过堑的贴地漫游
 
 - **`Terrain.{h,cpp}`（新增 181 + 501 行）就是实验指导书那个 `CTerrain` 的现代等价**：`SetSize / InitTerrain / LoadRawFile / GetHeight / GetAveHeight / BuildMeshData` 一一对上，四档 `flat / random / hills / contour`。`random` 是指导书的双重循环逐格掷点，`hills` 是同一份噪声加 `--terrain-smooth` 的几次盒式平均，`contour` 从外部读高度。此前这个 demo 的地面是一张 Plane，指导书要的“地面从双重循环里长出来”和“从 `.raw` / 等高线图读高度”两句都没有落点。

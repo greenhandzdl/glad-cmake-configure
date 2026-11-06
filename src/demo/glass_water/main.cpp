@@ -81,7 +81,7 @@ using namespace glass_water;
 
 namespace {
 
-constexpr const char* kAppVersion   = "1.5.0";
+constexpr const char* kAppVersion   = "1.6.0";
 constexpr const char* kWindowTitle  = "gldx::Renderer - glass, water, blending & depth";
 constexpr int kWindowWidth  = 800;
 constexpr int kWindowHeight = 600;
