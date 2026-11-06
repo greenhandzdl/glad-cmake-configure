@@ -15,8 +15,8 @@
 #   scripts/release.sh <X.Y.Z> --commit --tag  # also create git tag vX.Y.Z
 #
 # Anchors handled:
-#   src/demo/pbr_showcase/main.cpp    kAppVersion = "X.Y.Z"   (canonical source; duplicated in the two showcase demos)
-#   src/demo/voxel_terrain/main.cpp   kAppVersion = "X.Y.Z"
+#   src/demo/*/main.cpp           kAppVersion = "X.Y.Z"   (discovered, never hardcoded: every demo
+#                                  that prints a version is an anchor or the release drifts)
 #   CMakeLists.txt            project(GLFW_Template VERSION X.Y.Z ...)
 #   README.md                 sample "GLFW_Template X.Y.Z configuration:"
 #   README.md                 "当前正式版 [vX.Y.Z](.../releases/tag/vX.Y.Z)"
@@ -58,16 +58,31 @@ if [ "$DO_TAG" = true ] && [ "$DO_COMMIT" != true ]; then
     exit 2
 fi
 
-# The app-version string now lives with the two showcase demos (moved out of
-# Platform.h during the gfx->gldx split), so read/update it in both files.
-PBR_MAIN="src/demo/pbr_showcase/main.cpp"
-VOXEL_MAIN="src/demo/voxel_terrain/main.cpp"
-if [ ! -f "$PBR_MAIN" ] || [ ! -f "$VOXEL_MAIN" ]; then
-    echo "not run from the project root (missing $PBR_MAIN or $VOXEL_MAIN)" >&2
+# The app-version string lives with the demos (moved out of Platform.h during
+# the gfx->gldx split) and every demo main.cpp carries its own copy. Enumerate
+# them instead of naming them: the first release that hardcoded two files
+# silently left two more at the previous version, which is the exact drift this
+# script exists to prevent.
+if [ ! -d src/demo ]; then
+    echo "not run from the project root (missing src/demo)" >&2
     exit 1
 fi
-OLD="$(sed -nE 's/.*kAppVersion[[:space:]]*=[[:space:]]*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' "$PBR_MAIN")"
-echo "current version (from $PBR_MAIN): ${OLD:-<unknown>}"
+MAINS="$(grep -RlE 'kAppVersion[[:space:]]*=[[:space:]]*"' src/demo --include='main.cpp' 2>/dev/null | LC_ALL=C sort)"
+if [ -z "$MAINS" ]; then
+    echo "no demo main.cpp declares kAppVersion - wrong checkout?" >&2
+    exit 1
+fi
+OLD=""
+for f in $MAINS; do
+    v="$(sed -nE 's/.*kAppVersion[[:space:]]*=[[:space:]]*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' "$f" | head -1)"
+    [ -n "$v" ] || continue
+    if [ -z "$OLD" ]; then
+        OLD="$v"
+    elif [ "$OLD" != "$v" ]; then
+        echo "WARNING: $f is at $v but the other anchors report $OLD" >&2
+    fi
+done
+echo "current version (from $(echo $MAINS | wc -w | tr -d ' ') demo main.cpp): ${OLD:-<unknown>}"
 echo "target version: $NEW"
 echo "-----------------------------------------"
 
@@ -91,8 +106,9 @@ patch() {
 
 V='[0-9]+\.[0-9]+\.[0-9]+'
 
-patch "$PBR_MAIN" "s/(kAppVersion[[:space:]]*=[[:space:]]*\")$V(\".*)/\1$NEW\2/"
-patch "$VOXEL_MAIN" "s/(kAppVersion[[:space:]]*=[[:space:]]*\")$V(\".*)/\1$NEW\2/"
+for f in $MAINS; do
+    patch "$f" "s/(kAppVersion[[:space:]]*=[[:space:]]*\")$V(\".*)/\1$NEW\2/"
+done
 patch "CMakeLists.txt" "s/(project\(GLFW_Template VERSION )$V/\1$NEW/"
 patch "README.md" "s/(GLFW_Template )$V( configuration:)/\1$NEW\2/"
 patch "README.md" "s#(releases/tag/v)$V#\1$NEW#"
@@ -104,15 +120,15 @@ echo "version anchors touched in $changed file(s)"
 
 # Sanity: no stale old-version anchors should remain in the tracked files.
 if [ "$OLD" != "$NEW" ] && [ -n "$OLD" ]; then
-    if grep -RnE "$OLD" CMakeLists.txt "$PBR_MAIN" "$VOXEL_MAIN" README.md AGENTS.md >/dev/null 2>&1; then
+    if grep -RnE "$OLD" CMakeLists.txt $MAINS README.md AGENTS.md >/dev/null 2>&1; then
         echo "WARNING: the old version '$OLD' still appears in a version file:" >&2
-        grep -RnE "$OLD" CMakeLists.txt "$PBR_MAIN" "$VOXEL_MAIN" README.md AGENTS.md >&2 || true
+        grep -RnE "$OLD" CMakeLists.txt $MAINS README.md AGENTS.md >&2 || true
     fi
 fi
 
 if [ "$DO_COMMIT" = true ]; then
     echo "-----------------------------------------"
-    git add CMakeLists.txt "$PBR_MAIN" "$VOXEL_MAIN" README.md AGENTS.md
+    git add CMakeLists.txt $MAINS README.md AGENTS.md
     git commit -m "chore(release): v$NEW"
     echo "committed version bump"
     if [ "$DO_TAG" = true ]; then
