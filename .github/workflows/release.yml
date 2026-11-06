@@ -73,7 +73,13 @@ jobs:
       # ------------------------------------------------------------------
       # 依赖安装：Linux
       #   gldx 是 C++20 named module，需要成熟的模块实现 + clang-scan-deps，
-      #   Ubuntu 自带的 gcc-13/clang-18 不足以编译，故从 apt.llvm.org 装 clang-20。
+      #   Ubuntu 自带的 gcc/clang 不足以编译，故从 apt.llvm.org 装 clang。
+      #   版本号必须跟着 apt.llvm.org 的维护窗口走：它只发布 main + 最近两个
+      #   release（现在是 22/23），旧分支整条下架——写死 clang-20 时
+      #   `apt-get update` 直接报 “llvm-toolchain-<codename>-20 Release does not have
+      #   a Release file” 并以 exit 100 碎在装依赖这一步（v1.6.0 的 Linux job）。
+      #   注意这跟发行版无关：ubuntu-latest 升到 26.04 (resolute) 只是同一天发生
+      #   的另一件事，钉回 ubuntu-24.04 一样拿不到 -20。
       # ------------------------------------------------------------------
       - name: Install dependencies (Linux)
         if: matrix.os == 'linux'
@@ -89,11 +95,11 @@ jobs:
           sudo apt-get install -y gnupg lsb-release
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
           CODENAME=$(. /etc/os-release; echo "$VERSION_CODENAME")
-          echo "deb http://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          echo "deb http://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-23 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
-          sudo apt-get install -y clang-20 llvm-20
-          echo "CC=clang-20"  >> "$GITHUB_ENV"
-          echo "CXX=clang++-20" >> "$GITHUB_ENV"
+          sudo apt-get install -y clang-23 llvm-23
+          echo "CC=clang-23"  >> "$GITHUB_ENV"
+          echo "CXX=clang++-23" >> "$GITHUB_ENV"
 
       # ------------------------------------------------------------------
       # 依赖安装：macOS

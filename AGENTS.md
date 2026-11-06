@@ -228,7 +228,8 @@ AGENTS.md                    本文件（agent 速查，留在仓库根便于自
 - 输入：`build_type` / `release_tag`（空则 `ci-<日期>-<sha>`）/ `prerelease` / `draft`。
 - CI **不使用 `--preset`**（用显式 `cmake -S/-B`），故 `CMakePresets.json` 的 Darwin 条件对 Linux/Windows 无影响。
 - Windows job **钉死 `windows-2022` 镜像**：更新镜像带来的新 MSVC 在 named module 的 `import` 侧触发 STL 重定义编译风暴；解除条件=确认新工具链能过模块。逐平台其他硬约束见 [`doc/developer/release.md`](doc/developer/release.md)。
-- 版本号锚点共 6 处（两个 `kAppVersion`、`project(... VERSION)`、README 的配置摘要行与“当前正式版”链接、本文件的 tag），用 `scripts/release.sh <X.Y.Z>` 一次性重写；**删改 README 时留意这两个锚点**，脚本靠 grep 它们工作（命中不了只会报 `unchanged`，不报错）。
+- Linux job 的 clang **不能写死一个已经跳出 apt.llvm.org 维护窗口的版本**：该源只发 `main` + 最近两个 release（现为 22/23），旧分支整条下架，写死 `clang-20` 会使 `apt-get update` 报 `llvm-toolchain-<codename>-20 Release does not have a Release file` 并以 exit 100 碎在装依赖阶段（v1.6.0 的 Linux job）。注意这与发行版无关，`ubuntu-latest` 升到 26.04 (resolute) 只是同期另一件事，钉回 `ubuntu-24.04` 同样拿不到 -20；现取 23，解除条件=新工具链能过 named modules 且零告警。
+- 版本号锚点靠 **grep 枚举**而不是点名：`kAppVersion` 现在在 4 个 demo 的 `main.cpp` 里各有一份（`glass_water`/`night_forest`/`pbr_showcase`/`voxel_terrain`），共 9 个文件（加 `project(... VERSION)`、README 的配置摘要行与“当前正式版”链接、本文件的 tag）一起被 `scripts/release.sh <X.Y.Z>` 重写；以前这里写的是“共 6 处、两个 `kAppVersion`”，新增 demo 漂在旧版本上达两个版本周期——**新增会打印版本的 demo 什么都不用改，但不要回到硬编码清单**。脚本自带的 stale 自检也吃同一份枚举，所以它会报出是哪一份漂了。**删改 README 时留意那两个锚点**，脚本靠 grep 它们工作（命中不了只会报 `unchanged`，不报错）。
 
 ## 约定
 

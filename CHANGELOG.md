@@ -5,6 +5,11 @@
 
 ## Unreleased
 
+### CI：Linux job 的 clang 抬到 apt.llvm.org 仍在维护的分支（20 → 23）
+
+- **v1.6.0 的 Linux job 碎在 `Install dependencies (Linux)`**：`apt-get update` 报 `The repository 'http://apt.llvm.org/resolute llvm-toolchain-resolute-20 Release' does not have a Release file.` 并以 exit 100 退出，制品因此没创建（macOS / Windows 两个 job 本身是过的）。同一轮 `ubuntu-latest` 升到 Ubuntu 26.04 (resolute)，但两者只是同期发生：真正的原因是 apt.llvm.org 只发布 `main` + 最近两个 release（现为 22/23），**旧分支会被整条下架**，所以 `llvm-toolchain-<任意 codename>-20` 现在对任何发行版都不存在，钉回 `ubuntu-24.04` 一样拿不到。
+- **改法**：`release.yml` 的源行与包名改取 23（`llvm-toolchain-$CODENAME-23` / `clang-23 llvm-23` / `CC=clang-23` / `CXX=clang++-23`），注释里写清“版本号必须跟着维护窗口走”与 exit 100 的具体报错；`AGENTS.md` 的「CI / 发布」新增一条硬约束与解除条件（新工具链能过 named modules 且零告警），`doc/developer/release.md` §3 的 Linux 行同步。顺带修掉该节里“版本号锚点共 6 处（两个 `kAppVersion`）”的陈旧说法：现在是 9 个文件，且清单靠 grep 枚举而不是点名。
+
 ## v1.6.0
 
 ### `night_forest` 的地面从一张平面长成四档高度场：指导书 `CTerrain` 的现代等价类，外加真能爬坡过堑的贴地漫游
