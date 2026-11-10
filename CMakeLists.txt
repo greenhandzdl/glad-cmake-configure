@@ -80,16 +80,24 @@ set(TARGET_NAME "GLFW_Template")
 # it; OFF drops the whole model-import path without changing the gldx interface.
 option(GLDX_ENABLE_ASSIMP "Build assimp-backed 3D model import" ON)
 
+# Build option: FreeType as the font rasteriser behind gldx::Font. OFF keeps the
+# stb_truetype bake path that was always there, so the text subsystem builds on
+# a machine that has not fetched the submodule. Same interface, same atlas, same
+# metrics either way - only the outline rasteriser differs.
+option(GLDX_ENABLE_FREETYPE "Build FreeType-backed font rasteriser" ON)
+
 # ----------------------------------------------------------------------------
 # Layout: this file is a thin orchestrator. Dependency discovery lives under
 # cmake/, and every library/executable under src/ builds from its own
 # CMakeLists.txt via recursive add_subdirectory. Included (not added) so the
 # cache variables the dependency modules set (GLAD_TARGET, GLM_INCLUDE_DIR,
-# GLAD_SOURCE, ASSIMP_SOURCE) land in this scope and propagate to the subdirs.
+# GLAD_SOURCE, ASSIMP_SOURCE, FREETYPE_SOURCE) land in this scope and propagate
+# to the subdirs.
 # ----------------------------------------------------------------------------
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 include(Dependencies)   # GLFW + GLAD + GLM + stb -> GLAD_TARGET / GLM_INCLUDE_DIR
 include(Assimp)         # optional vendored assimp subproject -> assimp::assimp
+include(FreeType)       # optional vendored freetype subproject -> Freetype::Freetype
 
 add_subdirectory(src)   # gldx, gldxwin, gldxcli, GLFW_Template, demo/*
 
@@ -132,5 +140,6 @@ message(STATUS "  GLAD        : ${GLAD_SOURCE}")
 message(STATUS "  GLM         : ${GLM_INCLUDE_DIR}")
 message(STATUS "  STB         : submodule")
 message(STATUS "  Assimp      : ${ASSIMP_SOURCE}")
+message(STATUS "  FreeType    : ${FREETYPE_SOURCE}")
 message(STATUS "  Output      : ${CMAKE_SOURCE_DIR}/output")
 message(STATUS "")
