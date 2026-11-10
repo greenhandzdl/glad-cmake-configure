@@ -58,17 +58,29 @@ function(add_gldx_demo name)
     # after L56), and closed the last two axes: /Od, /Gw and /GS- change nothing,
     # and the /Fa listing reaches only 285 bytes and 12 lines before the watchdog
     # fires - it stops in the prologue, before a single instruction is emitted, so
-    # the writer is not being handed garbage; it runs away on its own. What is still
-    # open is which *property* of that call MSVC cannot write. The probe now
-    # rewrites just that region of the complete TU, once per property: the imported
-    # constant instead of this file's `constexpr glm::vec4 kDim = Hud::kDim;`, a
-    # prvalue of it, a function-local copy, a function-local const ref, and a
-    # literal in place of the char array that has to convert to std::string_view -
-    # motivated by the importers that compile either passing `Hud::kDim` directly or
-    # declaring no alias at all, which is an observation about which files fail,
-    # not yet a diagnosis. Until one of those rewrites compiles this stays
-    # "known, not fixed" - and remember that clang has no equivalent limit, so
-    # nothing built here can observe any of it.
+    # the writer is not being handed garbage; it runs away on its own.
+    # Run 42777226104 then falsified that headline with its own control row: deleting
+    # the statement from the complete TU still gives C1605, on both files. The two
+    # results only stand together as sufficient-but-not-necessary - inside the prefix
+    # family that one line crosses the limit, while the complete file has the same
+    # call shape 7 times (glass_water) and 12 times (night_forest), so removing one
+    # site from something already over the limit changes nothing. Whether all the
+    # sites have to go, or the file is simply over a cumulative limit and AddLine is
+    # only where the prefix happened to cross it, is what the new
+    # delete-all-occurrences row is there to answer. Per-property rewrites mean
+    # nothing on the complete file for that reason, and run on the minimal failing
+    # prefix instead - there, deleting the statement really does compile again, and if
+    # that stops holding the probe prints CONTROL DID NOT COMPILE rather than letting
+    # the rows below it be read as evidence.
+    # Which property of the call is unloadable is still open. The candidates come
+    # from the one asymmetry left in the source: both failing TUs declare
+    # `constexpr glm::vec4 kDim = Hud::kDim;` and hand over the *local* name, while
+    # text_hud/main.cpp passes `Hud::kDim` directly and voxel_terrain/Hud.cpp
+    # declares no alias at all. That is an observation about which files fail, not a
+    # diagnosis, and even a row that compiles only names a form the writer can emit -
+    # a fix would have to be applied at every call site, not at the one the bisect
+    # happened to name. Until then this stays "known, not fixed", and remember that
+    # clang has no equivalent limit, so nothing built here can observe any of it.
     if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         target_compile_options(d_${name} PRIVATE /bigobj)
     endif()
