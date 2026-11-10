@@ -38,7 +38,7 @@ GLFW_Template-windows-x64.zip
 
 - **macOS**：OpenGL 由系统框架提供，GLFW 使用 Cocoa 后端；本地构建必须用 Homebrew LLVM（AppleClang 无 `clang-scan-deps`），见 [使用者排错 §1](../user/9-troubleshooting.md)。
 - **Linux**：X11，OpenGL 4.1 Core Profile；注意 libstdc++ 不透出 `<mutex>`，用到 `std::unique_lock` 的文件要显式 include。编译器从 apt.llvm.org 取，**版本号必须落在该源的维护窗口内（`main` + 最近两个 release）**：旧分支会被整条下架，写死一个下架版本会让 `apt-get update` 在装依赖阶段以 exit 100 碎掉；与发行版无关，钉旧 `ubuntu-24.04` 也一样拿不到。
-- **Windows**：MSVC + vcpkg（GLFW 为动态库，发布包已附带对应 DLL）。当前 job **钉死 `windows-2022` 镜像**：更新镜像带来的 MSVC 版本会在 C++20 named modules 的 `import` 侧触发 STL 重定义编译风暴，解除条件与该决策记录见仓库根 [AGENTS.md](../../AGENTS.md) 的“CI / 发布”一节。
+- **Windows**：MSVC + vcpkg（GLFW 为动态库，发布包已附带对应 DLL）。当前 job **钉死 `windows-2022` 镜像**：更新镜像带来的 MSVC 版本会在 C++20 named modules 的 `import` 侧触发 STL 重定义编译风暴，解除条件与该决策记录见仓库根 [AGENTS.md](../../AGENTS.md) 的“CI / 发布”一节。自有目标在 MSVC 下都带 **`/bigobj`**：`import gldx` 的 TU 会把接口内联体 + glm 模板物化进同一个 .obj，先耗尽的是 COFF 节表的 65,279 个可寻址节而不是代码，所以报的是 `C1605 ... cannot exceed 4 GB`（4 GB = `/bigobj` 的 2³² 容量）；clang 侧无此限制，这一条只能在 action 里看到。
 
 ## 4. 版本号同步（`scripts/release.sh`）
 

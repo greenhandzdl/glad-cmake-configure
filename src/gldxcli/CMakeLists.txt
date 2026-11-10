@@ -14,5 +14,7 @@ target_sources(gldxcli PUBLIC FILE_SET CXX_MODULES FILES gldxcli.cppm)
 target_include_directories(gldxcli PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-    target_compile_options(gldxcli PRIVATE /utf-8)
+    # /utf-8 for the source encoding; /bigobj for the COFF section limit a
+    # module TU runs into (see the C1605 note in src/demo/CMakeLists.txt).
+    target_compile_options(gldxcli PRIVATE /utf-8 /bigobj)
 endif()

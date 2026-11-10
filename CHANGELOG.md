@@ -5,6 +5,14 @@
 
 ## Unreleased
 
+### Windows 构建补上 `/bigobj`：v1.7.0 的 Windows job 碎在 MSVC 的 COFF 节表上限
+
+- **只在 action 里出现**：`fatal error C1605: compiler limit: object file size cannot exceed 4 GB` 只打在 `src/demo/glass_water/Hud.cpp` 与 `src/demo/night_forest/Hud.cpp` 两个 TU 上；引擎侧 `src/gldx/text/Hud.cpp`、其余 26 个 demo、以及 Linux / macOS 的同源 TU 全部通过（fail-fast 关闭，所以两个平台照样绿、`Create Release` 被 skip）。本地 clang 怎么跑都看不到的坑，只能由三平台构建暴露。
+- **报错里的数字就是答案**：4 GB 等于 `/bigobj` 的节地址容量 2³²，而默认 COFF 只有 65,279 个可寻址节——先耗尽的是**节表的寻址空间**，不是对象文件。成因与本仓架构同构：一个 `import gldx;` 的 TU 会把接口带来的内联体与 glm 模板全部物化进同一个 .obj，`text/Hud.h` 进入接口后，最大的两个 HUD TU 越过了那条线。
+- **修法是把上限抬对，而不是把代码改碎**：`/bigobj` 加到我们自己的四个目标组（`src/demo/CMakeLists.txt` 的 `add_gldx_demo` 与 `gldx` / `gldxwin` / `gldxcli` 的 MSVC 块），不拆 TU、不降优化级、不动版面代码。`third_party/` 不受影响（assimp / freetype 本来就在 Windows 上过得去）。
+- **验证口径**：本地只能证明没改坏 clang 侧——重新配置 + 全量构建 exit=0，自有 `src/**` 告警 0 条，Summary 仍打 `FreeType: submodule (static, no external codecs)`；MSVC 侧以重跑 action 为准。
+- **文档**：`AGENTS.md`（报错表新增一行，含“别去拆 TU / 降优化”的反向指引；「CI / 发布」新增一条硬约束：新增会 `import gldx` 的目标时继承 `/bigobj`）、`doc/developer/release.md` §3 的 Windows 行。
+
 ## v1.7.0
 
 ### 字体光栅换成 FreeType（子模块 + 可选依赖），并把四个 demo 手抄的 HUD 版面收敛成引擎侧 `gldx::Hud`

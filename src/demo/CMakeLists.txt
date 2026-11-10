@@ -32,6 +32,21 @@ function(add_gldx_demo name)
     set_target_properties(d_${name} PROPERTIES
         OUTPUT_NAME ${name}
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/output)
+    # MSVC only: /bigobj. A demo TU is a module *importer*, so it materialises
+    # everything `import gldx;` carries (glm's templates on top) into one .obj,
+    # and the COFF section table runs out of addressable room long before the
+    # code does. The symptom is not a normal overflow diagnostic - it is
+    # `fatal error C1605: compiler limit: object file size cannot exceed 4 GB`,
+    # where that 4 GB is exactly /bigobj's 2^32 section capacity (the default is
+    # 65,279), i.e. the compiler ran out of *addressable sections*. Hit on
+    # Windows CI by the two largest HUD translation units
+    # (`glass_water/Hud.cpp`, `night_forest/Hud.cpp`) once `text/Hud.h` joined
+    # the gldx interface; the same TUs are fine on clang, which is why this only
+    # shows up in the action. /bigobj costs nothing but section-table size and
+    # needs a linker from VC2005 or later.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+        target_compile_options(d_${name} PRIVATE /bigobj)
+    endif()
 endfunction()
 
 # CONFIGURE_DEPENDS makes the glob re-run at build time, so dropping in a new
