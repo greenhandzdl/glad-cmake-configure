@@ -5,6 +5,8 @@
 
 ## Unreleased
 
+## v1.7.0
+
 ### 字体光栅换成 FreeType（子模块 + 可选依赖），并把四个 demo 手抄的 HUD 版面收敛成引擎侧 `gldx::Hud`
 
 - **`third_party/freetype` 成为第四个子模块**（upstream `https://gitlab.freedesktop.org/freetype/freetype.git`，钉在 `c4a3c18`），由新文件 `cmake/FreeType.cmake` 以 `GLDX_ENABLE_FREETYPE`（默认 `ON`）受控：静态、`FT_DISABLE_ZLIB/BZIP2/PNG/HARFBUZZ/BROTLI/HVF` 全 `TRUE`（仓内只要字形光栅， `.ttf/.otf/.ttc` 都在 FreeType 内建领域，不吃外部编解码器），并**补上 `Freetype::Freetype` ALIAS**——上游只建 `freetype-interface`，不建那个被广泛引用的别名。子模块缺失时给一条带 `git submodule update --init` 的 `FATAL_ERROR`，不静默降级。`src/gldx/CMakeLists.txt` 以 `PRIVATE` 链它，`OFF` 时定义 `GLDX_NO_FREETYPE`。

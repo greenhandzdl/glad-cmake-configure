@@ -6,7 +6,7 @@
 - **图形面**：OpenGL **4.1 Core**（GLSL `#version 410 core`）· PBR 金属/粗糙 · 级联阴影 · IBL · HDR + MSAA + Bloom + ACES · 分层透明（alpha 由菲涅耳与吸收守恒推导）· 透视/正交切换 · 实例化 · 视锥剔除 · CPU 拾取 · 异步资源管线 · 体素原语 · 引擎侧 HUD 面板（FreeType 光栅，stb_truetype 兜底）
 - **构建**：CMake ≥ 3.28 + Ninja；需支持 named modules 的编译器（Clang ≥ 19 / GCC ≥ 14 / 最新 MSVC）；macOS 必须用 Homebrew LLVM（AppleClang 无 `clang-scan-deps`）
 - **产物**：`output/GLFW_Template` + 每个 demo 一个可执行（`output/pbr_showcase`、`output/voxel_terrain`…；Windows 加 `.exe`）
-- **当前正式版**：**[v1.6.0](https://github.com/greenhandzdl/glad-cmake-configure/releases/tag/v1.6.0)**（全部变更见 [CHANGELOG.md](CHANGELOG.md)）
+- **当前正式版**：**[v1.7.0](https://github.com/greenhandzdl/glad-cmake-configure/releases/tag/v1.7.0)**（全部变更见 [CHANGELOG.md](CHANGELOG.md)）
 
 ## 快速开始
 
@@ -17,7 +17,7 @@ cmake --preset Debug && cmake --build --preset Debug     # 跨平台等价式：
 ./scripts/run.sh pbr_showcase       # 任一 demo：./scripts/run.sh <demo> [--off a,b --on c --quit-after N]
 ```
 
-配置末尾打印 `GLFW_Template 1.6.0 configuration:`（GLAD 走 system 还是子模块、Assimp / FreeType 是否启用）；逐平台依赖、`-DGLDX_ENABLE_ASSIMP=OFF` / `-DGLDX_ENABLE_FREETYPE=OFF` 去重依赖、一键脚本的自愈行为、CLion 工具链与常见报错都在 [入门](doc/user/1-getting-started.md)。
+配置末尾打印 `GLFW_Template 1.7.0 configuration:`（GLAD 走 system 还是子模块、Assimp / FreeType 是否启用）；逐平台依赖、`-DGLDX_ENABLE_ASSIMP=OFF` / `-DGLDX_ENABLE_FREETYPE=OFF` 去重依赖、一键脚本的自愈行为、CLion 工具链与常见报错都在 [入门](doc/user/1-getting-started.md)。
 
 ## 文档（按读者角色分三条路径）
 
