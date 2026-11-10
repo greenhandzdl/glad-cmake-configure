@@ -25,6 +25,15 @@
 # been killed and deleted, and the probe must exit 0. Expected line numbers are not
 # hardcoded, because the candidate list moves when the HUD files are edited.
 #
+# The one number that is chosen on purpose is the threshold. Fake cl fails anything
+# over 85 lines, which makes the minimal failing prefix L86 - the same single
+# `hud.AddLine(buf, kDim);` MSVC reports (run 42777226104). That matters: with 86
+# the fake flips one statement later, on a two-line snprintf that mentions no
+# constexpr alias, and the colour-declaration axis then legitimately never runs - so
+# the assertion that a reachable axis must not be skipped in silence would be testing
+# nothing. Round 4's real bug was exactly that axis vanishing while another axis set
+# the shared "something ran" flag.
+#
 # It also checks that nothing outlives the run. That is not paranoia: ten fake-cl
 # writers from earlier rounds were still running hours later, each still appending
 # to a listing whose directory had already been deleted, holding enough disk to fill
@@ -68,7 +77,7 @@ if [ ! -f "$src" ]; then
     exit 2
 fi
 n="$(wc -l < "$src")"
-if [ "$n" -gt "${SIM_FAIL_ABOVE:-86}" ]; then
+if [ "$n" -gt "${SIM_FAIL_ABOVE:-85}" ]; then
     echo "$src: fatal error C1605: compiler limit: object file size cannot exceed 4 GB"
     if [ -n "$asm" ]; then
         while :; do
@@ -107,7 +116,8 @@ PY
 # --- run -----------------------------------------------------------------------
 export PATH="$work/bin:$PATH"
 export SIM_CL="$work/bin/cl.exe"
-export SIM_FAIL_ABOVE="${SIM_FAIL_ABOVE:-86}"
+export SIM_FAIL_ABOVE="${SIM_FAIL_ABOVE:-85}"   # see the header: this lands the
+                                                # fake culprit on the AddLine call
 export PROBE_TIME_BUDGET="${PROBE_TIME_BUDGET:-120}"
 export PROBE_ASM_BUDGET="${PROBE_ASM_BUDGET:-2}"
 
@@ -155,13 +165,39 @@ check "bisect reports the failing end"               " +hi L[0-9]+ +C1605"
 check "bisect converges to a minimal prefix"         "minimal failing prefix: L[0-9]+ \(last passing L[0-9]+\)"
 check "culprit region is printed verbatim"           "culprit region, verbatim"
 # The substitution matrix is the step that turns "which statement" into "which
-# property of it", so it has to run on both TUs and every row has to answer.
-check "the matrix ran on both TUs"                   "substitution matrix on the complete file"
+# property of it". It has two families now, and they have to be separated: on the
+# complete file a rewrite can only say "still broken", while the per-property rows
+# are only readable on the minimal prefix. Both must run on both TUs.
+check "matrix A ran on both TUs"          "matrix A: complete file"
+check "matrix B ran on both TUs"          "matrix B: minimal failing prefix"
 check "a matrix row reports a verdict"               "matrix row .*(pass|C1605|other)"
-# Which rows exist depends on what the culprit region happens to be, and the fake
-# oracle picks a different region than MSVC does; what must never happen is an axis
-# being skipped in silence.
-check "every matrix axis is probed or said to be n/a" "imported const directly|string literal instead|no rewrite applied"
+# The control of family B is the row that licenses every row after it: deleting the
+# statement out of the minimal prefix has to compile, or the prefix is not minimal
+# and the property rows mean nothing.
+check "the prefix control row compiles"   "prefix: delete \(control\) +pass"
+# And on *both* TUs: a control that only holds on one of them means family B is
+# reading properties on one file and measuring noise on the other.
+controls="$(grep -cE 'matrix row prefix: delete \(control\) +pass' "$out")"
+if [ "$controls" = 2 ]; then
+    printf '  ok   the prefix control compiles on both TUs\n'
+else
+    printf '  FAIL the prefix control passed on %s of 2 TUs - family B is void where it did not\n' "$controls"
+    fails=$((fails + 1))
+fi
+check "redundant call sites are counted"  "complete: delete all [0-9]+ site"
+# Which rows exist depends on what the culprit region happens to be, but a reachable
+# axis must never be skipped in silence. Run 42777226104 is the reason this is a
+# separate assertion instead of a disjunction: the alias regex did not tolerate the
+# aligned `=`, so the colour-declaration axis produced no row *and* no message,
+# because the char-array axis had already set the shared "some row ran" flag.
+check "the alias axis is probed on these sources"    "prefix: imported const +(pass|C1605|other)"
+check "the string_view axis is probed"    "prefix: string literal +(pass|C1605|other)"
+# The other half of the same rule: the fake culprit for night_forest is a multi-line
+# region that reaches neither axis, and that has to be *said* rather than left out.
+# Silence and "not applicable" are the two outcomes this pair of assertions tells
+# apart; without the second one the first could be satisfied by a single TU.
+check "an unreachable axis announces itself"         "axis unreachable"
+check "a multi-line region says so"                  "note: the region spans [0-9]+ lines"
 check "isolated variant reports a verdict"           "isolated region +(pass|C1605|other)"
 check "the optimiser axis is probed"                 "min /Od +rc="
 # The fake cl never stops writing a listing for a failing source, so the only

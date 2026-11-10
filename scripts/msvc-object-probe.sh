@@ -51,8 +51,7 @@
 #     ~1.2 s. Time that does not grow with the amount of code is not the shape
 #     of a size limit: once the trigger is present the writer runs to the wall.
 #
-# So the last round stopped sampling and closed the case (run 42770837956, master
-# 541d66f). What came back:
+# What the round that stopped sampling returned (run 42770837956, master 541d66f):
 #   bisect        both TUs converge on the SAME statement, `hud.AddLine(buf, kDim);`
 #                 - glass_water fails at L86 with L85 passing, night_forest at L57
 #                 with L56 passing;
@@ -64,29 +63,51 @@
 #                 being *fed* to the writer: the writer itself is what runs away;
 #   isolated      came back `other:C2065`, which is the probe's fault rather than
 #                 MSVC's - with the rest of the body deleted, `buf` and `kDim` are no
-#                 longer in scope. "Is it this statement alone?" therefore stays
-#                 open, and deleting the body can never answer it. Only rewriting it
-#                 can, which is what the matrix below now does:
-#   substitution matrix
-#                 the complete TU with ONLY the culprit region rewritten, one row per
-#                 property of that region: deleted (the control - the rest of the file
-#                 then has to compile), unchanged (the replay), the imported constant
-#                 instead of the file's constexpr alias, a prvalue of the alias, a
-#                 function-local non-constexpr copy, a function-local const reference,
-#                 and a string literal instead of the char array that has to convert
-#                 to std::string_view. The aliases and the buffer are read out of the
-#                 source (alias_decls), so the rows follow whatever the culprit turns
-#                 out to be instead of being written for this one line, and an axis
-#                 that does not apply is printed as such rather than left silent.
-#                 Why these particular properties: the two TUs that fail both declare
-#                 `constexpr glm::vec4 kDim = Hud::kDim;` and pass the *local* name,
-#                 while text_hud/main.cpp - which compiles - passes `Hud::kDim`
-#                 directly and voxel_terrain/Hud.cpp declares no alias at all. That is
-#                 still only an observation about which files fail; a row that compiles
-#                 is what would turn it into a fact about which form is unloadable.
-# Each row costs one whole-TU compile (~11 s), so the matrix is under two minutes per
-# TU on top of the bisect.
+#                 longer in scope.
 #
+# The substitution matrix shipped in that same round then undid its own headline,
+# which is what a control row is for:
+#   delete the statement, complete file  ->  still C1605, on both TUs.
+# So "the bisect found the statement the writer cannot emit" was an over-reading. The
+# two observations only stand together as *sufficient, not necessary*: inside the
+# prefix family, adding that one line crosses the limit (and the prefix that fails
+# carries exactly one such call); in the complete file the same shape occurs 7 times
+# in glass_water and 12 in night_forest, so taking one of them out of a file already
+# over the limit changes nothing. What is NOT established is that each site is enough
+# on its own - that is the hypothesis the new delete-all-occurrences row tests, and
+# until it runs there are two readings left: the call sites are individually fatal,
+# or the file is over a cumulative limit and AddLine is merely where the prefix
+# happened to cross it.
+#
+# That is why the matrix is now two families, and why they must not be read as one:
+#   matrix A (complete TU) can only answer "is a statement of this kind involved at
+#   all". Rows: unchanged, delete one site, delete all N sites. Every per-property
+#   rewrite here is guaranteed to say "still broken" and means nothing.
+#   matrix B (minimal failing TU) is where per-property rows are readable, because
+#   there the delete row really does compile again. Its first row after the replay is
+#   the control; if the control does not pass, the family prints CONTROL DID NOT
+#   COMPILE and every B row below it is noise rather than evidence.
+# The properties B tests: the imported constant instead of this file's constexpr
+# alias, a prvalue of the alias, a function-local non-constexpr copy, a function-local
+# const reference, and a literal in place of the char array that has to convert to
+# std::string_view. Why these: the two TUs that fail both declare
+# `constexpr glm::vec4 kDim = Hud::kDim;` and pass the *local* name, while text_hud
+# passes `Hud::kDim` directly and voxel_terrain declares no alias at all - which is
+# still only an observation about which files fail. A row that compiles is what would
+# turn it into a fact about which form is unloadable, and a fix would then have to be
+# applied at every site, not at the one the bisect happened to name.
+#
+# One tool lesson from the same round, because it is the reason the per-axis messages
+# are per-axis now: the alias table is read from the source, and the pattern required
+# a single space before the `=`. These files align it (`kDim  = Hud::kDim;`), so the
+# colour-declaration axis produced no rows *and no message* - the char-array axis had
+# already set the shared "some row ran" flag. A disjunctive assertion cannot see that;
+# each axis now reports its own reachability and the selftest pins the fake threshold
+# so that the fake culprit is the same single statement MSVC names.
+#
+# Each row costs one compile: matrix A rows are whole-TU compiles (~11 s), matrix B
+# rows are prefix compiles (~1.2 s), so the two families together add a couple of
+# minutes per TU on top of the bisect.
 # All of it except cl.exe itself is plain shell, and it is checked locally:
 # scripts/msvc-object-probe-selftest.sh puts a fake `cl.exe` on PATH (C1605 above a
 # chosen source length, an endless /Fa listing on a failing source, which is how the
@@ -275,72 +296,117 @@ listing_probe() {
 # the local name, while the importers that compile fine name the imported
 # constant directly, so this map lets the substitution matrix be derived from the
 # source instead of hardcoded to the line that happened to trip.
+#
+# Whitespace has to be a class and not a literal space: these files align the
+# `=`, so `constexpr glm::vec4 kDim  = Hud::kDim;` has two spaces before it. The
+# single-space pattern matched nothing and the whole alias axis vanished without a
+# word (run 42777226104) - the silent-row failure this script exists to report.
+# -E is used because BSD sed has no \+.
 alias_decls() {
-    sed -n 's/^constexpr \([A-Za-z_:0-9]*\) \([A-Za-z_][A-Za-z0-9_]*\) = \([A-Za-z_:0-9]*\);.*/\2 \1 \3/p' "$1"
+    sed -n -E 's/^constexpr[[:space:]]+([A-Za-z_:0-9]+)[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+=[[:space:]]+([A-Za-z_:0-9]+);.*/\2 \1 \3/p' "$1"
 }
 
-# variants_probe <prefix> <file> <lo> <hi> <demo> - rewrite only the culprit
-# region inside the *complete* file and compile the whole TU once per rewrite.
+# variants_probe <prefix> <file> <lo> <hi> <opens> <demo> - rewrite the culprit
+# region and compile, in two families that answer two different questions.
 #
-# "Which statement" is not actionable; "which property of the statement" is. Each
-# row changes exactly one property and keeps everything else, including all the
-# code before it, so a row that passes names a form of the same call that the
-# writer can emit. The first row is the control: delete the statement and the rest
-# of the TU has to compile, otherwise the flip was not this line's to begin with.
+# Run 42777226104 is the reason there are now two. On the *complete* file,
+# deleting the statement still gives C1605, while on the *prefix* that same
+# statement is what flips pass to fail. Both are true and they do not conflict:
+# the statement is sufficient, not necessary - the file has a dozen call sites of
+# the same shape, each one enough on its own, so removing one from something
+# already past the limit changes nothing. A complete-file rewrite can therefore
+# only ask "is this kind of statement involved at all", which is what delete-one
+# and delete-all-occurrences do. Per-property rewrites are only meaningful on the
+# minimal failing prefix, where deleting the statement really does compile again -
+# there the delete row is a control, not a second measurement of the same thing.
 variants_probe() {
-    local prefix="$1" full="$2" lo="$3" hi="$4" demo="$5"
-    local region out="probe_src/var_${demo}.cpp" lit='"probe"' word name type init hit rlines
+    local prefix="$1" full="$2" lo="$3" hi="$4" opens="$5" demo="$6"
+    local region out="probe_src/var_${demo}.cpp" pfx="probe_src/pfx_${demo}.cpp"
+    local lit='"probe"' word name type init rlines stmt sites alias_hit lit_hit
 
-    matrix_row() {   # <label> <replacement region; empty deletes the region>
-        local label="$1" body="$2" rc vd
+    write_variant() {   # <out> <base> <body; empty deletes the region>
         {
-            head -n "$lo" "$full"
-            [ -n "$body" ] && printf '%s\n' "$body"
-            tail -n +"$((hi + 1))" "$full"
-        } > "$out"
-        replay_cl "$prefix" "probe_var.obj" "$out" "probe_var.log"; rc=$?
-        vd="$(verdict_of "probe_var.log" "$rc" "probe_var.obj")"
-        printf '  matrix row %-26s %-13s %s\n' "$label" "$vd" "$(objsize probe_var.obj)"
-        [ "${vd:0:4}" = "pass" ] ||
+            head -n "$lo" "$2"
+            [ -n "$3" ] && printf '%s\n' "$3"
+            tail -n +"$((hi + 1))" "$2"
+        } > "$1"
+    }
+
+    matrix_run() {   # <label> <prepared source> - sets MV
+        local rc
+        replay_cl "$prefix" "probe_var.obj" "$2" "probe_var.log"; rc=$?
+        MV="$(verdict_of "probe_var.log" "$rc" "probe_var.obj")"
+        printf '  matrix row %-30s %-13s %s\n' "$1" "$MV" "$(objsize probe_var.obj)"
+        [ "${MV:0:4}" = "pass" ] ||
             grep -oE 'error [A-Z][0-9]+' probe_var.log | head -1 | sed 's/^/     /'
     }
 
     region="$(sed -n "$((lo + 1)),${hi}p" "$full")"
     rlines="$(printf '%s\n' "$region" | wc -l | tr -d ' ')"
-    echo "  ---- substitution matrix on the complete file (region L$((lo + 1))..L${hi}) ----"
+    stmt="$(printf '%s\n' "$region" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | head -1)"
+    sites="$(awk -v s="$stmt" '{t=$0; gsub(/^[ \t]+|[ \t]+$/,"",t); if (t==s) c++}
+                              END {print c+0}' "$full")"
+
+    echo "  ---- matrix A: complete file (region L$((lo + 1))..L${hi}, ${sites} identical site(s)) ----"
     [ "$rlines" -eq 1 ] ||
         echo "     note: the region spans $rlines lines, so every row rewrites all of them"
-    matrix_row "delete the statement" ""
-    matrix_row "unchanged (control)" "$region"
+    write_variant "$out" "$full" "$region"
+    matrix_run "complete: unchanged (replay)" "$out"
+    write_variant "$out" "$full" ""
+    matrix_run "complete: delete the statement" "$out"
+    awk -v s="$stmt" '{t=$0; gsub(/^[ \t]+|[ \t]+$/,"",t); if (t!=s) print}' "$full" > "$out"
+    matrix_run "complete: delete all $sites sites" "$out"
 
-    hit=0
+    echo "  ---- matrix B: minimal failing prefix (L1..L${hi} + ${opens} closing braces) ----"
+    cut_write "$full" "$hi" "$opens" "$pfx"
+    matrix_run "prefix: unchanged (replay)" "$pfx"
+    write_variant "$out" "$pfx" ""
+    matrix_run "prefix: delete (control)" "$out"
+    # The control is what makes every row below readable. If deleting the
+    # statement from the prefix does not compile either, this prefix is not a
+    # minimal repro and nothing in this family can distinguish a property.
+    [ "${MV:0:4}" = "pass" ] ||
+        echo "     CONTROL DID NOT COMPILE: the prefix is not minimal, so the rows"
+    [ "${MV:0:4}" = "pass" ] ||
+        echo "     below can only say 'still broken', never 'this property is fine'"
+
+    alias_hit=0
     while read -r name type init; do
         [ -n "$name" ] || continue
         case "$region" in *"$name"*) ;; *) continue ;; esac
-        hit=1
-        matrix_row "imported const directly" "${region//$name/$init}"
-        matrix_row "prvalue from the alias" "${region//$name/$type($name)}"
-        matrix_row "local non-constexpr copy" "    $type probe_c = $name;${region//$name/probe_c}"
-        matrix_row "local const ref to alias" "    const $type& probe_r = $name;${region//$name/probe_r}"
+        alias_hit=1
+        write_variant "$out" "$pfx" "${region//$name/$init}"
+        matrix_run "prefix: imported const" "$out"
+        write_variant "$out" "$pfx" "${region//$name/$type($name)}"
+        matrix_run "prefix: prvalue of alias" "$out"
+        write_variant "$out" "$pfx" "    $type probe_c = $name;${region//$name/probe_c}"
+        matrix_run "prefix: local non-constexpr" "$out"
+        write_variant "$out" "$pfx" "    const $type& probe_r = $name;${region//$name/probe_r}"
+        matrix_run "prefix: local const ref" "$out"
     done <<< "$(alias_decls "$full")"
+    # Each axis states its own reachability: a silent matrix is how a row that
+    # was never run gets read as a row that passed.
+    [ "$alias_hit" = 1 ] ||
+        echo "     axis unreachable: the region names no constexpr alias declared in"
+    [ "$alias_hit" = 1 ] ||
+        echo "     this file, so the colour-declaration axis cannot be reached"
 
     # The other operand: the line also hands over a char array that has to convert
     # to std::string_view. A literal removes that conversion and touches nothing
     # else, so it separates "the colour argument" from "this argument at all".
+    lit_hit=0
     for word in $(printf '%s\n' "$region" | tr -cs 'A-Za-z0-9_' '\n'); do
         grep -qE "^[[:space:]]*char ${word}\[" "$full" || continue
-        matrix_row "string literal instead" "${region/$word/$lit}"
-        hit=1
+        write_variant "$out" "$pfx" "${region/$word/$lit}"
+        matrix_run "prefix: string literal" "$out"
+        lit_hit=1
         break
     done
-    # An axis that does not apply has to say so: a silent matrix is how a row that
-    # was never run gets read as a row that passed.
-    if [ "$hit" = 0 ]; then
-        echo "     no rewrite applied: the region uses neither a constexpr alias nor a"
-        echo "     char array, so neither the colour-declaration nor the string_view axis"
-        echo "     can be reached from this statement"
-    fi
-    rm -f "$out" probe_var.obj probe_var.log
+    [ "$lit_hit" = 1 ] ||
+        echo "     axis unreachable: no char array declared in this file is passed in"
+    [ "$lit_hit" = 1 ] ||
+        echo "     the region, so the string_view-conversion axis cannot be reached"
+    rm -f "$out" "$pfx" probe_var.obj probe_var.log
 }
 
 # bisect_prefix <demo> <prefix> <file> - the smallest prefix that still trips
@@ -414,7 +480,7 @@ bisect_prefix() {
     echo "  minimal failing prefix: L${L[hi]} (last passing L${L[lo]})"
     echo "  ---- culprit region, verbatim (L$((L[lo] + 1))..L${L[hi]}) ----"
     sed -n "$((L[lo] + 1)),${L[hi]}p" "$full" | cut -c1-100 | sed 's/^/  | /'
-    variants_probe "$prefix" "$full" "${L[lo]}" "${L[hi]}" "$demo"
+    variants_probe "$prefix" "$full" "${L[lo]}" "${L[hi]}" "${O[hi]}" "$demo"
 
     # Isolated: the culprit region dropped into the function with the rest of
     # the body deleted. Still failing means the region alone is the trigger;
