@@ -51,29 +51,54 @@
 #     ~1.2 s. Time that does not grow with the amount of code is not the shape
 #     of a size limit: once the trigger is present the writer runs to the wall.
 #
-# So this round stops sampling and closes the case:
-#   bisect         exact binary search over the statement-boundary prefixes of
-#                  BOTH failing TUs, which returns the one statement that flips
-#                  pass -> C1605 and prints the culprit region verbatim;
-#   isolated       that region dropped into the preamble with the rest of the
-#                  body deleted, separating "this statement alone" from "only in
-#                  this position";
-#   /Od /Gw /GS-   the optimiser itself is the one code path that was never
-#                  varied (/Ob1, /Os and /Zc:inline- only tune how it inlines);
-#   /Fa listing    ask the compiler what it is emitting, under a watchdog so a
-#                  runaway writer cannot fill the runner's disk. A listing that
-#                  balloons means the writer is being fed garbage; one that stays
-#                  small means the runaway is inside the object writer alone.
-# Cuts that stop parsing are reported as such and stepped over, so an
-# inconclusive row cannot be read as a pass. The whole probe is time-bounded.
+# So the last round stopped sampling and closed the case (run 42770837956, master
+# 541d66f). What came back:
+#   bisect        both TUs converge on the SAME statement, `hud.AddLine(buf, kDim);`
+#                 - glass_water fails at L86 with L85 passing, night_forest at L57
+#                 with L56 passing;
+#   /Od /Gw /GS-  all three still C1605, so the optimiser axis is dead as well; with
+#                 the flag axis that is every compiler-side knob tried so far;
+#   /Fa listing   285 bytes and 12 lines inside the watchdog's 3 s, and those lines
+#                 are the prologue (`include listing.inc`, `_BSS       SEGMENT`). The
+#                 compile dies before emitting a single instruction, so nothing is
+#                 being *fed* to the writer: the writer itself is what runs away;
+#   isolated      came back `other:C2065`, which is the probe's fault rather than
+#                 MSVC's - with the rest of the body deleted, `buf` and `kDim` are no
+#                 longer in scope. "Is it this statement alone?" therefore stays
+#                 open, and deleting the body can never answer it. Only rewriting it
+#                 can, which is what the matrix below now does:
+#   substitution matrix
+#                 the complete TU with ONLY the culprit region rewritten, one row per
+#                 property of that region: deleted (the control - the rest of the file
+#                 then has to compile), unchanged (the replay), the imported constant
+#                 instead of the file's constexpr alias, a prvalue of the alias, a
+#                 function-local non-constexpr copy, a function-local const reference,
+#                 and a string literal instead of the char array that has to convert
+#                 to std::string_view. The aliases and the buffer are read out of the
+#                 source (alias_decls), so the rows follow whatever the culprit turns
+#                 out to be instead of being written for this one line, and an axis
+#                 that does not apply is printed as such rather than left silent.
+#                 Why these particular properties: the two TUs that fail both declare
+#                 `constexpr glm::vec4 kDim = Hud::kDim;` and pass the *local* name,
+#                 while text_hud/main.cpp - which compiles - passes `Hud::kDim`
+#                 directly and voxel_terrain/Hud.cpp declares no alias at all. That is
+#                 still only an observation about which files fail; a row that compiles
+#                 is what would turn it into a fact about which form is unloadable.
+# Each row costs one whole-TU compile (~11 s), so the matrix is under two minutes per
+# TU on top of the bisect.
 #
 # All of it except cl.exe itself is plain shell, and it is checked locally:
-# scripts/msvc-object-probe-selftest.sh puts a fake `cl.exe` on PATH (C1605 above
-# a chosen source length, an endless /Fa listing on a failing source, which is
-# how the watchdog gets tested), points the probe at the real src/demo tree, and
-# asserts that every row carries a verdict, that both bisections converge, and
-# that no intermediate file outlives the step. It has already earned its keep:
-# the first version of the watchdog killed the shell wrapper and left cl writing.
+# scripts/msvc-object-probe-selftest.sh puts a fake `cl.exe` on PATH (C1605 above a
+# chosen source length, an endless /Fa listing on a failing source, which is how the
+# watchdog gets tested), points the probe at the real src/demo tree, and asserts that
+# every row carries a verdict, that both bisections converge, that the matrix either
+# answers or says why it cannot, that no intermediate file outlives the step - and
+# that no *process* does. That last assertion is not decoration: the first version of
+# the watchdog used `timeout`, whose signal reaches only the shell wrapper, so cl kept
+# appending to a listing in a directory the selftest had already deleted. Ten such
+# orphans from earlier rounds later filled this machine's disk and made `mktemp` fail,
+# invisibly, because their files were unlinked but still open. kill_tree is what stops
+# a writer; the process check is what stops kill_tree from regressing quietly.
 #
 # The script never fails the build: it is meant to run from a step guarded by
 # `if: failure()`.
@@ -245,6 +270,79 @@ listing_probe() {
     rm -f "$asm"
 }
 
+# alias_decls <file> - the constexpr aliases this TU builds out of imported
+# constants, as "localName type importedInitializer". The culprit statement uses
+# the local name, while the importers that compile fine name the imported
+# constant directly, so this map lets the substitution matrix be derived from the
+# source instead of hardcoded to the line that happened to trip.
+alias_decls() {
+    sed -n 's/^constexpr \([A-Za-z_:0-9]*\) \([A-Za-z_][A-Za-z0-9_]*\) = \([A-Za-z_:0-9]*\);.*/\2 \1 \3/p' "$1"
+}
+
+# variants_probe <prefix> <file> <lo> <hi> <demo> - rewrite only the culprit
+# region inside the *complete* file and compile the whole TU once per rewrite.
+#
+# "Which statement" is not actionable; "which property of the statement" is. Each
+# row changes exactly one property and keeps everything else, including all the
+# code before it, so a row that passes names a form of the same call that the
+# writer can emit. The first row is the control: delete the statement and the rest
+# of the TU has to compile, otherwise the flip was not this line's to begin with.
+variants_probe() {
+    local prefix="$1" full="$2" lo="$3" hi="$4" demo="$5"
+    local region out="probe_src/var_${demo}.cpp" lit='"probe"' word name type init hit rlines
+
+    matrix_row() {   # <label> <replacement region; empty deletes the region>
+        local label="$1" body="$2" rc vd
+        {
+            head -n "$lo" "$full"
+            [ -n "$body" ] && printf '%s\n' "$body"
+            tail -n +"$((hi + 1))" "$full"
+        } > "$out"
+        replay_cl "$prefix" "probe_var.obj" "$out" "probe_var.log"; rc=$?
+        vd="$(verdict_of "probe_var.log" "$rc" "probe_var.obj")"
+        printf '  matrix row %-26s %-13s %s\n' "$label" "$vd" "$(objsize probe_var.obj)"
+        [ "${vd:0:4}" = "pass" ] ||
+            grep -oE 'error [A-Z][0-9]+' probe_var.log | head -1 | sed 's/^/     /'
+    }
+
+    region="$(sed -n "$((lo + 1)),${hi}p" "$full")"
+    rlines="$(printf '%s\n' "$region" | wc -l | tr -d ' ')"
+    echo "  ---- substitution matrix on the complete file (region L$((lo + 1))..L${hi}) ----"
+    [ "$rlines" -eq 1 ] ||
+        echo "     note: the region spans $rlines lines, so every row rewrites all of them"
+    matrix_row "delete the statement" ""
+    matrix_row "unchanged (control)" "$region"
+
+    hit=0
+    while read -r name type init; do
+        [ -n "$name" ] || continue
+        case "$region" in *"$name"*) ;; *) continue ;; esac
+        hit=1
+        matrix_row "imported const directly" "${region//$name/$init}"
+        matrix_row "prvalue from the alias" "${region//$name/$type($name)}"
+        matrix_row "local non-constexpr copy" "    $type probe_c = $name;${region//$name/probe_c}"
+        matrix_row "local const ref to alias" "    const $type& probe_r = $name;${region//$name/probe_r}"
+    done <<< "$(alias_decls "$full")"
+
+    # The other operand: the line also hands over a char array that has to convert
+    # to std::string_view. A literal removes that conversion and touches nothing
+    # else, so it separates "the colour argument" from "this argument at all".
+    for word in $(printf '%s\n' "$region" | tr -cs 'A-Za-z0-9_' '\n'); do
+        grep -qE "^[[:space:]]*char ${word}\[" "$full" || continue
+        matrix_row "string literal instead" "${region/$word/$lit}"
+        hit=1
+        break
+    done
+    # An axis that does not apply has to say so: a silent matrix is how a row that
+    # was never run gets read as a row that passed.
+    if [ "$hit" = 0 ]; then
+        echo "     no rewrite applied: the region uses neither a constexpr alias nor a"
+        echo "     char array, so neither the colour-declaration nor the string_view axis"
+        echo "     can be reached from this statement"
+    fi
+    rm -f "$out" probe_var.obj probe_var.log
+}
+
 # bisect_prefix <demo> <prefix> <file> - the smallest prefix that still trips
 # C1605, the culprit region verbatim, and the probes that only pay off once the
 # region is known.
@@ -316,6 +414,7 @@ bisect_prefix() {
     echo "  minimal failing prefix: L${L[hi]} (last passing L${L[lo]})"
     echo "  ---- culprit region, verbatim (L$((L[lo] + 1))..L${L[hi]}) ----"
     sed -n "$((L[lo] + 1)),${L[hi]}p" "$full" | cut -c1-100 | sed 's/^/  | /'
+    variants_probe "$prefix" "$full" "${L[lo]}" "${L[hi]}" "$demo"
 
     # Isolated: the culprit region dropped into the function with the rest of
     # the body deleted. Still failing means the region alone is the trigger;

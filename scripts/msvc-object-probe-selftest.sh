@@ -24,6 +24,12 @@
 # carry a verdict (a row without one is how round one looked), the listing must have
 # been killed and deleted, and the probe must exit 0. Expected line numbers are not
 # hardcoded, because the candidate list moves when the HUD files are edited.
+#
+# It also checks that nothing outlives the run. That is not paranoia: ten fake-cl
+# writers from earlier rounds were still running hours later, each still appending
+# to a listing whose directory had already been deleted, holding enough disk to fill
+# the machine and leave `mktemp` failing with "no space left on device". A probe
+# step that leaks writers is worse than one that prints nothing.
 
 set -uo pipefail
 
@@ -33,7 +39,14 @@ root="$(cd "$here/.." && pwd)"
 [ -f "$probe" ] || { echo "no probe at $probe" >&2; exit 1; }
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/gldx-probe-selftest.XXXXXX")" || exit 1
-trap 'rm -rf "$work"' EXIT
+# Whatever happens, no fake compiler may keep running after this script: the
+# leftover writers from earlier rounds each burned 20 minutes of CPU and tens of MB
+# of "deleted" log per minute, and the machine ended up with no space for mktemp.
+cleanup() {
+    pkill -9 -f "$work/bin/cl.exe" 2>/dev/null
+    rm -rf "$work"
+}
+trap cleanup EXIT
 mkdir -p "$work/bin" "$work/build"
 ln -s "$root/src" "$work/src" || exit 1
 
@@ -141,6 +154,14 @@ check "bisect reports both ends"                     " +lo L[0-9]+ +pass"
 check "bisect reports the failing end"               " +hi L[0-9]+ +C1605"
 check "bisect converges to a minimal prefix"         "minimal failing prefix: L[0-9]+ \(last passing L[0-9]+\)"
 check "culprit region is printed verbatim"           "culprit region, verbatim"
+# The substitution matrix is the step that turns "which statement" into "which
+# property of it", so it has to run on both TUs and every row has to answer.
+check "the matrix ran on both TUs"                   "substitution matrix on the complete file"
+check "a matrix row reports a verdict"               "matrix row .*(pass|C1605|other)"
+# Which rows exist depends on what the culprit region happens to be, and the fake
+# oracle picks a different region than MSVC does; what must never happen is an axis
+# being skipped in silence.
+check "every matrix axis is probed or said to be n/a" "imported const directly|string literal instead|no rewrite applied"
 check "isolated variant reports a verdict"           "isolated region +(pass|C1605|other)"
 check "the optimiser axis is probed"                 "min /Od +rc="
 # The fake cl never stops writing a listing for a failing source, so the only
@@ -156,6 +177,18 @@ check "probe completes"                              "probe complete"
 if grep -qE "window stays" "$out"; then
     echo "  FAIL bisect stopped without converging:"
     grep -E "window stays|inconclusive" "$out" | sed 's/^/     /'
+    fails=$((fails + 1))
+fi
+
+# Nothing may outlive the run. The probe's own kill_tree is what this checks, and
+# the assertion is independent of the file check above: a writer that survives keeps
+# appending to a path that has already been deleted, so it fills the disk while
+# looking empty.
+left_procs="$(pgrep -f "$work/bin/cl.exe" 2>/dev/null | tr '\n' ' ')"
+if [ -z "$left_procs" ]; then
+    echo "  ok   no fake cl process survived the probe (kill_tree reached the child)"
+else
+    echo "  FAIL fake cl still running after the probe: pids $left_procs"
     fails=$((fails + 1))
 fi
 

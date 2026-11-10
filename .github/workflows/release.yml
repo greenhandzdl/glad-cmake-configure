@@ -188,14 +188,23 @@ jobs:
       #   glass_water/Hud.cpp 的前缀二分在 L85 过、L97 起失败，且**所有失败的
       #   前缀都花 11.1 s、所有通过的前缀都只花 1.2 s**——耗时不随代码量增长，
       #   就不是尺寸上限的形状：触发点一旦存在，写出器径直冲到墙上。
-      #   所以本轮不再抽样：对两个 TU 做精确二分取回那一行翻转的语句，把它原样
-      #   打进日志，再试从未变过的优化器轴（/Od /Gw /GS-）与 /Fa 清单（带看门狗，
-      #   防写出器把 runner 的盘写满）。具体读法见脚本文件头注释；本步骤不影响
+      #   第三轮（run 42770837956）不再抽样，直接收敛：两个 TU 二分到**同一句**
+      #   `hud.AddLine(buf, kDim);`（glass_water L85 过 / L86 碎，night_forest L56
+      #   过 / L57 碎）；`/Od /Gw /GS-` 一字不差，优化器轴与 flag 轴一样全死；`/Fa`
+      #   清单在看门狗的 3 s 里只有 285 字节 12 行，还停在 prologue（`include
+      #   listing.inc` 与 `_BSS       SEGMENT`）——一条指令都还没写出，所以失控的不是“喂给
+      #   写出器的东西”，是写出器自己。
+      #   因此本轮的问题从“是哪一句”换成“这句的哪个性质写不出来”：替换矩阵在
+      #   **完整 TU** 上只重写 culprit 那一行，每行只改一个性质（删掉＝对照、原样
+      #   ＝重放、用导入常量替掉 constexpr 别名、别名造 prvalue、函数局部非
+      #   constexpr 副本、函数局部 const 引用、字面量替掉要转 string_view 的 char
+      #   数组），用不上的轴必须打印出来。具体读法见脚本文件头注释；本步骤不影响
       #   job 结论，clang 侧无此限制、本地无法复现，取证只能安排在 action 里。
       #   但探针本身不是：除 cl 命令行外全是 shell，改它之前先跑
       #   scripts/msvc-object-probe-selftest.sh（假 cl.exe，含看门狗必须被杀成
-      #   rc=124 的断言）。这条不是洁癖——看门狗的第一版用 timeout，只杀到了 bash
-      #   包装进程，cl 作为子进程继续写清单，是 selftest 把它报出来的。
+      #   rc=124、并且结束后不得有进程存活的断言）。这条不是洁癖——看门狗的第一版
+      #   用 timeout，只杀到了 bash 包装进程，cl 作为子进程继续往已删除的目录里写
+      #   清单，是 selftest 把它报出来的；本地遗留的十个孤儿 cl 一度写满了盘。
       # ------------------------------------------------------------------
       - name: Probe MSVC object-writer limit (Windows, on failure)
         if: failure() && matrix.os == 'windows'
