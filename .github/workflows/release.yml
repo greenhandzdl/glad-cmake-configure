@@ -178,6 +178,22 @@ jobs:
         run: cmake --build build --config "$BUILD_TYPE"
 
       # ------------------------------------------------------------------
+      # MSVC 对象写出限制取证（仅 Windows，仅构建已失败时）
+      #   v1.7.0 起 Windows job 碎在 `fatal error C1605: compiler limit: object
+      #   file size cannot exceed 4 GB`，只打在 glass_water/Hud.cpp 与
+      #   night_forest/Hud.cpp 上。两个看似合理的答案都被 action 自身证伪了：
+      #   /bigobj 在命令行上时错误一字不差（run 42760865230），而更大的
+      #   main.cpp 同源文件能过——所以下一步不是再猜一轮，而是把取证做成一个
+      #   只编译单个 TU 的变体矩阵（每个变体几十秒，一轮出全部结论）。
+      #   clang 没有这条限制，本地无法复现；具体变体清单与读法见
+      #   scripts/msvc-object-probe.sh 的文件头注释。本步骤不影响 job 结论。
+      # ------------------------------------------------------------------
+      - name: Probe MSVC object-writer limit (Windows, on failure)
+        if: failure() && matrix.os == 'windows'
+        shell: bash
+        run: bash scripts/msvc-object-probe.sh build
+
+      # ------------------------------------------------------------------
       # 打包产物
       # ------------------------------------------------------------------
       - name: Stage runtime DLLs & package (Windows)
