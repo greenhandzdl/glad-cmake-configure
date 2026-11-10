@@ -2,29 +2,15 @@ module;
 
 #include "gldx/gmf.hpp"
 
-#include <stb_image_write.h>
-
 // Global-module declaration of the hook gldxwin links against; must be seen in
-// the GMF here so the definition attaches to the global module, matching the
-// declaration gldxwin includes in its own GMF (see ScreenshotHook.h).
+// the GMF here so this TU agrees with gldxwin on its mangling. The DEFINITION
+// lives in ScreenshotHook.cpp, a plain textual TU - a global module fragment
+// may only hold preprocessor directives ([module.global.frag]; MSVC reports the
+// old definition as C5202), and a purview definition would pick up a @gldx
+// module bound that gldxwin's global-module declaration cannot see.
 #include "gldx/util/ScreenshotHook.h"
 
 #include <cstring>
-
-// EncodeScreenshot is defined IN the global module fragment (same attachment
-// trick as the glad/glm entities gmf.hpp pulls in) because gldxwin links
-// against the same GMF-declared hook from its own GMF; a purview definition
-// would be read as a module-bound redeclaration and rejected. CaptureScreenshot
-// below stays a normal module-gldx entity - window-bound capture now goes
-// through gldx::win::Window::CaptureScreenshot in demos.
-namespace gldx {
-bool EncodeScreenshot(const std::string& path, int width, int height,
-                      const unsigned char* rgbTopDown) {
-    if (width <= 0 || height <= 0 || !rgbTopDown) return false;
-    const int stride = width * 3;
-    return stbi_write_png(path.c_str(), width, height, 3, rgbTopDown, stride) != 0;
-}
-} // namespace gldx
 
 #include "gldx/util/Screenshot.h"
 

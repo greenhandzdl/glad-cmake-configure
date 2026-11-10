@@ -5,6 +5,13 @@
 
 ## Unreleased
 
+### 修复自有源码最后一条 MSVC 告警：`C5202` 把定义从 global module fragment 里搬走
+
+- **现象**（run 42825435241，三平台首次全绿的那一场）：Windows job 通过、532 步全部走完，但自有 `src/**` 还剩一条告警——`src\gldx\util\Screenshot.cpp(26): warning C5202: a global module fragment can only contain preprocessor directives`。它和 C1605/C2011 同源：都是“模块边界上放错了东西”。
+- **根因**：`gldx::EncodeScreenshot` 的定义体被写在 `Screenshot.cpp` 的 **global module fragment** 里。当初的理由是对的（`gldxwin` 要调它，符号必须两侧都附着在 global module，否则 mangling 带上 `@gldx` 就链不上），但 GMF 只允许预处理指令（`[module.global.frag]`），函数体不是。把它挪进 `module gldx;` 之后的 purview 也不行——clang 立刻报 `declaration of 'EncodeScreenshot' in module gldx follows declaration in the global module`，正是那条注释里写死的规则。
+- **修复**：借仓里已有的先例（`third_party/stb_image_impl.cpp` 就是“普通文本 TU，链进 gldx 静态库但绝不进导出面”），新增 `src/gldx/util/ScreenshotHook.cpp` 作为非模块 TU：它 `#include "gldx/util/ScreenshotHook.h"` 并定义 `gldx::EncodeScreenshot`，于是符号以全局模块的形态进入静态库，`gldxwin` 侧的同一条声明照样匹配得上；`stb_image_write` 仍然只是 `gldx` 的私有依赖。`Screenshot.cpp` 现在只在自己的 GMF 里 include 那个头（声明），purview 里照常留 `CaptureScreenshot`。
+- **验证**：全量构建自有 `src/**` 告警 0；`Window::CaptureScreenshot` 端到端跑通（`./output/glass_water --off hud --snapshot /tmp/hook_verify.png --snap-at 2` → 1600×1200 PNG，476 KB，`file` 认作 `PNG image data, 8-bit/color RGB`），证明跨库那条 hook 在运行期也真的被调到，不只是链接过。
+
 ### 修复 Windows 下一道墙：模块与导入方的编译环境不一致（C2011 重定义风暴）
 
 - **现象**（run 42798303106，别名修复之后）：`fatal error` 没有了，`glass_water` 与 `night_forest` 的 HUD TU 都编译通过，构建第一次走到第 498 步 `src/demo/voxel_terrain/Hud.cpp`——此前每一轮都在 486/491 就死，这个 TU 从未被编过——在那里碎成 `error C2011: 'glm::qualifier': 'enum' type redefinition`、C2572、C2953，紧接着 `<vector>`/`std::vector` 也全套重定义。别名修复只是拆掉第一道墙，这不是同一个 bug。

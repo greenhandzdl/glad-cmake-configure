@@ -52,7 +52,8 @@ set(GLDX_SOURCES
     assets/AssetManager.cpp
     assets/ModelLoader.cpp
     assets/ImageLoader.cpp
-    third_party/stb_image_impl.cpp)   # plain (non-module) 3rd-party impl TU
+    third_party/stb_image_impl.cpp   # plain (non-module) 3rd-party impl TU
+    util/ScreenshotHook.cpp)         # plain (non-module) GMF-symbol TU
 
 add_library(gldx STATIC ${GLDX_SOURCES})
 
