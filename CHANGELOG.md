@@ -5,13 +5,14 @@
 
 ## Unreleased
 
-### Windows 构建补上 `/bigobj`：v1.7.0 的 Windows job 碎在 MSVC 的 COFF 节表上限
+### Windows 仍碎在 `C1605`：`/bigobj` 的猜测被 action 证伪，改为在 CI 里取证
 
-- **只在 action 里出现**：`fatal error C1605: compiler limit: object file size cannot exceed 4 GB` 只打在 `src/demo/glass_water/Hud.cpp` 与 `src/demo/night_forest/Hud.cpp` 两个 TU 上；引擎侧 `src/gldx/text/Hud.cpp`、其余 26 个 demo、以及 Linux / macOS 的同源 TU 全部通过（fail-fast 关闭，所以两个平台照样绿、`Create Release` 被 skip）。本地 clang 怎么跑都看不到的坑，只能由三平台构建暴露。
-- **报错里的数字就是答案**：4 GB 等于 `/bigobj` 的节地址容量 2³²，而默认 COFF 只有 65,279 个可寻址节——先耗尽的是**节表的寻址空间**，不是对象文件。成因与本仓架构同构：一个 `import gldx;` 的 TU 会把接口带来的内联体与 glm 模板全部物化进同一个 .obj，`text/Hud.h` 进入接口后，最大的两个 HUD TU 越过了那条线。
-- **修法是把上限抬对，而不是把代码改碎**：`/bigobj` 加到我们自己的四个目标组（`src/demo/CMakeLists.txt` 的 `add_gldx_demo` 与 `gldx` / `gldxwin` / `gldxcli` 的 MSVC 块），不拆 TU、不降优化级、不动版面代码。`third_party/` 不受影响（assimp / freetype 本来就在 Windows 上过得去）。
-- **验证口径**：本地只能证明没改坏 clang 侧——重新配置 + 全量构建 exit=0，自有 `src/**` 告警 0 条，Summary 仍打 `FreeType: submodule (static, no external codecs)`；MSVC 侧以重跑 action 为准。
-- **文档**：`AGENTS.md`（报错表新增一行，含“别去拆 TU / 降优化”的反向指引；「CI / 发布」新增一条硬约束：新增会 `import gldx` 的目标时继承 `/bigobj`）、`doc/developer/release.md` §3 的 Windows 行。
+- **现象不变**：`fatal error C1605: compiler limit: object file size cannot exceed 4 GB` 只打在 `src/demo/glass_water/Hud.cpp`（218 行）与 `src/demo/night_forest/Hud.cpp`（230 行）两个 TU 上；引擎侧 `src/gldx/text/Hud.cpp`、`src/demo/voxel_terrain/Hud.cpp`（46 行）与其余 demo 全部通过。fail-fast 关闭，所以 Linux / macOS 照样绿，`Create Release` 被 skip。
+- **上一轮写下的因果是错的**：曾把报错里的 4 GB 读成 `/bigobj` 的节地址容量 2³²（默认 65,279），断定“先耗尽的是节表不是代码”，并给自有目标加了 `/bigobj`。run 42760865230 直接证伪——日志里两个失败 TU 的 `cl.exe` 命令行已带 `/bigobj`，错误码与文本一字不差。这条记录留在仓里，是为了留下“错误的诊断是怎么被推翻的”，不是留一个可复用的结论。
+- **“TU 太大”这个解释也站不住**：同仓里 `night_forest/main.cpp`（27 KB）与 `glass_water/main.cpp`（18 KB）比这两个失败文件大，同样 `import gldx;` 并包含 `Hud.h`，却编译通过；四个 demo 的 HUD TU 里最小的 `voxel_terrain/Hud.cpp` 也过。因此触发点在这两个文件正文里的某种构造，而不是体量。
+- **抬工具链不是出路**：`windows-latest` 已升到 VS 18（MSVC 14.51），其 named modules 在 `import` 侧会触发 STL 头 C2572/C7571 重定义风暴，故 job 钉死 `windows-2022`（MSVC 14.44.35200）——见「CI / 发布」既有记录。
+- **本轮真正做的事是把取证安排进 CI**：Windows job 增加 `if: failure() && matrix.os == 'windows'` 的探针步骤，用 `ninja -t commands` 取回失败 TU 的原始命令行，就地按变体重编（含/不含 `/bigobj`、`/Ob1`、`/Zc:inline-`、`/Os`，另加两段只保留“导入 + 别名 + AddLine”骨架的最小探针源文件），单文件编译只需几十秒，一轮就能定出是哪一类限制。`/bigobj` 保留，但理由退回它本来站得住的那条：对 C1128 的廉价保险。
+- **状态**：未修复。v1.7.0 的 Windows 制品不存在（Release 被 skip），本地 clang 侧全量重编 exit=0、自有 `src/**` 告警 0 条只能证明没改坏另外两个平台。
 
 ## v1.7.0
 

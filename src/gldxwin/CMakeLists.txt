@@ -20,7 +20,7 @@ target_link_libraries(gldxwin PUBLIC
     ${GLAD_TARGET})
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-    # /utf-8 for the source encoding; /bigobj for the COFF section limit a
-    # module TU runs into (see the C1605 note in src/demo/CMakeLists.txt).
+    # /utf-8 for the source encoding; /bigobj as cheap insurance against C1128.
+    # It is not a C1605 fix - see the note in src/demo/CMakeLists.txt.
     target_compile_options(gldxwin PRIVATE /utf-8 /bigobj)
 endif()

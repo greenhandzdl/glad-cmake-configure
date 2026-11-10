@@ -84,9 +84,12 @@ endif()
 # Per-compiler module tweaks. CMake >= 3.28 drives named-module compilation and
 # the import-graph scan for all three vendors, so this only patches up details:
 #   * MSVC: /utf-8 so the embedded GLSL raw strings + any non-ASCII comments are
-#     read as UTF-8 regardless of the system code page, and /bigobj because the
-#     COFF section table of a module TU runs out of addressable sections long
-#     before the code does (same C1605 reasoning as src/demo/CMakeLists.txt).
+#     read as UTF-8 regardless of the system code page, and /bigobj as cheap
+#     insurance against C1128 (a module TU can exceed the default 65,279
+#     addressable COFF sections). /bigobj does *not* address the C1605 that the
+#     v1.7.0 Windows job hit on two demo TUs - see the note in
+#     src/demo/CMakeLists.txt and the failure-time probe in
+#     .github/workflows/release.yml.
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     target_compile_options(gldx PRIVATE /utf-8 /bigobj)
 endif()
