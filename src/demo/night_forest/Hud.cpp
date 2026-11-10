@@ -17,17 +17,16 @@ namespace {
 
 // The three panel roles come from the engine now, so amber means the same
 // thing here as it does in glass_water: "this frame is missing something the
-// panel is claiming". Aliased rather than spelled out because the line list
-// below is long, and because a demo palette that could drift from the engine's
-// is exactly how two panels end up meaning different things by the same colour.
+// panel is claiming". They are spelled out as `Hud::kFg` rather than aliased
+// into a local `constexpr glm::vec4 kFg = Hud::kFg;`: clang does not care, MSVC
+// 14.44 does - ODR-using such an alias makes its object writer hit the 4 GB
+// limit (C1605), while naming the imported constant directly compiles. Same
+// prefix, two spellings, one 6.7 KB object and one nothing: run 42781895430.
 //
 // Everything here is ASCII 32..126 on purpose - the baked font atlas covers
 // exactly that range and TextRenderer silently skips anything outside it, so a
 // typographic arrow would not render as an arrow but as a missing glyph.
 using Hud = gldx::Hud;
-constexpr glm::vec4 kFg   = Hud::kFg;
-constexpr glm::vec4 kDim  = Hud::kDim;
-constexpr glm::vec4 kWarn = Hud::kWarn;
 
 const char* YesNo(bool v) { return v ? "on " : "off"; }
 
@@ -54,10 +53,10 @@ void NightHudPass::Build(gldx::RenderFrame& f) {
 
     std::snprintf(buf, sizeof(buf), "night_forest   fps %.1f   cpu %.2f ms",
                   f.smoothedFps, cpuMs);
-    hud.AddLine(buf, kDim);
+    hud.AddLine(buf, Hud::kDim);
     std::snprintf(buf, sizeof(buf), "pos (%.1f, %.1f, %.1f)  fov %.0f  speed %.1f",
                   in->pos.x, in->pos.y, in->pos.z, in->fov, in->speed);
-    hud.AddLine(buf, kDim);
+    hud.AddLine(buf, Hud::kDim);
 
     // ---- the claim, in two numbers ------------------------------------------
     // Counted by the pass as it submitted, from the InstancedMesh objects it drew,
@@ -69,11 +68,11 @@ void NightHudPass::Build(gldx::RenderFrame& f) {
         std::snprintf(buf, sizeof(buf),
                       "world %d draws / %u instances on the last frame",
                       pass->drawsLastFrame(), pass->instancesLastFrame());
-        hud.AddLine(buf, kFg);
+        hud.AddLine(buf, Hud::kFg);
         std::snprintf(buf, sizeof(buf),
                       "capture %d draws for %d faces   (6 views of the same world)",
                       pass->captureDrawsLastFrame(), pass->facesCaptured());
-        hud.AddLine(buf, kDim);
+        hud.AddLine(buf, Hud::kDim);
     }
     std::snprintf(buf, sizeof(buf), "planted %u fir + %u broadleaf, %u rejected  seed %u",
                   scene->plantedFir(), scene->plantedBroad(), scene->rejected(),
@@ -82,7 +81,7 @@ void NightHudPass::Build(gldx::RenderFrame& f) {
     // after eight attempts per tree, so a dense ring silently plants fewer.
     hud.AddLine(buf,
         scene->plantedFir() + scene->plantedBroad()
-            < static_cast<std::uint32_t>(scene->config.treeCount) ? kWarn : kDim);
+            < static_cast<std::uint32_t>(scene->config.treeCount) ? Hud::kWarn : Hud::kDim);
 
     // ---- the ground ---------------------------------------------------------
     // The flat sheet gets a line of its own rather than silence, because a panel
@@ -95,15 +94,15 @@ void NightHudPass::Build(gldx::RenderFrame& f) {
         if (t.reliefActive()) {
             std::snprintf(buf, sizeof(buf), "terrain %s  %u x %u cells at %.2f m  relief %.1f m",
                           TerrainModeName(t.mode()), t.cells(), t.cells(), t.cell(), t.relief());
-            hud.AddLine(buf, kFg);
+            hud.AddLine(buf, Hud::kFg);
             std::snprintf(buf, sizeof(buf), "  %llu verts / %llu indices  %+.1f..%+.1f m"
                           "  smooth %d  levels %d",
                           static_cast<unsigned long long>(t.vertexCount()),
                           static_cast<unsigned long long>(t.indexCount()),
                           t.minHeight(), t.maxHeight(), t.smoothing(), t.levels());
-            hud.AddLine(buf, kDim);
+            hud.AddLine(buf, Hud::kDim);
             std::snprintf(buf, sizeof(buf), "  %s", t.source().c_str());
-            hud.AddLine(buf, kDim);
+            hud.AddLine(buf, Hud::kDim);
             // Gradient of the height field under the eye, sampled two cells apart so
             // it is the slope the shading uses rather than one vertex's noise spike.
             const float span = std::max(t.cell(), 0.5f);
@@ -115,17 +114,17 @@ void NightHudPass::Build(gldx::RenderFrame& f) {
             std::snprintf(buf, sizeof(buf), "  under foot %+.2f m  slope %.0f deg",
                           scene->heightAt(in->pos.x, in->pos.z),
                           std::atan(grad) * 57.29577951308232f);
-            hud.AddLine(buf, kDim);
+            hud.AddLine(buf, Hud::kDim);
         } else {
             std::snprintf(buf, sizeof(buf), "ground flat sheet  %.0f m half-width  %d uv tiles",
                           scene->groundHalf(), scene->grassTile());
-            hud.AddLine(buf, kDim);
+            hud.AddLine(buf, Hud::kDim);
         }
     }
     if (in->walk) {
         std::snprintf(buf, sizeof(buf), "walk path  t %.1f s  eye %.2f m  heading %.0f deg",
                       animTime, scene->config.walkEye, in->yaw * 57.29577951308232f);
-        hud.AddLine(buf, kFg);
+        hud.AddLine(buf, Hud::kFg);
     }
 
     // ---- what the crate is sampling -----------------------------------------
@@ -136,20 +135,20 @@ void NightHudPass::Build(gldx::RenderFrame& f) {
         const bool live = pass->captureLive();
         std::snprintf(buf, sizeof(buf), "env %s  %d px  mix %.2f  lod %.1f",
                       pass->envSource(), pass->envSizeLive(), in->envMix, envLod);
-        hud.AddLine(buf, live ? kFg : kWarn);
+        hud.AddLine(buf, live ? Hud::kFg : Hud::kWarn);
         if (!in->capture) {
-            hud.AddLine("> capture OFF: the box mirrors the sky, not the", kWarn);
-            hud.AddLine("  forest behind it. 1 brings the FBO cube back.", kWarn);
+            hud.AddLine("> capture OFF: the box mirrors the sky, not the", Hud::kWarn);
+            hud.AddLine("  forest behind it. 1 brings the FBO cube back.", Hud::kWarn);
         } else if (live && pass->facesCaptured() == 0) {
             std::snprintf(buf, sizeof(buf), "   faces 0 = crate parked, cube reused");
-            hud.AddLine(buf, kDim);
+            hud.AddLine(buf, Hud::kDim);
         }
     }
     std::snprintf(buf, sizeof(buf), "crate  ior %.2f  refract %s   at (%.1f, %.1f, %.1f)",
                   ior, YesNo(in->refract),
                   scene->cratePose().pos.x, scene->cratePose().pos.y,
                   scene->cratePose().pos.z);
-    hud.AddLine(buf, in->refract ? kDim : kWarn);
+    hud.AddLine(buf, in->refract ? Hud::kDim : Hud::kWarn);
 
     // Where the wander has got to. The heading is the table's own yaw, so watching
     // it change is watching the seeded path, and the distance is the camera's to the
@@ -163,7 +162,7 @@ void NightHudPass::Build(gldx::RenderFrame& f) {
                       moving ? "moving" : "parked", animTime,
                       scene->cratePose().yaw * 57.29577951308232f,
                       std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z));
-        hud.AddLine(buf, moving ? kDim : kWarn);
+        hud.AddLine(buf, moving ? Hud::kDim : Hud::kWarn);
     }
 
     // ---- the light model ----------------------------------------------------
@@ -174,28 +173,28 @@ void NightHudPass::Build(gldx::RenderFrame& f) {
         const NightPass::Settings& s = pass->settings;
         std::snprintf(buf, sizeof(buf), "gooch band %.2f  warm(%.2f,%.2f,%.2f)",
                       s.bandWidth, s.lightTint.x, s.lightTint.y, s.lightTint.z);
-        hud.AddLine(buf, kDim);
+        hud.AddLine(buf, Hud::kDim);
         std::snprintf(buf, sizeof(buf), "  cold(%.2f,%.2f,%.2f) lift(%.3f,%.3f,%.3f)",
                       s.shadowTint.x, s.shadowTint.y, s.shadowTint.z,
                       s.shadowLift.x, s.shadowLift.y, s.shadowLift.z);
-        hud.AddLine(buf, kDim);
+        hud.AddLine(buf, Hud::kDim);
     }
     if (field) {
         std::snprintf(buf, sizeof(buf), "moon dir (%.2f, %.2f, %.2f)  %.1f x",
                       field->moonDir.x, field->moonDir.y, field->moonDir.z,
                       field->moonIntensity);
-        hud.AddLine(buf, kDim);
+        hud.AddLine(buf, Hud::kDim);
     }
     if (!skySource.empty()) {
-        hud.AddLine(skySource, kDim);
+        hud.AddLine(skySource, Hud::kDim);
     }
     std::snprintf(buf, sizeof(buf), "lanterns %s (%d points)   fog %s %.0f-%.0f m",
                   YesNo(in->lights), static_cast<int>(scene->lanterns().size()),
                   YesNo(in->fog), fogStart, fogEnd);
-    hud.AddLine(buf, (in->lights && in->fog) ? kDim : kWarn);
+    hud.AddLine(buf, (in->lights && in->fog) ? Hud::kDim : Hud::kWarn);
     if (frozenAt > 0.0) {
         std::snprintf(buf, sizeof(buf), "clock frozen at %.2f s", frozenAt);
-        hud.AddLine(buf, kWarn);
+        hud.AddLine(buf, Hud::kWarn);
     }
 
     // Who drew the glyphs is a build fact, and the panel is the only place it
@@ -206,7 +205,7 @@ void NightHudPass::Build(gldx::RenderFrame& f) {
         std::snprintf(buf, sizeof(buf), "font %s  %.0f px bake  %d glyphs  %dx%d atlas",
                       gldx::Font::backend(), f.overlay.font->bakeSize(),
                       gldx::Font::kNumGlyphs, gldx::Font::kAtlasW, gldx::Font::kAtlasH);
-        hud.AddLine(buf, kDim);
+        hud.AddLine(buf, Hud::kDim);
     }
 
     // ---- controls, in their own panel so the evidence stays readable ---------

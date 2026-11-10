@@ -105,6 +105,24 @@
 # each axis now reports its own reachability and the selftest pins the fake threshold
 # so that the fake culprit is the same single statement MSVC names.
 #
+# What round five returned (run 42781895430), and the fix it named:
+#   matrix B, minimal failing prefix, both TUs:
+#     delete (control)      pass ~5.6 KB   alias declarations still present
+#     imported const        pass ~6.7 KB   `Hud::kDim` spelled at the call site
+#     prvalue of alias      C1605
+#     local non-constexpr   C1605
+#     local const ref       C1605
+#     string literal        C1605          the alias is still ODR-used here too
+#   matrix A's delete-all-N-sites stays C1605 because only the exact-shape lines
+#   are removed while the remaining sites keep ODR-using the aliases.
+# So the trigger is the ODR-use of a namespace-scope constexpr class-type variable
+# initialised from an imported static constexpr member: the importer owes that
+# variable a definition, and MSVC 14.44's object writer never finishes emitting it.
+# Naming the imported constant binds to the module's own inline definition, so the
+# importer emits nothing. The fix deleted the three aliases in each of the two demo
+# HUD TUs and spells Hud::kX at every call site; the standing rule lives in
+# AGENTS.md. This script stays: any Windows build failure still runs it.
+#
 # Each row costs one compile: matrix A rows are whole-TU compiles (~11 s), matrix B
 # rows are prefix compiles (~1.2 s), so the two families together add a couple of
 # minutes per TU on top of the bisect.

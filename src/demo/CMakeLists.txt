@@ -36,51 +36,21 @@ function(add_gldx_demo name)
     # TU can exceed the default 65,279 addressable COFF sections, and the option
     # costs nothing but section-table size (linker from VC2005 or later).
     #
-    # Do not confuse that with C1605, which this option does NOT fix. The v1.7.0
-    # Windows job failed with `fatal error C1605: compiler limit: object file
-    # size cannot exceed 4 GB` on `glass_water/Hud.cpp` and `night_forest/Hud.cpp`;
-    # reading the 4 GB as "/bigobj's 2^32 section capacity" looked convincing and
-    # was wrong - run 42760865230 shows /bigobj on the cl command line with the
-    # identical error. "The TU is too big" is wrong too: night_forest/main.cpp
-    # and glass_water/main.cpp are larger, import gldx and include the same Hud.h,
-    # and compile fine. "Importing several modules is what does it" is wrong too:
-    # counting the C5050 lines by the source path each one carries, 18 demo sources
-    # import gldxwin (many of them gldx + gldxwin + gldxcli) while the whole build
-    # fails on exactly two objects. So the trigger is inside the bodies of those
-    # two files, and scripts/msvc-object-probe.sh now names the statement. Run
-    # 42765315428: all six flag variants give the byte-identical error, a skeleton
-    # TU with the same `import gldx;` + Hud.h preamble and an empty body compiles
-    # into 1.5 KB, and prefixes of glass_water/Hud.cpp pass up to L85 and fail from
-    # L97 onward - with every failing prefix taking 11.1 s and every passing one
-    # 1.2 s. Time that does not grow with the amount of code is not a size limit.
-    # Run 42770837956 then bisected both TUs down to the *same* statement,
-    # `hud.AddLine(buf, kDim);` (glass_water L86 after L85 passes, night_forest L57
-    # after L56), and closed the last two axes: /Od, /Gw and /GS- change nothing,
-    # and the /Fa listing reaches only 285 bytes and 12 lines before the watchdog
-    # fires - it stops in the prologue, before a single instruction is emitted, so
-    # the writer is not being handed garbage; it runs away on its own.
-    # Run 42777226104 then falsified that headline with its own control row: deleting
-    # the statement from the complete TU still gives C1605, on both files. The two
-    # results only stand together as sufficient-but-not-necessary - inside the prefix
-    # family that one line crosses the limit, while the complete file has the same
-    # call shape 7 times (glass_water) and 12 times (night_forest), so removing one
-    # site from something already over the limit changes nothing. Whether all the
-    # sites have to go, or the file is simply over a cumulative limit and AddLine is
-    # only where the prefix happened to cross it, is what the new
-    # delete-all-occurrences row is there to answer. Per-property rewrites mean
-    # nothing on the complete file for that reason, and run on the minimal failing
-    # prefix instead - there, deleting the statement really does compile again, and if
-    # that stops holding the probe prints CONTROL DID NOT COMPILE rather than letting
-    # the rows below it be read as evidence.
-    # Which property of the call is unloadable is still open. The candidates come
-    # from the one asymmetry left in the source: both failing TUs declare
-    # `constexpr glm::vec4 kDim = Hud::kDim;` and hand over the *local* name, while
-    # text_hud/main.cpp passes `Hud::kDim` directly and voxel_terrain/Hud.cpp
-    # declares no alias at all. That is an observation about which files fail, not a
-    # diagnosis, and even a row that compiles only names a form the writer can emit -
-    # a fix would have to be applied at every call site, not at the one the bisect
-    # happened to name. Until then this stays "known, not fixed", and remember that
-    # clang has no equivalent limit, so nothing built here can observe any of it.
+    # Do not confuse that with C1605, which this option does NOT fix. C1605 was a
+    # different bug, now fixed: a TU that imports gldx must not copy an imported
+    # `static constexpr` class-type constant into a namespace-scope `constexpr`
+    # variable (`constexpr glm::vec4 kDim = Hud::kDim;`) and then ODR-use that
+    # alias. MSVC 14.44's object writer never terminates on the definition it then
+    # owes the importer; clang emits it without complaint, so nothing local can
+    # see the difference. Run 42781895430's matrix B is the controlled experiment:
+    # on the minimal failing prefix, deleting the one call (alias declarations
+    # still present) compiles, naming `Hud::kDim` directly compiles into ~6.7 KB,
+    # and every rewrite that still ODR-uses the alias (prvalue of it, a local
+    # copy, a local const reference) gives C1605. So the trigger is the ODR-use,
+    # not the declaration. The fix removed the aliases from glass_water/Hud.cpp
+    # and night_forest/Hud.cpp and spells `Hud::kX` at every call site; the
+    # forensic rounds that got there are in CHANGELOG.md and in the header of
+    # scripts/msvc-object-probe.sh, which still runs on any Windows failure.
     if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         target_compile_options(d_${name} PRIVATE /bigobj)
     endif()

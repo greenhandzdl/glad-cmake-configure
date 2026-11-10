@@ -5,6 +5,14 @@
 
 ## Unreleased
 
+### 修复 Windows `C1605`：删掉 demo HUD 对引擎色常量的本地 constexpr 别名
+
+- **根因**（run 42781895430 的 B 族对照矩阵，两个 TU 一致）：会 `import gldx` 的 TU 里，`constexpr glm::vec4 kDim = Hud::kDim;` 这类命名空间作用域别名一旦被 ODR-use，MSVC 14.44 的 .obj 写出器就在“导入方欠这个变量的定义”这一步失控到 4 GB 上限。对照：最小失败前缀上删掉那一句调用（别名声明仍在）→ 过（5595/5613 字节）；实参直接写 `Hud::kDim` → 过（6712/6730 字节）；别名包 prvalue、函数内非 constexpr 副本、函数内 const 引用、char 数组换字符串字面量（全都仍 ODR-use 别名）→ 一律 C1605。所以触发的是 **ODR-use 而非声明本身**。A 族 `delete all N sites` 仍 C1605 也由此解释：它只删精确同形行，其余调用点仍在 ODR-use 别名。
+- **为什么直接写导入常量就没事**：`Hud::kDim` 是类内 `static constexpr`，C++17 起隐式 inline，定义在模块自己的 TU 里发出；导入方绑到那个已有符号，什么都不用发。本地别名则是导入方自己新造的一个静态存储期变量，定义得由导入方发——写出器正是在这一步失控。
+- **修复**：删掉 `src/demo/glass_water/Hud.cpp` 与 `src/demo/night_forest/Hud.cpp` 各三个别名，全部实参直接写 `Hud::kFg/kDim/kWarn`。归一化源码比对（去注释、去别名声明、裸角色名映射到 `Hud::kX`）证明两文件与 HEAD 逐行相同、颜色角色序列逐处一致（23/29 处），即语义无操作。
+- **本地验证**：Homebrew clang 23 Release 构建 exit 0、自有 `src/**` 告警 0；`glass_water` 与 `night_forest` 均 `--freeze-at 2 --quit-after 4` 出图（BMP 回读），末帧回归行不变（`47 blend submissions, 79 total draws` / `5 world draws / 1406 instances, 0 capture faces, env FBO capture`）。clang 无此限制，故 C1605 本身的判定只能来自 Windows action。
+- **约定落文档**：AGENTS.md「约定」与「报错 → 修复」、`src/demo/CMakeLists.txt`、`doc/developer/release.md`、workflow 注释与探针头注里“未定位 / known, not fixed”的过期结论全部改为已确诊；规则＝会 `import gldx` 的 TU 不给导入的 constexpr 类类型常量起本地别名，在用点直接写 `Hud::kX`。
+
 ### Windows 仍碎在 `C1605`：`/bigobj` 的猜测被 action 证伪，改为在 CI 里取证
 
 - **现象不变**：`fatal error C1605: compiler limit: object file size cannot exceed 4 GB` 只打在 `src/demo/glass_water/Hud.cpp`（218 行）与 `src/demo/night_forest/Hud.cpp`（230 行）两个 TU 上；引擎侧 `src/gldx/text/Hud.cpp`、`src/demo/voxel_terrain/Hud.cpp`（46 行）与其余 demo 全部通过。fail-fast 关闭，所以 Linux / macOS 照样绿，`Create Release` 被 skip。
@@ -23,7 +31,7 @@
 - **探针第四轮（run 42777226104，master b91e808）先推翻了自己上一轮的标题**：Linux ✓、macOS ✓、Windows ✗，而替换矩阵的对照行给出 `complete: delete the statement → C1605`（两个 TU 都是）。也就是说“二分找到了写不出来的那一句”是过度解读：前缀家族里加上这一句确实就过线（且那个失败前缀里只有这一处这样的调用），而完整文件里同形调用有 7 处（`glass_water`）与 12 处（`night_forest`），从已经越线的文件里拿掉一处自然什么都不变。两个观察只能合起来读成**充分而不必要**；“每一处单独就致命”还是“整文件是累积越线、AddLine 只是前缀恰好跨过的那一处”，本轮没有数据能区分——那正是新增的 delete-all-occurrences 行要问的。
   矩阵因此拆成两族，且读法不同：A 族在完整 TU 上只能回答“这类语句是否参与”（原样、删一处、删全部 N 处），任何按性质改写的行在这里必然只会说“还是碎的”；B 族在最小失败前缀上按性质改写（改用导入常量、别名包成 prvalue、函数内非 constexpr 副本、函数内 const 引用、char 数组换成字符串字面量），因为那里删掉这一句确实编得回来，delete 行才当得起对照行；对照一旦不过就打印 `CONTROL DID NOT COMPILE`，下面的行只算噪声，不再冒充证据。
 - **工具自己也被这一轮抓出来了**：别名表是从源码 grep 的，而旧正则要求 `=` 前恰好一个空格——这些文件把等号对齐了（`constexpr glm::vec4 kDim  = Hud::kDim;`），于是一整条颜色声明轴既没跑出一行也没打提示，因为 char 数组那一轴已经把共用的“有一行跑过”标志置起来了。断言当时写的是“跑过或明确说用不上”的**或**式，正好看不见这种缺口。现在每个轴各自声明可达性，selftest 的假 oracle 阈值钉到 85 行，让假 culprit 与 MSVC 报的是同一句（否则它恰好落在一个两处都够不着的多行区域上，断言又变成空转），并新增三条断言：两族矩阵都必须出现、B 族对照必须在**两个** TU 都编译回来、可达的轴必须各自有行或各自有“够不着”的话。
-- **状态**：未修复，而且上一轮那句“触发点是一句 `hud.AddLine(buf, kDim);`”现在按证据降级为“**一个充分条件**（在前缀家族里）”。flag、优化器、清单三条轴已全部排除；写出器在产第一条指令之前就失控已经由清单字节数确认；剩下的分叉是“这些同形调用逐条致命”还是“整文件累积越线”，以及 B 族里哪一种写法编得回来。v1.7.0 的 Windows 制品仍不存在（Release 被 skip），本轮改动全在取证工具与文档；本地 clang 侧 exit=0、自有 `src/**` 告警 0 条，`scripts/msvc-object-probe-selftest.sh` 28 项断言全过——但那只证明工具的控制流跑得对，矩阵的结论仍只在 MSVC 上成立。
+- **状态（第四轮结束时的快照，已被 Unreleased 顶部的修复条目取代）**：未修复，而且上一轮那句“触发点是一句 `hud.AddLine(buf, kDim);`”现在按证据降级为“**一个充分条件**（在前缀家族里）”。flag、优化器、清单三条轴已全部排除；写出器在产第一条指令之前就失控已经由清单字节数确认；剩下的分叉是“这些同形调用逐条致命”还是“整文件累积越线”，以及 B 族里哪一种写法编得回来。v1.7.0 的 Windows 制品仍不存在（Release 被 skip），本轮改动全在取证工具与文档；本地 clang 侧 exit=0、自有 `src/**` 告警 0 条，`scripts/msvc-object-probe-selftest.sh` 28 项断言全过——但那只证明工具的控制流跑得对，矩阵的结论仍只在 MSVC 上成立。
 
 ## v1.7.0
 

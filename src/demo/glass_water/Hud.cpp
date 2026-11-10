@@ -45,19 +45,20 @@ const char* ModeName(BlendMode m) {
 // guarantee are drawn in amber, so the panel is scannable while flying rather
 // than something to read carefully after the fact.
 //
-// The three roles come from the engine now, so amber means the same thing here
-// as it does in night_forest: "this frame is missing something the panel is
-// claiming". Aliased rather than spelled out because a demo palette that could
-// drift from the engine's is exactly how two panels end up meaning different
-// things by the same colour.
+// The three panel roles come from the engine now, so amber means the same
+// thing here as it does in night_forest: "this frame is missing something the
+// panel is claiming". They are spelled out as `Hud::kFg` rather than aliased
+// into a local `constexpr glm::vec4 kFg = Hud::kFg;`: clang does not care about
+// that alias, MSVC 14.44 does - ODR-using it sends its object writer into the
+// 4 GB limit (C1605). The same failing prefix emits a 6.7 KB object when the
+// imported constant is named directly and no object at all when the alias is:
+// run 42781895430. The palette cannot drift from the engine's either, because
+// this file holds no copy of it to drift.
 //
 // Everything here is ASCII 32..126 on purpose - the baked font atlas covers
 // exactly that range and TextRenderer silently skips anything outside it, so a
 // typographic arrow would not render as an arrow but as a missing glyph.
 using Hud = gldx::Hud;
-constexpr glm::vec4 kFg   = Hud::kFg;
-constexpr glm::vec4 kDim  = Hud::kDim;
-constexpr glm::vec4 kWarn = Hud::kWarn;
 
 } // namespace
 
@@ -83,10 +84,10 @@ void GlassHudPass::Build(gldx::RenderFrame& f) {
     // ---- where the camera is, since "the object behind disappeared" is only
     // ---- observable from a specific distance to it ---------------------------
     std::snprintf(buf, sizeof(buf), "glass_water   fps %.1f   cpu %.2f ms", f.smoothedFps, cpuMs);
-    hud.AddLine(buf, kDim);
+    hud.AddLine(buf, Hud::kDim);
     std::snprintf(buf, sizeof(buf), "pos (%.1f, %.1f, %.1f)   speed %.1f   sea %.2f",
                   in->pos.x, in->pos.y, in->pos.z, in->speed, in->wave);
-    hud.AddLine(buf, kDim);
+    hud.AddLine(buf, Hud::kDim);
 
     // ---- which projection the vertices went through, and its framing ---------
     // Printed as the two numbers that actually define it, not just a mode name:
@@ -98,7 +99,7 @@ void GlassHudPass::Build(gldx::RenderFrame& f) {
     } else {
         std::snprintf(buf, sizeof(buf), "proj PERSPECTIVE   fov %.1f deg", in->fov);
     }
-    hud.AddLine(buf, in->ortho ? kWarn : kDim);
+    hud.AddLine(buf, in->ortho ? Hud::kWarn : Hud::kDim);
 
     // ---- what the water is made of, read back out of the item table ----------
     // Not a caption the shader has to agree with: this is the same Surface the
@@ -113,7 +114,7 @@ void GlassHudPass::Build(gldx::RenderFrame& f) {
             std::snprintf(buf, sizeof(buf),
                           "water  ior %.3f -> F0 %.2f%%  rough %.2f  path %.1f m",
                           s.ior, f * f * 100.0f, s.roughness, s.pathLen);
-            hud.AddLine(buf, kDim);
+            hud.AddLine(buf, Hud::kDim);
             // Which side of the (fragment, blend unit) contract pays the multiply by
             // coverage. Shader and GPU are the same arithmetic written in two
             // different places, so both are fine and the frame is identical; only
@@ -124,7 +125,7 @@ void GlassHudPass::Build(gldx::RenderFrame& f) {
             std::snprintf(buf, sizeof(buf),
                           "absorb %.3f/%.3f/%.3f  a=1-(1-F)T  rgb*a by %s",
                           s.absorption.x, s.absorption.y, s.absorption.z, weighted);
-            hud.AddLine(buf, in->blend == BlendMode::Additive ? kWarn : kDim);
+            hud.AddLine(buf, in->blend == BlendMode::Additive ? Hud::kWarn : Hud::kDim);
             break;
         }
     }
@@ -132,10 +133,10 @@ void GlassHudPass::Build(gldx::RenderFrame& f) {
     // ---- the four guarantees, as the frame asked for them --------------------
     std::snprintf(buf, sizeof(buf), "[1] sort far->near  %s   [3] shell two-pass  %s",
                   YesNo(in->sortBackToFront), YesNo(in->shellTwoPass));
-    hud.AddLine(buf, in->sortBackToFront && in->shellTwoPass ? kFg : kWarn);
+    hud.AddLine(buf, in->sortBackToFront && in->shellTwoPass ? Hud::kFg : Hud::kWarn);
     std::snprintf(buf, sizeof(buf), "[2] blend depth    %s   [4] equation  %s",
                   in->blendWritesDepth ? "WRITE" : "no-write", ModeName(in->blend));
-    hud.AddLine(buf, in->blendWritesDepth ? kWarn : kFg);
+    hud.AddLine(buf, in->blendWritesDepth ? Hud::kWarn : Hud::kFg);
 
     // ---- the same state as the driver holds it, read back inside the pass ----
     if (const BlendPass* b = blend) {
@@ -154,12 +155,12 @@ void GlassHudPass::Build(gldx::RenderFrame& f) {
                       YesNo(gl.depthTest), YesNo(gl.depthWrite), YesNo(gl.blend), YesNo(gl.cull));
         // This is the line that proves the demo's thesis: switch [2] on and the
         // read-back flips to yes, which is exactly when pixels start getting eaten.
-        hud.AddLine(buf, gl.depthWrite ? kWarn : kFg);
+        hud.AddLine(buf, gl.depthWrite ? Hud::kWarn : Hud::kFg);
         std::snprintf(buf, sizeof(buf), "GL  src/dst     %s", eq);
-        hud.AddLine(buf, kDim);
+        hud.AddLine(buf, Hud::kDim);
         std::snprintf(buf, sizeof(buf), "blend submissions %d   all layers %d   cpu %.2f ms",
                       b->blendDraws(), b->totalDraws(), cpuMs);
-        hud.AddLine(buf, kDim);
+        hud.AddLine(buf, Hud::kDim);
 
         // ---- the evidence that costs the most to fake: last frame's order ----
         // Printed from the sequence Execute() actually submitted in, so turning
@@ -167,10 +168,10 @@ void GlassHudPass::Build(gldx::RenderFrame& f) {
         const std::vector<BlendPass::Entry>& order = b->order();
         if (in->sortBackToFront) {
             if (order.empty()) {
-                hud.AddLine("order: (blend layer empty)", kDim);
+                hud.AddLine("order: (blend layer empty)", Hud::kDim);
             } else {
                 std::snprintf(buf, sizeof(buf), "drawn far->near (%zu submissions):", order.size());
-                hud.AddLine(buf, kDim);
+                hud.AddLine(buf, Hud::kDim);
                 const std::size_t show = std::min<std::size_t>(order.size(), 7);
                 for (std::size_t i = 0; i < show; ++i) {
                     const BlendPass::Entry& e = order[i];
@@ -180,21 +181,21 @@ void GlassHudPass::Build(gldx::RenderFrame& f) {
                     } else {
                         std::snprintf(buf, sizeof(buf), "  %5.1f m  %s", e.distance, e.label);
                     }
-                    hud.AddLine(buf, kFg);
+                    hud.AddLine(buf, Hud::kFg);
                 }
                 if (order.size() > show) {
                     std::snprintf(buf, sizeof(buf), "  ... %zu more, still far->near",
                                   order.size() - show);
-                    hud.AddLine(buf, kDim);
+                    hud.AddLine(buf, Hud::kDim);
                 }
             }
         } else {
-            hud.AddLine("order: NOT SORTED - declaration order,", kWarn);
-            hud.AddLine("       the sheet as one submission", kWarn);
+            hud.AddLine("order: NOT SORTED - declaration order,", Hud::kWarn);
+            hud.AddLine("       the sheet as one submission", Hud::kWarn);
         }
         if (in->blendWritesDepth) {
-            hud.AddLine("> blend fills the depth buffer: anything", kWarn);
-            hud.AddLine("  behind a pane is rejected by GL_LESS.", kWarn);
+            hud.AddLine("> blend fills the depth buffer: anything", Hud::kWarn);
+            hud.AddLine("  behind a pane is rejected by GL_LESS.", Hud::kWarn);
         }
     }
 

@@ -207,6 +207,11 @@ jobs:
       #   rc=124、并且结束后不得有进程存活的断言）。这条不是洁癖——看门狗的第一版
       #   用 timeout，只杀到了 bash 包装进程，cl 作为子进程继续往已删除的目录里写
       #   清单，是 selftest 把它报出来的；本地遗留的十个孤儿 cl 一度写满了盘。
+      #   第五轮（run 42781895430）交回了可操作的修复：B 族里只有 `imported const`
+      #   （实参直接写 `Hud::kDim`）一行编译通过（6712/6730 字节），其余仍 ODR-use
+      #   本地别名的改写全 C1605，而 delete 对照行（留声明、删调用）也过——所以触发
+      #   的是 ODR-use 而非声明本身。两个 demo HUD TU 的别名已删、实参直接写
+      #   `Hud::kX`。探针保留：任何 Windows 构建失败仍会跑它。
       # ------------------------------------------------------------------
       - name: Probe MSVC object-writer limit (Windows, on failure)
         if: failure() && matrix.os == 'windows'
