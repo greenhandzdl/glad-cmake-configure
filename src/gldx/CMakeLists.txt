@@ -3,13 +3,14 @@
 # ============================================================================
 # Every engine translation unit is a module-implementation unit of `gldx`; the
 # single primary interface unit is gldx.cppm (declared via the CXX_MODULES
-# FILE_SET below). stb / assimp stay private to the library: they are only ever
-# textually included inside individual implementation units, never on the
-# exported interface. GLAD + GLM leak into exported signatures so their include
-# dirs propagate PUBLIC (importers reach the same global-module types).
+# FILE_SET below). stb / assimp / freetype stay private to the library: they are
+# only ever textually included inside individual implementation units, never on
+# the exported interface. GLAD + GLM leak into exported signatures so their
+# include dirs propagate PUBLIC (importers reach the same global-module types).
 #
-# GLAD_TARGET / GLM_INCLUDE_DIR / the assimp option come from the root scope
-# (cmake/Dependencies.cmake + cmake/Assimp.cmake), inherited into here.
+# GLAD_TARGET / GLM_INCLUDE_DIR and the assimp + freetype options come from the
+# root scope (cmake/Dependencies.cmake + Assimp.cmake + FreeType.cmake),
+# inherited into here.
 
 set(GLDX_SOURCES
     core/RenderContext.cpp
@@ -42,6 +43,7 @@ set(GLDX_SOURCES
     render/SkyboxRenderer.cpp
     render/SpriteBatch.cpp
     text/Font.cpp
+    text/Hud.cpp
     light/EnvironmentMap.cpp
     shadow/CascadedShadowMap.cpp
     debug/DebugDraw.cpp
@@ -71,6 +73,12 @@ if(GLDX_ENABLE_ASSIMP)
         assimp::assimp)
 else()
     target_compile_definitions(gldx PRIVATE GLDX_NO_ASSIMP)
+endif()
+if(GLDX_ENABLE_FREETYPE)
+    target_link_libraries(gldx PRIVATE
+        Freetype::Freetype)
+else()
+    target_compile_definitions(gldx PRIVATE GLDX_NO_FREETYPE)
 endif()
 
 # Per-compiler module tweaks. CMake >= 3.28 drives named-module compilation and

@@ -95,7 +95,9 @@ struct RenderFrame {
     // blended terrain so debris sits correctly against water (optional).
     ParticleBatch* particles = nullptr;
 
-    // 2D / diagnostic overlays drawn by DebugHudPass.
+    // 2D / diagnostic overlays: consumed by DebugHudPass and by gldx::Hud, which
+    // draws its panels through these records rather than owning a batch itself.
+    // A frame that wires up none of them simply gets no text (never an error).
     struct Overlay {
         DebugDraw*   debug   = nullptr;
         SpriteBatch* sprite  = nullptr;

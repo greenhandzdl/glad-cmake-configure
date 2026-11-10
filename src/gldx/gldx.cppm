@@ -22,9 +22,10 @@
 //
 // Deliberately NOT exported: <GLFW/glfw3.h> and the app constants live in
 // gldx/core/Platform.h, which stays a plain text-include header (only the
-// executable needs a windowing context). stb / assimp are implementation
-// details kept inside individual module-implementation units and never surface
-// on this interface.
+// executable needs a windowing context). stb / assimp / freetype are
+// implementation details kept inside individual module-implementation units and
+// never surface on this interface: consumers see gldx::Font and gldx::Hud, and
+// which rasteriser filled the atlas is a build choice, not an API one.
 // ============================================================================
 
 module;
@@ -103,6 +104,7 @@ export {
 // --- text ------------------------------------------------------------------
 #include "gldx/text/Font.h"
 #include "gldx/text/TextRenderer.h"
+#include "gldx/text/Hud.h"
 
 // --- debug -----------------------------------------------------------------
 #include "gldx/debug/DebugDraw.h"
