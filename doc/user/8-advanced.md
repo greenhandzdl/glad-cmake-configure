@@ -238,33 +238,37 @@ st.vao.DrawArrays(GL_PATCHES, 0, 4);         // 4 个控制点
 
 ## 6. 文字 HUD 与调试绘制
 
-三个协作件覆盖"往画面上叠 2D 信息"：**`Font`** 把系统 TTF 用 stb_truetype 烘焙成一张 RGBA 覆盖图集（单个 `Texture2D`）；**`SpriteBatch`** 是左上角像素坐标、自带正交投影的即时模式四边形批；**`TextRenderer`** 无状态，逐字形查图集矩形 + advance、按（目标尺寸 / 烘焙尺寸）缩放后把带色四边形推进共享批——整个 HUD 收敛成几次 draw call。
+四个协作件覆盖"往画面上叠 2D 信息"：**`Font`** 把系统 TTF 烘焙成一张 RGBA 覆盖图集（单个 `Texture2D`）——光栅器用 FreeType，构建时关掉 `GLDX_ENABLE_FREETYPE` 就退回 stb_truetype，**两后端填同一组度量字段，所以换后端不改任何一行调用方代码**（`Font::backend()` 只用来把“这台机器上究竟用了哪个”报告给人看，因为光看截图真的看不出来）；**`SpriteBatch`** 是左上角像素坐标、自带正交投影的即时模式四边形批；**`TextRenderer`** 无状态，逐字形查图集矩形 + advance、按（目标尺寸 / 烘焙尺寸）缩放后把带色四边形推进共享批；**`Hud`/`HudPass`** 站在最上面一层：行列表、面板按最宽行自动 sizing、四角定位、右对齐、行高推进、屏幕中心标记，以及"整块 overlay 只 begin/end 一次批"的记账都在这里。
 
-完整可用的 HUD pass（找不到字体会自动禁用文字叠加，绝不致命）：
+**默认用 `Hud`，不要自己排坐标。** 下面就是一个完整可用的 HUD pass（找不到字体会自动禁用文字叠加，绝不致命）：
 
 ```cpp
-class HudPass : public gldx::RenderPass {
+class MyHud : public gldx::HudPass {                     // 引擎已经自带一个 Hud，只管“说什么”
 public:
-    HudPass() : RenderPass("Hud") {
+    MyHud() : gldx::HudPass("Hud") {
         sprite_.Init();                                 // 渲染线程：构造在 OnCreate 里跑
-        const char* candidates[] = {                    // 依次试系统字体，命中即用
-            "/System/Library/Fonts/Menlo.ttc", "/System/Library/Fonts/Helvetica.ttc",
-            "C:/Windows/Fonts/consola.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-        };
-        for (const char* c : candidates) if (font_.LoadFromFile(c, 48.0f)) break;   // 烘焙尺寸 48 > 任何绘制尺寸 → 下采样仍清晰
+        font_.LoadSystem(48.0f);                        // “这台机器上哪张 TTF”是平台事实，候选表住在 Font 里
         gldx::Texture2DDesc w; w.width = w.height = 1; w.channels = 4; w.pixels = {255,255,255,255};
         white_.Upload(w);                                // 1×1 纯白，给 SpriteBatch 着色用
     }
     void Execute(gldx::RenderFrame& f) override {
-        if (!font_.loaded() || !white_.valid()) return;
-        sprite_.Begin(white_, f.fbWidth, f.fbHeight);    // 像素坐标、左上角原点
-        sprite_.Draw(white_, 16, 16, 320, 64, 0, 0, 1, 1, glm::vec4(0, 0, 0, 0.4f));   // 半透面板底
-        gldx::TextRenderer::Draw(sprite_, font_, "gldx demo",  28, 26, 26.0f, glm::vec4(1.0f));
+        f.overlay.sprite = &sprite_;                     // Hud 借这三样画自己，缺任何一个就安静地不画
+        f.overlay.font   = &font_;
+        f.overlay.white  = &white_;
+        gldx::HudPass::Execute(f);                       // 基类：Clear → Build → Draw → profiler 帧收口
+    }
+    void Build(gldx::RenderFrame& f) override {          // 这个 override 只决定“本帧说哪几行”
+        using Hud = gldx::Hud;
+        if (!hud.visible()) return;                      // Build 不管可见与否都会跑，能跳的 snprintf 自己跳
         char line[96];
         std::snprintf(line, sizeof(line), "%.0f fps  fb %dx%d", f.smoothedFps, f.fbWidth, f.fbHeight);
-        gldx::TextRenderer::Draw(sprite_, font_, line, 28, 60, 20.0f, glm::vec4(0.75f, 0.85f, 1.0f, 1.0f));
-        const float w = gldx::TextRenderer::Measure(font_, line, 20.0f);   // 量宽以右对齐/自适应面板
-        sprite_.End();
+        hud.BeginSection(Hud::Anchor::TopLeft, 20.0f);   // 开一个面板：左上角、默认字号 20px、底色 kPanel
+        hud.AddLineAt("gldx demo", 26.0f);               // 这一行自己的字号（标题与正文同面板）
+        hud.AddLine(line, Hud::kDim);                    // 其余行继承面板字号
+        hud.AddBlock("Multi-line via '\\n'\n colour is a plain RGBA tint.");  // 自带换行的整块字符串，由 Hud 拆行
+        hud.BeginSection(Hud::Anchor::BottomLeft, 12.0f);
+        hud.AddLines({"Esc quit", "H toggle hud"});     // 键位提示块的固定写法
+        hud.SetMarker(Hud::Marker::Dot);                 // 屏幕中心一个点：指针已捕获
     }
 private:
     gldx::SpriteBatch sprite_;
@@ -273,7 +277,13 @@ private:
 };
 ```
 
-要点：`'\n'` 即换行（按字体行距推进 y）；颜色就是一个 RGBA tint；`Measure` 用来按最宽行给面板定尺寸，而不是写死魔法数。
+要点：
+- **字号是 section 级的**，`BeginSection(anchor, pixelSize, panel, align, padding)` 定基调，`AddLineAt` 覆盖单行；面板宽取最宽行、高取逐行 advance 累加，所以不必再写 `320, 64` 这种魔法数。
+- **`Build()` 无条件跑**（基类的 `Execute` 先 `Clear()` 再 `Build()` 再 `Draw()`），所以面板藏着时也要自己 `if (!hud.visible()) return;` 才能省下 `snprintf`。
+- 颜色只用三个引擎常量，全仓含义一致：`kFg` 是这个 demo 正在主张的那件事，`kDim` 是围绕它的上下文与键位，`kWarn`（琥珀）专指“本帧缺了面板断言的东西”（时钟没冻结、字体没找到）。别另调 RGBA。
+- 图集只烘 printable ASCII：一整个排版箭头 `→` 会被**静默跳过**（不是画成豆腐块，是干脆没得），面板文字以 ASCII 为限。
+- 行距来自字体自己的 metrics 按目标字号缩放，所以换光栅后端时文字是“跟着动”而不是“对不上”。
+- 真要一个非面板的版面（把读数钉在屏幕中间某处）才直接消费 `SpriteBatch` + `TextRenderer::Draw/Measure`，`'\n'` 仍是换行、颜色仍是一个 RGBA tint；引擎自带的 `DebugHudPass` 就是这么消费的。
 
 **调试线框与帧耗时**：`DebugDraw` 在 CPU 上累积彩色线段（`Clear()` → 多次 `Push*` → `Draw(viewProj)`），一次 `GL_LINES` 提交、**关深度测试**，所以坐标轴/包围盒/选中轮廓永远浮在上层；固定容量、溢出即丢（是诊断输出、不值得中途重分配）。`Profiler` 用 `GL_TIME_ELAPSED`（4.1 核心）+ CPU 时钟夹住一段 GL 工作，GPU 耗时晚一帧到（异步查询的正常行为）。
 
@@ -288,7 +298,8 @@ profiler_.BeginFrame();  /* ...这段的 GL 工作... */  profiler_.EndFrame();
 ```
 
 🔗 **现场演示**：
-- 纯 2D HUD（Font + SpriteBatch + TextRenderer）：[`../../src/demo/text_hud/main.cpp`](../../src/demo/text_hud/main.cpp)。
+- 纯 2D HUD（`gldx::Hud` + Font + SpriteBatch + TextRenderer，一个面板里三种字号）：[`../../src/demo/text_hud/main.cpp`](../../src/demo/text_hud/main.cpp)。它有 `--snapshot` / `--snap-at` / `--freeze-at`（park 的是 `FrameInfo::time`，因为 `t=` 读数与循环色都读它），但因为面板本身就是被测对象、没有 `--off hud` 可退，这张图只能当版面证据与字体后端 A/B，不能当逐字节基线。
+- 把成品场景的统计量灌进 `Hud` 的四个角：[`../../src/demo/night_forest/Hud.cpp`](../../src/demo/night_forest/Hud.cpp)（证据块 + 键位面板）、[`../../src/demo/glass_water/Hud.cpp`](../../src/demo/glass_water/Hud.cpp)（逐提交排序明细）、[`../../src/demo/voxel_terrain/Hud.cpp`](../../src/demo/voxel_terrain/Hud.cpp)（上游 `snprintf` 好一个 `std::string`、整块 `AddBlock` 传下来）。
 - 调试线框 + 帧耗时 + 文字读数：[`../../src/demo/debug_draw/main.cpp`](../../src/demo/debug_draw/main.cpp)。
 - HUD 回读剔除/拾取结果（`visibleCount/selected`）：[`../../src/demo/camera_picking/main.cpp`](../../src/demo/camera_picking/main.cpp)。
 

@@ -30,6 +30,14 @@
 - **scene/** 是纯 CPU（矩阵 + 包围体），不碰 GL，因此脱离上下文也能安全推理、
   独立测试。
 - **render/** 是唯一逐帧编排 GL 的地方。
+- **text/ 是唯一有“可替换后端”的特性层子系统**：字形光栅用 FreeType 还是 stb_truetype 是**构建期**
+  开关（`GLDX_ENABLE_FREETYPE`）而不是 API 分叉——两后端把度量填进同一组字段，所以 `Hud` 与
+  `TextRenderer` 的排版代码里没有一行 `#ifdef`，调用方换后端不改一行。这么切是因为“用哪个
+  光栅器”与“这台机器上哪张 TTF 存在”一样，是环境事实而非引擎语义；需要上报现实时由
+  `Font::backend()` 把名字交给 HUD 自己打一行，而不是靠比对截图。
+- **特性层可以继承 render/ 的 pass 基类，这不算反转编排方向**：`text/Hud.h` 的 `HudPass : RenderPass`
+  与同层 `TextRenderer` 直接用 `render/SpriteBatch`、`light/EnvironmentMap` 用 `render/Framebuffer` 同类——
+  `render/` 向特性层开放的是**可复用的构件与基类**，“谁 `AddPass`、逐帧按什么顺序跑”仍只在应用侧。
 
 ## 2. 场景图（`src/gldx/scene/`）
 
@@ -222,7 +230,7 @@ pass 中，从而让整帧（场景*与*自发光*与*天空盒）被一致地�
 
 ```
 .
-├── cmake/                   # CMake 辅助模块（由根 CMakeLists include）：Dependencies.cmake(glfw/glad/glm/stb 探测) · Assimp.cmake(assimp 子项目)
+├── cmake/                   # CMake 辅助模块（由根 CMakeLists include）：Dependencies.cmake(glfw/glad/glm/stb 探测) · Assimp.cmake(assimp 子项目) · FreeType.cmake(freetype 子项目，静态 + 全禁外部编解码器，补齐 Freetype::Freetype ALIAS)
 ├── src/                      # 三个库 + 全部可执行，各自独立 CMakeLists，经根 add_subdirectory(src) 递归编排
 │   ├── CMakeLists.txt        #   编排：add_subdirectory(gldx/gldxwin/gldxcli) + GLFW_Template 可执行 + demo
 │   ├── main.cpp              # 最简 hello-triangle：import gldx/gldxwin/gldxcli，自定义 RenderPass + 内联 GLSL + 高层 Mesh 直渲窗口（最小实现基线，目标 GLFW_Template）
@@ -240,7 +248,7 @@ pass 中，从而让整帧（场景*与*自发光*与*天空盒）被一致地�
 │   │   ├── util/             #   Noise（Perlin 2D/3D + fBm，确定性、无全局状态）
 │   │   ├── scene/            #   Scene / SceneNode / Transform（纯 CPU 层级）
 │   │   ├── render/           #   Renderer / RenderPass / RenderFrame / 后期链 / SpriteBatch / TextRenderer / ParticleBatch / Voxel 两 pass
-│   │   ├── text/ assets/ debug/     # 字体·异步资源·DebugDraw/Profiler/Picking/Frustum
+│   │   ├── text/ assets/ debug/     # 字体（双后端：FreeType 光栅 + stb_truetype fallback，一个 atlas、同一份度量字段）· Hud/HudPass（引擎侧仪表面板：行列表 + 角上定位 + 面板自 sizing，demo 只交字符串）· 异步资源 · DebugDraw/Profiler/Picking/Frustum
 │   │   ├── ...               #   引擎各 .cpp 均为 `module gldx;` 实现单元
 │   │   └── third_party/      #   stb_image_impl.cpp（唯一第三方实现 TU，非模块接口）
 │   ├── gldxwin/              # 引擎无关窗口库：named module `gldxwin`（gldx::win::App 单例 + 多窗口 Window + 帧循环），仅链 glfw+GLAD，不 import gldx
@@ -275,8 +283,9 @@ pass 中，从而让整帧（场景*与*自发光*与*天空盒）被一致地�
 ├── doc/                      # 使用者(user/，含 Demo 画廊) + 开发者(developer/: 设计+线程安全+发布)；agent 速查见根 AGENTS.md
 ├── third_party/
 │   ├── glad/                 # 子模块：glad2 生成器（OpenGL 4.1 Core 绑定）
-│   ├── stb/                  # 子模块：header-only 图像/字体
-│   └── assimp/               # 子模块：模型导入（源码内置构建）
+│   ├── stb/                  # 子模块：header-only 图像/字体（字体作 fallback 光栅器，见 freetype/）
+│   ├── assimp/               # 子模块：模型导入（源码内置构建）
+│   └── freetype/             # 子模块：字形光栅器（GLDX_ENABLE_FREETYPE 默认 ON，静态内置构建）
 ├── scripts/                  # build.sh / run.sh / clean.sh（由 CMake 生成）+ release.sh（版本号单源同步）
 ├── .github/workflows/        # 手动触发的三平台构建 + 发布流水线（见 release.md）
 └── CMakeLists.txt            # 根：~60 行 orchestrator（project/标准/option → include(cmake/) → add_subdirectory(src) → 脚本生成 + Summary）

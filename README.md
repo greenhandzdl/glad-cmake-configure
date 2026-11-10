@@ -3,7 +3,7 @@
 跨平台（Windows / macOS / Linux）的 **现代 OpenGL 图形引擎 / PBR 渲染器**：源自一个用 **GLFW** 建窗、**GLAD** 加载函数的 CMake 起步模板，现已成长为一套分层的 `gldx` 引擎子系统。`src/main.cpp` 只留**最简 hello-triangle** 作为“最小实现”基线，其余一个功能一个 demo 在 `src/demo/{feature}/`（成品演示 `pbr_showcase`、可玩体素世界 `voxel_terrain`、五层透明状态机 + 电介质 Cook-Torrance 水面 + 透视/正交切换的 `glass_water`、1400 棵树 5 次 draw + 星空 cube + FBO 反射折射的 `night_forest`…共 27 个）。
 
 - **语言与交付**：C++23；引擎以 **C++20 named module `gldx`**（静态库）交付，另有窗口库 `gldxwin` 与命令行库 `gldxcli`——消费者统一 `import gldx; import gldxwin; import gldxcli;`
-- **图形面**：OpenGL **4.1 Core**（GLSL `#version 410 core`）· PBR 金属/粗糙 · 级联阴影 · IBL · HDR + MSAA + Bloom + ACES · 分层透明（alpha 由菲涅耳与吸收守恒推导）· 透视/正交切换 · 实例化 · 视锥剔除 · CPU 拾取 · 异步资源管线 · 体素原语
+- **图形面**：OpenGL **4.1 Core**（GLSL `#version 410 core`）· PBR 金属/粗糙 · 级联阴影 · IBL · HDR + MSAA + Bloom + ACES · 分层透明（alpha 由菲涅耳与吸收守恒推导）· 透视/正交切换 · 实例化 · 视锥剔除 · CPU 拾取 · 异步资源管线 · 体素原语 · 引擎侧 HUD 面板（FreeType 光栅，stb_truetype 兜底）
 - **构建**：CMake ≥ 3.28 + Ninja；需支持 named modules 的编译器（Clang ≥ 19 / GCC ≥ 14 / 最新 MSVC）；macOS 必须用 Homebrew LLVM（AppleClang 无 `clang-scan-deps`）
 - **产物**：`output/GLFW_Template` + 每个 demo 一个可执行（`output/pbr_showcase`、`output/voxel_terrain`…；Windows 加 `.exe`）
 - **当前正式版**：**[v1.6.0](https://github.com/greenhandzdl/glad-cmake-configure/releases/tag/v1.6.0)**（全部变更见 [CHANGELOG.md](CHANGELOG.md)）
@@ -17,7 +17,7 @@ cmake --preset Debug && cmake --build --preset Debug     # 跨平台等价式：
 ./scripts/run.sh pbr_showcase       # 任一 demo：./scripts/run.sh <demo> [--off a,b --on c --quit-after N]
 ```
 
-配置末尾打印 `GLFW_Template 1.6.0 configuration:`（GLAD 走 system 还是子模块、Assimp 是否启用）；逐平台依赖、`-DGLDX_ENABLE_ASSIMP=OFF` 去重依赖、一键脚本的自愈行为、CLion 工具链与常见报错都在 [入门](doc/user/1-getting-started.md)。
+配置末尾打印 `GLFW_Template 1.6.0 configuration:`（GLAD 走 system 还是子模块、Assimp / FreeType 是否启用）；逐平台依赖、`-DGLDX_ENABLE_ASSIMP=OFF` / `-DGLDX_ENABLE_FREETYPE=OFF` 去重依赖、一键脚本的自愈行为、CLion 工具链与常见报错都在 [入门](doc/user/1-getting-started.md)。
 
 ## 文档（按读者角色分三条路径）
 

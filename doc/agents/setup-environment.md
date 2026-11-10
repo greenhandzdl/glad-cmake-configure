@@ -61,9 +61,9 @@ pip install jinja2
 git submodule update --init --recursive
 ```
 
-判据：`third_party/glad`、`third_party/stb`、`third_party/assimp` 下都有源文件（如 `third_party/assimp/CMakeLists.txt`）。
+判据：`third_party/glad`、`third_party/stb`、`third_party/assimp`、`third_party/freetype` 下都有源文件（如 `third_party/assimp/CMakeLists.txt`、`third_party/freetype/CMakeLists.txt`）。
 
-> 若只需非模型类的 demo（如 `voxel_terrain`/`pbr_showcase`）或不关心模型导入，可用 `-DGLDX_ENABLE_ASSIMP=OFF` 配置：该分支不检/不构建 assimp，因此连 assimp 子模块都不必拉（glad/stb 仍必需）。
+> 若只需非模型类的 demo（如 `voxel_terrain`/`pbr_showcase`）或不关心模型导入，可用 `-DGLDX_ENABLE_ASSIMP=OFF` 配置：该分支不检/不构建 assimp，因此连 assimp 子模块都不必拉（glad/stb/freetype 仍必需）。同理 `-DGLDX_ENABLE_FREETYPE=OFF` 可跳过 freetype 子模块（字体退回 stb_truetype，引擎接口与 HUD 版面不变）。两者都 OFF 时只需 glad + stb。
 
 ---
 

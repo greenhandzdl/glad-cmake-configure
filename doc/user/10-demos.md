@@ -10,6 +10,8 @@
 
 ## 2. 成品演示
 
+四个把 HUD 当产物写的 demo（`voxel_terrain` / `glass_water` / `night_forest`，加单功能 demo `text_hud`）用的是同一个引擎类 `gldx::Hud`（`src/gldx/text/Hud.h`）：行列表、面板按最宽行自 sizing、四角锚定、右对齐测量、行高推进、屏幕中心标记、以及"整块 overlay 只 begin/end 一次批"的记账全在引擎侧，demo 的 `Hud.{h,cpp}` 派生 `gldx::HudPass` 后**只写一个 `Build()` 负责拼字符串**（数字可以是 pass 的统计量、输入结构体的字段，或 `main.cpp` `snprintf` 好的一个 `std::string`）。面板颜色只有三个常量，全仓含义一致：`kFg` 是这个 demo 在主张的那件事、`kDim` 是上下文与键位、`kWarn`（琥珀）是"本帧缺了面板断言的东西"。写法与逐条口径见 [进阶 §6](8-advanced.md)。还在手排 `TextRenderer` 的是 `textured_sphere`（自己 `Measure` 量宽 + 画底板 + 手推 y 的左上角三行面板，正是 `gldx::Hud` 要替掉的那种写法——本轮只收敛上面四个 demo，它还没迁）与 `pbr_showcase`（用引擎自带的 `DebugHudPass`）。
+
 ### `pbr_showcase`：全链路交互场景
 
 `./scripts/run.sh pbr_showcase` 是完整场景：带纹理的地面与球阵、金属立方体、一个旋转的子层级（carousel，演示场景层级变换传播），配合级联阴影、IBL 环境光照、HDR + Bloom + ACES 后期、天空盒，以及精灵批次文本 HUD。绘制不再是内联 `gl*` 调用，而是逐帧组装一个 `RenderFrame` 后一句 `renderer.Render(frame)`；`BuildPbrPipeline()` 依序跑 Shadow → Geometry → Skybox → PostProcess → DebugHud，这些都是**按需装配**的可选 pass。
@@ -18,7 +20,7 @@
 
 ### `voxel_terrain`：可玩体素世界
 
-`./scripts/run.sh voxel_terrain` 是体素原语的验收场：fBm 高度场地形 + 沙滩 + 湖泊 + 树冠，worker 线程生成与网格化、渲染线程限量上传，雾随距离收掉视距边缘。世界层（chunk 网格、流式策略、地形生成在 `World.{h,cpp}`，输入回调在 `Input.{h,cpp}`，HUD pass 在 `Hud.{h,cpp}`）全部写在 `src/demo/voxel_terrain/` 内（`main.cpp` 只留窗口/帧循环装配），引擎只提供原语、不含任何世界概念。
+`./scripts/run.sh voxel_terrain` 是体素原语的验收场：fBm 高度场地形 + 沙滩 + 湖泊 + 树冠，worker 线程生成与网格化、渲染线程限量上传，雾随距离收掉视距边缘。世界层（chunk 网格、流式策略、地形生成在 `World.{h,cpp}`，输入回调在 `Input.{h,cpp}`，HUD 行组装在 `Hud.{h,cpp}`：派生 `gldx::HudPass`，把 `main.cpp` 每帧 `snprintf` 好的一个 `std::string` 整块交给 `hud.AddBlock()`）全部写在 `src/demo/voxel_terrain/` 内（`main.cpp` 只留窗口/帧循环装配），引擎只提供原语、不含任何世界概念。
 
 **操作**：鼠标转向（指针捕获）；`W`/`A`/`S`/`D` 飞行、`Space`/`Ctrl` 上下（`Shift` 减速）；左键破坏、右键放置；`1`–`8` 选方块；`F` 切换飞行/轨道相机；`[`/`]` 太阳方位、`-`/`=` 太阳高度；`P` 粒子；`Tab` 透视/正交；`X` 退出。
 
@@ -60,7 +62,7 @@
 
 取证口径与仓库约定一致：`--off hud`、`--freeze-at` 不晚于 `--snap-at`、指针未捕获时输入层不驱动仿真（`Input.cpp` 里鼠标与滚轮各有一道 `if (!in->captured) return;`）；同参数**单发**重跑 `cmp` 逐字节全等。反过来，把十几条取证命令**连跑成一个脚本**时会出现一种必须记住的抖动：每轮失败的张次都不一样，量级却是不满 100 个像素、最大 7–10/255，bbox 落在树与雾那一带——那是 GPU 末位级抖动被连跑放大，不是某一帧坏了，所以仓内取证一律单发逐条。贴脸机位 `--pos-x 2.5 --pos-y 1.15 --pos-z 4.6 --yaw 0.50 --pitch -0.10 --env-mix 0.5 --env-lod 0.7` 下三组对照的像素差 bbox **恰好落在箱子那一块**（(617,466)–(986,773)），也就是“只有箱子的像素被环境立方体改动过”这件事本身：`--off capture` ↔ 默认最大差 95/255（默认帧映出身后那盏灯笼的暖池与树线的冷紫，关掉后同一批像素只剩冷紫底 + 离散星点——镜像天空而不是镜像森林）；`--off refract` ↔ 默认最大差 39/255；`--env-mix 0.6` ↔ `--env-mix 0` 最大差 88/255。
 
-**操作**：`W`/`A`/`S`/`D` 飞行、`Space`/`Ctrl` 上下、`Shift` 减速（反射只有一米半宽，6 m/s 一步就跨过箱子）、鼠标转向（指针捕获）；`1` FBO 抓取、`2` 折射、`3` 灯笼点光、`4` 雾、`R` 放行/停住箱子；`[`/`]` 环境混合（0–0.60）、`-`/`=` 飞行速度、滚轮 fov；`C` 剔除、`V` 线框、`B` Bloom、`H` HUD、`G` 切贴地漫游、`F` 释放/捕获指针、`Esc` 只释放指针、`X` 退出。CLI features `capture,refract,lights,fog,roam,hud,bloom,cull,wireframe,cursor,walk` + options `stars,star-size,seed,trees,env-size,env-mix,env-lod,emissive,ior,band,moon-x,moon-y,moon-z,moon-int,density,start-at,speed,fov,yaw,pitch,pos-x,pos-y,pos-z,freeze-at,snapshot,snap-at,terrain,terrain-cells,terrain-cell,terrain-relief,terrain-smooth,terrain-levels,terrain-map,terrain-tile,walk-radius`；HUD 打印的是回读到的 GL/路径状态（`planted 817 fir + 583 broadleaf`、`env FBO capture 256 px mix 0.18 lod 1.5`、`faces 0 = crate parked`、`wander moving t 6.0 s heading 214 deg 4.1 m away`、`gooch band 0.16 warm/cold/lift` 三组实际进 GPU 的数），改了 uniform 而这一行不变就说明改动根本没上 GPU。
+**操作**：`W`/`A`/`S`/`D` 飞行、`Space`/`Ctrl` 上下、`Shift` 减速（反射只有一米半宽，6 m/s 一步就跨过箱子）、鼠标转向（指针捕获）；`1` FBO 抓取、`2` 折射、`3` 灯笼点光、`4` 雾、`R` 放行/停住箱子；`[`/`]` 环境混合（0–0.60）、`-`/`=` 飞行速度、滚轮 fov；`C` 剔除、`V` 线框、`B` Bloom、`H` HUD、`G` 切贴地漫游、`F` 释放/捕获指针、`Esc` 只释放指针、`X` 退出。CLI features `capture,refract,lights,fog,roam,hud,bloom,cull,wireframe,cursor,walk` + options `stars,star-size,seed,trees,env-size,env-mix,env-lod,emissive,ior,band,moon-x,moon-y,moon-z,moon-int,density,start-at,speed,fov,yaw,pitch,pos-x,pos-y,pos-z,freeze-at,snapshot,snap-at,terrain,terrain-cells,terrain-cell,terrain-relief,terrain-smooth,terrain-levels,terrain-map,terrain-tile,walk-radius`；HUD 打印的是回读到的 GL/路径状态（`planted 817 fir + 583 broadleaf`、`env FBO capture 256 px mix 0.18 lod 1.5`、`faces 0 = crate parked`、`wander moving t 6.0 s heading 214 deg 4.1 m away`、`gooch band 0.16 warm/cold/lift` 三组实际进 GPU 的数），改了 uniform 而这一行不变就说明改动根本没上 GPU；面板末行还会报字体后端与图集（`font freetype  48 px bake  95 glyphs  1024x1024 atlas`）——这是唯一一行“截图本身证明不了”的事实，因为 FreeType 与 stb_truetype 兜底画出来的字几乎一样。
 
 ## 3. Demo 索引
 
@@ -77,7 +79,7 @@
 | `skybox` | SkyboxRenderer + 独立 SkyboxPass（只留背景） | `./scripts/run.sh skybox` |
 | `instancing` | InstancedMesh GPU 场 + 实例化 pass | `./scripts/run.sh instancing` |
 | `particles` | ParticleBatch（`GL_PROGRAM_POINT_SIZE` point-sprite） | `./scripts/run.sh particles` |
-| `text_hud` | Font + SpriteBatch + TextRenderer 叠 HUD | `./scripts/run.sh text_hud` |
+| `text_hud` | `gldx::Hud` + Font + SpriteBatch + TextRenderer 叠 HUD：一个面板里 26/20/16 三种字号（`AddLineAt`）、带换行的 `AddBlock`、右上右对齐的循环色词；`--snapshot` / `--snap-at` / `--freeze-at` 取证（面板自己就是被测对象，没有 `--off hud`，所以这张图是版面证据与字体后端 A/B，不是逐字节基线） | `./scripts/run.sh text_hud` |
 | `camera_picking` | Camera + Frustum 剔除 + PickRay/PickNearest | `./scripts/run.sh camera_picking` |
 | `debug_draw` | DebugDraw 线框 + Profiler CPU/GPU 帧计时 | `./scripts/run.sh debug_draw` |
 | `geometry_upload` | GeometryFactory → MeshData → Mesh::Upload（无光照纯色） | `./scripts/run.sh geometry_upload` |

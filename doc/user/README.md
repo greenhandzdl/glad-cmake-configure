@@ -57,7 +57,8 @@
 | 电介质 PBR 透明：alpha 由矢量菲涅耳 + Beer-Lambert 吸收守恒推出，`uPremultiply` 与混合方程配对 | [8 §1.2](8-advanced.md) | `glass_water`（水面/玻璃板/泡泡） |
 | 透视 ↔ 正交切换：每帧换投影矩阵，正交下视线方向改取相机前向 | [8 §1.3](8-advanced.md) / [6 §2](6-camera-picking.md) | `glass_water`、`pbr_showcase`、`voxel_terrain` |
 | `ShaderProgram` 四入口与全阶段装配 | [8 §5](8-advanced.md) | `shader_file`、`geometry_shader`、`geometry_shader_file`、`shader_stages` |
-| 文字 HUD / 调试绘制 / 帧耗时 | [8 §6](8-advanced.md) | `text_hud`、`debug_draw` |
+| 文字 HUD / 调试绘制 / 帧耗时 | [8 §6](8-advanced.md) | `text_hud`、`debug_draw`；面板本身（`gldx::Hud`/`HudPass`）还被 `night_forest`、`glass_water`、`voxel_terrain` 消费 |
+| 字体光栅双后端：FreeType ↔ stb_truetype 是构建选项而非 API 分叉（两后端填同一组度量字段，换后端零代码改动） | [1 §3](1-getting-started.md) + [8 §6](8-advanced.md) | `text_hud`、`night_forest`（面板末行报 `Font::backend()`）；`-DGLDX_ENABLE_FREETYPE=OFF` 重编即可对照 |
 
 ---
 

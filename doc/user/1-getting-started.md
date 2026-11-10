@@ -66,6 +66,7 @@ pip install jinja2         # 生成 GLAD 需要
 | **GLM** | 系统包管理器 | `find_path(GLM_INCLUDE_DIR glm/glm.hpp)`，header-only |
 | **STB** | git 子模块 | header-only，提供 `stb` INTERFACE 目标；由 `src/gldx/third_party/stb_image_impl.cpp` 实例化图像/字体解码 |
 | **Assimp** | git 子模块（可选） | 由 `GLDX_ENABLE_ASSIMP`（默认 `ON`）控制：`ON` 时 `add_subdirectory` 源码内置构建（导入器 only）、链接 `assimp::assimp`；`OFF` 时整个 assimp 依赖不构建、`ModelLoader::Load` 降级为“模型导入不可用”，体素/程序化几何/PBR 不受影响（`model_loading` demo 在 OFF 下会优雅提示不可用而非崩溃） |
+| **FreeType** | git 子模块（可选） | 由 `GLDX_ENABLE_FREETYPE`（默认 `ON`）控制：`ON` 时 `add_subdirectory` 源码内置构建（静态、关掉 zlib/bzip2/png/harfbuzz/brotli/hvf 这些仓内用不到的外部编解码器）、链接 `Freetype::Freetype`，作为 `gldx::Font` 的字形光栅器；`OFF` 时字体退回 stb_truetype 光栅，**接口、版面、排版度量都不变**（两后端填同一组度量字段），只是字形覆盖值的细微不同会让同一帧截图有 0.78% 的像素不相等（实测，差异全在文字区域） |
 
 > GLAD 采用「系统优先、仓库回退」：系统装有 GLAD 时直接链接 `glad::glad`；否则现场调用子模块内的 glad2 生成器（需 Python 3 + jinja2，缺失时回退到隔离的 `uv` venv）生成绑定。无论走哪条路径，最终可执行文件只依赖 GLFW（共享库）与 GLAD（静态库，运行期动态加载 GL），因此无需再手动链接 OpenGL / X11 / Cocoa 等系统库。
 
@@ -84,13 +85,16 @@ cmake --build build
 ./output/pbr_showcase         # 任一功能 demo：./output/<demo>
 ```
 
-配置结束会打印依赖解析摘要，便于确认 GLAD 与 Assimp 的来源（形状为 `GLFW_Template <版本> configuration:` 加两行 `GLAD : submodule (OpenGL 4.1 Core)` / `Assimp : submodule (static, bundled zlib)`，各项都可替为 `system` 或 `DISABLED`）。
+配置结束会打印依赖解析摘要，便于确认 GLAD、Assimp 与 FreeType 的来源（形状为 `GLFW_Template <版本> configuration:` 加 `  GLAD        : submodule (OpenGL 4.1 Core)` / `  Assimp      : submodule (static, bundled zlib)` / `  FreeType    : submodule (static, FreeType rasteriser)` 三行，各项都可替为 `system` 或 `DISABLED`）。
 
-不需要模型导入时，可用 `-DGLDX_ENABLE_ASSIMP=OFF` 去掉这个重依赖（连子模块都不必拉）：
+不需要模型导入时，可用 `-DGLDX_ENABLE_ASSIMP=OFF` 去掉这个重依赖（连子模块都不必拉）；不需要 FreeType 光栅时同理 `-DGLDX_ENABLE_FREETYPE=OFF`（字体退回 stb_truetype，重编一个 `gldx` 即可，所有 demo 代码一字不改）：
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGLDX_ENABLE_ASSIMP=OFF
+cmake -S . -B build-nofreetype -G Ninja -DCMAKE_BUILD_TYPE=Release -DGLDX_ENABLE_FREETYPE=OFF
 ```
+
+> 生成器不能事后改：新开一个构建目录**必须带 `-G Ninja`**，否则回落到默认 Unix Makefiles 并在配置 `gldx` 时报 `modules are not supported by this generator`。
 
 ### 4.2 CMake Presets（macOS 便捷路径，推荐）
 
