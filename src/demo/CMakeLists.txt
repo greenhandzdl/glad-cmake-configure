@@ -46,16 +46,19 @@ function(add_gldx_demo name)
     # and compile fine. "Importing several modules is what does it" is wrong too:
     # counting the C5050 lines by the source path each one carries, 18 demo sources
     # import gldxwin (many of them gldx + gldxwin + gldxcli) while the whole build
-    # fails on exactly two objects. So the trigger is something inside the bodies
-    # of those two files, and it is still unidentified - clang has no equivalent
-    # limit, so no local build can pin it down. The Windows job therefore runs
-    # scripts/msvc-object-probe.sh
-    # when the build fails: flag variants plus a statement-boundary prefix bisection
-    # of glass_water/Hud.cpp (see .github/workflows/release.yml). Its first round
-    # (run 42762856818) returned nothing but rc=127, because Git Bash eats the
-    # backslashes of the native command line ninja hands back - the replay itself
-    # now has to prove it invoked the compiler. Change this comment only when that
-    # has produced evidence, not another plausible story.
+    # fails on exactly two objects. So the trigger is inside the bodies of those
+    # two files. Round two of scripts/msvc-object-probe.sh (run 42765315428)
+    # narrowed it, still without naming it: all six flag variants give the
+    # byte-identical error, a skeleton TU with the same `import gldx;` + Hud.h
+    # preamble and an empty body compiles into 1.5 KB, and prefixes of
+    # glass_water/Hud.cpp pass up to L85 and fail from L97 onward - with every
+    # failing prefix taking 11.1 s and every passing one 1.2 s. Time that does not
+    # grow with the amount of code is not a size limit; it is one construct
+    # switching the object writer into a runaway. The job therefore re-runs the
+    # probe (flag variants, an exact statement-boundary bisection of both TUs,
+    # /Od /Gw /GS-, and an /Fa listing under a watchdog). Until that names the
+    # construct this stays "known, not fixed" - and remember that clang has no
+    # equivalent limit, so nothing built here can observe any of it.
     if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         target_compile_options(d_${name} PRIVATE /bigobj)
     endif()
