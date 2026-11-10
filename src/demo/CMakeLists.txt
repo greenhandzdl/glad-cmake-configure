@@ -47,18 +47,28 @@ function(add_gldx_demo name)
     # counting the C5050 lines by the source path each one carries, 18 demo sources
     # import gldxwin (many of them gldx + gldxwin + gldxcli) while the whole build
     # fails on exactly two objects. So the trigger is inside the bodies of those
-    # two files. Round two of scripts/msvc-object-probe.sh (run 42765315428)
-    # narrowed it, still without naming it: all six flag variants give the
-    # byte-identical error, a skeleton TU with the same `import gldx;` + Hud.h
-    # preamble and an empty body compiles into 1.5 KB, and prefixes of
-    # glass_water/Hud.cpp pass up to L85 and fail from L97 onward - with every
-    # failing prefix taking 11.1 s and every passing one 1.2 s. Time that does not
-    # grow with the amount of code is not a size limit; it is one construct
-    # switching the object writer into a runaway. The job therefore re-runs the
-    # probe (flag variants, an exact statement-boundary bisection of both TUs,
-    # /Od /Gw /GS-, and an /Fa listing under a watchdog). Until that names the
-    # construct this stays "known, not fixed" - and remember that clang has no
-    # equivalent limit, so nothing built here can observe any of it.
+    # two files, and scripts/msvc-object-probe.sh now names the statement. Run
+    # 42765315428: all six flag variants give the byte-identical error, a skeleton
+    # TU with the same `import gldx;` + Hud.h preamble and an empty body compiles
+    # into 1.5 KB, and prefixes of glass_water/Hud.cpp pass up to L85 and fail from
+    # L97 onward - with every failing prefix taking 11.1 s and every passing one
+    # 1.2 s. Time that does not grow with the amount of code is not a size limit.
+    # Run 42770837956 then bisected both TUs down to the *same* statement,
+    # `hud.AddLine(buf, kDim);` (glass_water L86 after L85 passes, night_forest L57
+    # after L56), and closed the last two axes: /Od, /Gw and /GS- change nothing,
+    # and the /Fa listing reaches only 285 bytes and 12 lines before the watchdog
+    # fires - it stops in the prologue, before a single instruction is emitted, so
+    # the writer is not being handed garbage; it runs away on its own. What is still
+    # open is which *property* of that call MSVC cannot write. The probe now
+    # rewrites just that region of the complete TU, once per property: the imported
+    # constant instead of this file's `constexpr glm::vec4 kDim = Hud::kDim;`, a
+    # prvalue of it, a function-local copy, a function-local const ref, and a
+    # literal in place of the char array that has to convert to std::string_view -
+    # motivated by the importers that compile either passing `Hud::kDim` directly or
+    # declaring no alias at all, which is an observation about which files fail,
+    # not yet a diagnosis. Until one of those rewrites compiles this stays
+    # "known, not fixed" - and remember that clang has no equivalent limit, so
+    # nothing built here can observe any of it.
     if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         target_compile_options(d_${name} PRIVATE /bigobj)
     endif()
