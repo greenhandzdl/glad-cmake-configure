@@ -109,7 +109,7 @@ using namespace night_forest;
 
 namespace {
 
-constexpr const char* kAppVersion   = "1.7.0";
+constexpr const char* kAppVersion   = "1.7.1";
 constexpr const char* kWindowTitle  = "gldx::Renderer - instanced night forest, Gooch light, FBO cube";
 constexpr int kWindowWidth  = 800;
 constexpr int kWindowHeight = 600;

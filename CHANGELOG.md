@@ -3,7 +3,9 @@
 本文件记录 `GLFW_Template`（`gldx` 引擎（旧名 `gfx`）+ 演示应用）各版本的变更。历史条目保留当时的 `gfx` 旧称不改写；Unreleased 顶部起用 `gldx`。
 版本标签遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## Unreleased
+## v1.7.1
+
+本版只修 Windows CI 与自有源码告警，不改任何引擎行为：v1.7.0 的跨平台 action 从第二轮起就碎在 MSVC 的 named module 边界上，先后表现为 C1605（对象写出器）、C2011/C2572/C2953（导入方环境不一致）与 C5202（定义放错 fragment）。三处都已在 clang 侧看不见、只有 Windows 能判定，因此每一条都在 action 里做过对照取证。三个平台的 `GLFW_Template` 与全部 27 个 demo 现已同一条提交上全绿。
 
 ### 修复自有源码最后一条 MSVC 告警：`C5202` 把定义从 global module fragment 里搬走
 
