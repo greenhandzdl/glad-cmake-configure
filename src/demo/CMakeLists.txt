@@ -43,12 +43,19 @@ function(add_gldx_demo name)
     # was wrong - run 42760865230 shows /bigobj on the cl command line with the
     # identical error. "The TU is too big" is wrong too: night_forest/main.cpp
     # and glass_water/main.cpp are larger, import gldx and include the same Hud.h,
-    # and compile fine. So the trigger is something inside those two bodies, and
-    # it is still unidentified - clang has no equivalent limit, so no local build
-    # can pin it down. The Windows job therefore runs a compile-only probe of the
-    # failing TU under flag variants when the build fails (see
-    # .github/workflows/release.yml); change this comment only when that has
-    # produced evidence, not another plausible story.
+    # and compile fine. "Importing several modules is what does it" is wrong too:
+    # counting the C5050 lines by the source path each one carries, 18 demo sources
+    # import gldxwin (many of them gldx + gldxwin + gldxcli) while the whole build
+    # fails on exactly two objects. So the trigger is something inside the bodies
+    # of those two files, and it is still unidentified - clang has no equivalent
+    # limit, so no local build can pin it down. The Windows job therefore runs
+    # scripts/msvc-object-probe.sh
+    # when the build fails: flag variants plus a statement-boundary prefix bisection
+    # of glass_water/Hud.cpp (see .github/workflows/release.yml). Its first round
+    # (run 42762856818) returned nothing but rc=127, because Git Bash eats the
+    # backslashes of the native command line ninja hands back - the replay itself
+    # now has to prove it invoked the compiler. Change this comment only when that
+    # has produced evidence, not another plausible story.
     if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         target_compile_options(d_${name} PRIVATE /bigobj)
     endif()
