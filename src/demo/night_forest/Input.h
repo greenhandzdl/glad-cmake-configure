@@ -101,11 +101,6 @@ struct Input {
     }
 };
 
-// A few well-known system fonts, tried in order; HUD text just no-ops if none
-// are found, so a missing font never breaks the render.
-extern const char* const kFontCandidates[];
-extern const int kFontCandidateCount;
-
 // Movement asked for by the keyboard, already scaled by speed and dt, expressed as
 // three scalars in the camera's own frame rather than as a world vector: that way
 // this header never has to name gldx::Camera, and main.cpp keeps the camera as the

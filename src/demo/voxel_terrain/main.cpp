@@ -217,10 +217,13 @@ int main(int argc, char** argv) {
             return 1;
         }
         gldx::Font font;
-        for (int i = 0; i < kFontCandidateCount; ++i) {
-            if (font.LoadFromFile(kFontCandidates[i], 48.0f)) break;
+        // Which TTF exists is a platform fact rather than a demo's business, so
+        // the candidate list moved behind Font::LoadSystem. A missing font
+        // disables the text overlay; it never stops the render.
+        if (const auto r = font.LoadSystem(48.0f); !r) {
+            std::fprintf(stderr, "HUD font not found (%s); text overlay disabled\n",
+                         r.error().c_str());
         }
-        if (!font.loaded()) std::fprintf(stderr, "HUD font not found; text overlay disabled\n");
         gldx::Texture2D white;
         white.Upload([]() {
             gldx::Texture2DDesc d;
@@ -610,12 +613,16 @@ int main(int argc, char** argv) {
             vx.doubleSided = input.doubleSided;
 
             char line[512];
+            // Evidence only. The key hints used to be the last two lines of this
+            // string, which is why the panel needed a hard-coded width; they now
+            // live in the bottom-left section of Hud.cpp. The state those lines
+            // carried stays here, phrased as what the key will do from this frame
+            // ("next F -> orbit") rather than as a legend.
             std::snprintf(line, sizeof(line),
                           "voxel_terrain %s  %s\n"
                           "%.0f fps   CPU %.2f ms  GPU %.2f ms   chunks %d (meshed %d)  pos %.0f %.0f %.0f\n"
                           "streaming gen %zu mesh %zu   particles %zu   visible %d/%d\n"
-                          "picked: %s   (WASD fly, space/ctrl up/down, shift slow, LMB break, RMB place)\n"
-                          "F camera %s   ESC pointer %s   P particles %s   B 2-sided %s   [ ] - = sun   X quit",
+                          "picked %s   next F %s   pointer %s   particles %s   2-sided %s",
                           kAppVersion,
                           input.cam == Input::Cam::Fly ? "FLY" : "ORBIT",
                           smoothedFps,

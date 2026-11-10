@@ -315,10 +315,13 @@ int main(int argc, char** argv) {
         }
 
         gldx::Font font;
-        for (int i = 0; i < kFontCandidateCount; ++i) {
-            if (font.LoadFromFile(kFontCandidates[i], 48.0f)) break;
+        // Which TTF exists is a platform fact rather than a demo's business, so
+        // the candidate list moved behind Font::LoadSystem. A missing font
+        // disables the text overlay; it never stops the render.
+        if (const auto r = font.LoadSystem(48.0f); !r) {
+            std::fprintf(stderr, "HUD font not found (%s); text overlay disabled\n",
+                         r.error().c_str());
         }
-        if (!font.loaded()) std::fprintf(stderr, "HUD font not found; text overlay disabled\n");
 
         gldx::Profiler profiler;
         profiler.Init();

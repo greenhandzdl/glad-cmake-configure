@@ -45,35 +45,34 @@ const char* ModeName(BlendMode m) {
 // guarantee are drawn in amber, so the panel is scannable while flying rather
 // than something to read carefully after the fact.
 //
+// The three roles come from the engine now, so amber means the same thing here
+// as it does in night_forest: "this frame is missing something the panel is
+// claiming". Aliased rather than spelled out because a demo palette that could
+// drift from the engine's is exactly how two panels end up meaning different
+// things by the same colour.
+//
 // Everything here is ASCII 32..126 on purpose - the baked font atlas covers
 // exactly that range and TextRenderer silently skips anything outside it, so a
 // typographic arrow would not render as an arrow but as a missing glyph.
-constexpr glm::vec4 kFg{1.0f, 1.0f, 1.0f, 0.92f};
-constexpr glm::vec4 kWarn{1.0f, 0.72f, 0.28f, 0.95f};
-constexpr glm::vec4 kDim{0.72f, 0.80f, 0.92f, 0.72f};
-
-struct Line {
-    std::string text;
-    glm::vec4 color = kFg;
-};
+using Hud = gldx::Hud;
+constexpr glm::vec4 kFg   = Hud::kFg;
+constexpr glm::vec4 kDim  = Hud::kDim;
+constexpr glm::vec4 kWarn = Hud::kWarn;
 
 } // namespace
 
-void GlassHudPass::Execute(gldx::RenderFrame& f) {
-    gldx::RenderContext::AssertRenderThread("GlassHudPass::Execute");
-    if (!in || f.fbWidth <= 0) {
-        if (f.overlay.profiler) f.overlay.profiler->EndFrame();
-        return;
-    }
+void GlassHudPass::Build(gldx::RenderFrame& f) {
+    if (!in) return;
     // H hides the panel, not the instrumenting: BlendPass still reads its state
     // back out of GL every frame, so a clean screenshot has the same numbers in
-    // the process log it would have had on screen.
-    if (!in->hud) {
-        if (f.overlay.profiler) f.overlay.profiler->EndFrame();
-        return;
-    }
+    // the process log it would have had on screen. Only the string building is
+    // skipped, because that is the panel's own cost.
+    hud.SetVisible(in->hud);
+    if (!in->hud) return;
 
-    std::vector<Line> lines;
+    // The evidence block: one section, top-left, sized by the engine to the
+    // widest line rather than by a number this file used to keep in its head.
+    hud.BeginSection(Hud::Anchor::TopLeft, 13.0f);
     char buf[256];
 
     // Read before this pass calls EndFrame(), so the number on screen is the
@@ -84,10 +83,10 @@ void GlassHudPass::Execute(gldx::RenderFrame& f) {
     // ---- where the camera is, since "the object behind disappeared" is only
     // ---- observable from a specific distance to it ---------------------------
     std::snprintf(buf, sizeof(buf), "glass_water   fps %.1f   cpu %.2f ms", f.smoothedFps, cpuMs);
-    lines.push_back({buf, kDim});
+    hud.AddLine(buf, kDim);
     std::snprintf(buf, sizeof(buf), "pos (%.1f, %.1f, %.1f)   speed %.1f   sea %.2f",
                   in->pos.x, in->pos.y, in->pos.z, in->speed, in->wave);
-    lines.push_back({buf, kDim});
+    hud.AddLine(buf, kDim);
 
     // ---- which projection the vertices went through, and its framing ---------
     // Printed as the two numbers that actually define it, not just a mode name:
@@ -99,7 +98,7 @@ void GlassHudPass::Execute(gldx::RenderFrame& f) {
     } else {
         std::snprintf(buf, sizeof(buf), "proj PERSPECTIVE   fov %.1f deg", in->fov);
     }
-    lines.push_back({buf, in->ortho ? kWarn : kDim});
+    hud.AddLine(buf, in->ortho ? kWarn : kDim);
 
     // ---- what the water is made of, read back out of the item table ----------
     // Not a caption the shader has to agree with: this is the same Surface the
@@ -114,7 +113,7 @@ void GlassHudPass::Execute(gldx::RenderFrame& f) {
             std::snprintf(buf, sizeof(buf),
                           "water  ior %.3f -> F0 %.2f%%  rough %.2f  path %.1f m",
                           s.ior, f * f * 100.0f, s.roughness, s.pathLen);
-            lines.push_back({buf, kDim});
+            hud.AddLine(buf, kDim);
             // Which side of the (fragment, blend unit) contract pays the multiply by
             // coverage. Shader and GPU are the same arithmetic written in two
             // different places, so both are fine and the frame is identical; only
@@ -125,7 +124,7 @@ void GlassHudPass::Execute(gldx::RenderFrame& f) {
             std::snprintf(buf, sizeof(buf),
                           "absorb %.3f/%.3f/%.3f  a=1-(1-F)T  rgb*a by %s",
                           s.absorption.x, s.absorption.y, s.absorption.z, weighted);
-            lines.push_back({buf, in->blend == BlendMode::Additive ? kWarn : kDim});
+            hud.AddLine(buf, in->blend == BlendMode::Additive ? kWarn : kDim);
             break;
         }
     }
@@ -133,10 +132,10 @@ void GlassHudPass::Execute(gldx::RenderFrame& f) {
     // ---- the four guarantees, as the frame asked for them --------------------
     std::snprintf(buf, sizeof(buf), "[1] sort far->near  %s   [3] shell two-pass  %s",
                   YesNo(in->sortBackToFront), YesNo(in->shellTwoPass));
-    lines.push_back({buf, in->sortBackToFront && in->shellTwoPass ? kFg : kWarn});
+    hud.AddLine(buf, in->sortBackToFront && in->shellTwoPass ? kFg : kWarn);
     std::snprintf(buf, sizeof(buf), "[2] blend depth    %s   [4] equation  %s",
                   in->blendWritesDepth ? "WRITE" : "no-write", ModeName(in->blend));
-    lines.push_back({buf, in->blendWritesDepth ? kWarn : kFg});
+    hud.AddLine(buf, in->blendWritesDepth ? kWarn : kFg);
 
     // ---- the same state as the driver holds it, read back inside the pass ----
     if (const BlendPass* b = blend) {
@@ -155,12 +154,12 @@ void GlassHudPass::Execute(gldx::RenderFrame& f) {
                       YesNo(gl.depthTest), YesNo(gl.depthWrite), YesNo(gl.blend), YesNo(gl.cull));
         // This is the line that proves the demo's thesis: switch [2] on and the
         // read-back flips to yes, which is exactly when pixels start getting eaten.
-        lines.push_back({buf, gl.depthWrite ? kWarn : kFg});
+        hud.AddLine(buf, gl.depthWrite ? kWarn : kFg);
         std::snprintf(buf, sizeof(buf), "GL  src/dst     %s", eq);
-        lines.push_back({buf, kDim});
+        hud.AddLine(buf, kDim);
         std::snprintf(buf, sizeof(buf), "blend submissions %d   all layers %d   cpu %.2f ms",
                       b->blendDraws(), b->totalDraws(), cpuMs);
-        lines.push_back({buf, kDim});
+        hud.AddLine(buf, kDim);
 
         // ---- the evidence that costs the most to fake: last frame's order ----
         // Printed from the sequence Execute() actually submitted in, so turning
@@ -168,10 +167,10 @@ void GlassHudPass::Execute(gldx::RenderFrame& f) {
         const std::vector<BlendPass::Entry>& order = b->order();
         if (in->sortBackToFront) {
             if (order.empty()) {
-                lines.push_back({"order: (blend layer empty)", kDim});
+                hud.AddLine("order: (blend layer empty)", kDim);
             } else {
                 std::snprintf(buf, sizeof(buf), "drawn far->near (%zu submissions):", order.size());
-                lines.push_back({buf, kDim});
+                hud.AddLine(buf, kDim);
                 const std::size_t show = std::min<std::size_t>(order.size(), 7);
                 for (std::size_t i = 0; i < show; ++i) {
                     const BlendPass::Entry& e = order[i];
@@ -181,85 +180,39 @@ void GlassHudPass::Execute(gldx::RenderFrame& f) {
                     } else {
                         std::snprintf(buf, sizeof(buf), "  %5.1f m  %s", e.distance, e.label);
                     }
-                    lines.push_back({buf, kFg});
+                    hud.AddLine(buf, kFg);
                 }
                 if (order.size() > show) {
                     std::snprintf(buf, sizeof(buf), "  ... %zu more, still far->near",
                                   order.size() - show);
-                    lines.push_back({buf, kDim});
+                    hud.AddLine(buf, kDim);
                 }
             }
         } else {
-            lines.push_back({"order: NOT SORTED - declaration order,", kWarn});
-            lines.push_back({"       the sheet as one submission", kWarn});
+            hud.AddLine("order: NOT SORTED - declaration order,", kWarn);
+            hud.AddLine("       the sheet as one submission", kWarn);
         }
         if (in->blendWritesDepth) {
-            lines.push_back({"> blend fills the depth buffer: anything", kWarn});
-            lines.push_back({"  behind a pane is rejected by GL_LESS.", kWarn});
+            hud.AddLine("> blend fills the depth buffer: anything", kWarn);
+            hud.AddLine("  behind a pane is rejected by GL_LESS.", kWarn);
         }
     }
 
     // ---- controls, in their own panel so the evidence stays readable ---------
-    std::vector<Line> keys = {
-        {"WASD/Space/Ctrl fly  Shift brake  mouse look", kDim},
-        {"1 sort  2 depth-write  3 shell  4 equation", kDim},
-        {"Tab persp/ortho  wheel zoom  [ ] sea  - = speed", kDim},
-        {"C cull  V wire  B bloom  H hud  F cursor  X quit", kDim},
-    };
-
-    if (!f.overlay.sprite || !f.overlay.font || !f.overlay.white ||
-        !f.overlay.font->loaded()) {
-        if (f.overlay.profiler) f.overlay.profiler->EndFrame();
-        return;
-    }
-
-    const gldx::Font& font = *f.overlay.font;
-    const float topPx = 13.0f;
-    const float keyPx = 12.0f;
-    const float advTop = font.lineGap() * (topPx / font.bakeSize());
-    const float advKey = font.lineGap() * (keyPx / font.bakeSize());
-    const float pad = 6.0f;
-
-    auto widest = [&font](const std::vector<Line>& v, float px) {
-        float w = 0.0f;
-        for (const Line& l : v) w = std::max(w, gldx::TextRenderer::Measure(font, l.text, px));
-        return w;
-    };
-
-    const float wTop = widest(lines, topPx);
-    const float hTop = advTop * static_cast<float>(lines.size()) + pad * 2.0f;
-    const float wKey = widest(keys, keyPx);
-    const float hKey = advKey * static_cast<float>(keys.size()) + pad * 2.0f;
-    const float keyY = static_cast<float>(f.fbHeight) - hKey - pad;
-
-    f.overlay.sprite->Begin(*f.overlay.white, f.fbWidth, f.fbHeight);
-    f.overlay.sprite->Draw(*f.overlay.white, pad, pad, wTop + pad * 2.0f, hTop,
-                           0.0f, 0.0f, 1.0f, 1.0f, glm::vec4(0.0f, 0.0f, 0.0f, 0.55f));
-    f.overlay.sprite->Draw(*f.overlay.white, pad, keyY, wKey + pad * 2.0f, hKey,
-                           0.0f, 0.0f, 1.0f, 1.0f, glm::vec4(0.0f, 0.0f, 0.0f, 0.45f));
-
-    float y = pad + advTop * 0.25f;
-    for (const Line& l : lines) {
-        gldx::TextRenderer::Draw(*f.overlay.sprite, font, l.text, pad * 2.0f, y, topPx, l.color);
-        y += advTop;
-    }
-    float ky = keyY + advKey * 0.25f;
-    for (const Line& l : keys) {
-        gldx::TextRenderer::Draw(*f.overlay.sprite, font, l.text, pad * 2.0f, ky, keyPx, l.color);
-        ky += advKey;
-    }
+    hud.BeginSection(Hud::Anchor::BottomLeft, 12.0f,
+                     glm::vec4(0.0f, 0.0f, 0.0f, 0.45f));
+    hud.AddLines({
+        "WASD/Space/Ctrl fly  Shift brake  mouse look",
+        "1 sort  2 depth-write  3 shell  4 equation",
+        "Tab persp/ortho  wheel zoom  [ ] sea  - = speed",
+        "C cull  V wire  B bloom  H hud  F cursor  X quit",
+    });
 
     // Not a crosshair: a fly camera has nothing under the centre of the screen
     // worth aiming at. The dot only says the pointer is captured, i.e. that the
-    // mouse drives the view rather than the OS.
-    if (in->captured) {
-        const float cx = f.fbWidth * 0.5f, cy = f.fbHeight * 0.5f;
-        f.overlay.sprite->Draw(*f.overlay.white, cx - 1.5f, cy - 1.5f, 3.0f, 3.0f,
-                               0.0f, 0.0f, 1.0f, 1.0f, glm::vec4(1.0f, 1.0f, 1.0f, 0.35f));
-    }
-    f.overlay.sprite->End();
-
-    if (f.overlay.profiler) f.overlay.profiler->EndFrame();
+    // mouse drives the view rather than the OS. HudPass::Execute draws it, and
+    // closes the profiler frame, on every path out of here.
+    hud.SetMarker(in->captured ? Hud::Marker::Dot : Hud::Marker::None);
 }
 
 } // namespace glass_water

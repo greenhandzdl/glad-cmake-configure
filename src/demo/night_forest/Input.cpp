@@ -11,18 +11,6 @@ import gldx;
 
 namespace night_forest {
 
-const char* const kFontCandidates[] = {
-    "/System/Library/Fonts/Menlo.ttc",
-    "/System/Library/Fonts/Helvetica.ttc",
-    "/System/Library/Fonts/Supplemental/Arial.ttf",
-    "C:/Windows/Fonts/consola.ttf",
-    "C:/Windows/Fonts/arial.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-};
-const int kFontCandidateCount =
-    static_cast<int>(sizeof(kFontCandidates) / sizeof(kFontCandidates[0]));
-
 FlyIntent ReadFlyIntent(gldx::win::Window& win, const Input& in, float dt) {
     FlyIntent out;
     // See HandleKeys: a released pointer means the frame is nobody's to move.

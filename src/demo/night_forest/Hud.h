@@ -14,6 +14,11 @@
  * counts the pass tallied as it submitted, which is the demo's whole claim in two
  * numbers - fourteen hundred trees arriving as two draws.
  *
+ * Layout is not this file's business any more: gldx::Hud owns the palette, the
+ * panel sizing, the corner placement and the sprite batch, so what is left here
+ * is deciding what the lines say. Deriving gldx::HudPass rather than writing
+ * another RenderPass is what buys that - the only override is Build().
+ *
  * Like every other demo here, the panel is switchable off with H and with
  * `--off hud`, and the comparison screenshots must use that: a live fps number
  * puts a text diff into every pair of images.
@@ -29,11 +34,12 @@
 
 namespace night_forest {
 
-class NightHudPass final : public gldx::RenderPass {
+class NightHudPass final : public gldx::HudPass {
 public:
-    NightHudPass() : gldx::RenderPass("NightHud") {}
+    NightHudPass() : gldx::HudPass("NightHud") {}
 
-    void Execute(gldx::RenderFrame& f) override;
+    // Fills the inherited `hud` with this frame's lines; see Hud.cpp.
+    void Build(gldx::RenderFrame& f) override;
 
     // Non-owning: everything here outlives the HUD, which is last in the pipeline.
     const NightPass* pass = nullptr;

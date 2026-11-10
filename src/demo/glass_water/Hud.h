@@ -13,6 +13,11 @@
  * actually submitted in - so turning sorting off visibly rewrites the list
  * instead of only changing a label.
  *
+ * Layout is not this file's business any more: gldx::Hud owns the palette, the
+ * panel sizing, the corner placement and the sprite batch, so what is left here
+ * is deciding what the lines say. Deriving gldx::HudPass rather than writing
+ * another RenderPass is what buys that - the only override is Build().
+ *
  * NOTE: names gldx engine types, so include AFTER `import gldx;`.
  */
 
@@ -23,11 +28,12 @@
 
 namespace glass_water {
 
-class GlassHudPass final : public gldx::RenderPass {
+class GlassHudPass final : public gldx::HudPass {
 public:
-    GlassHudPass() : gldx::RenderPass("GlassHud") {}
+    GlassHudPass() : gldx::HudPass("GlassHud") {}
 
-    void Execute(gldx::RenderFrame& f) override;
+    // Fills the inherited `hud` with this frame's lines; see Hud.cpp.
+    void Build(gldx::RenderFrame& f) override;
 
     // Non-owning: the pass whose output is being reported, and the state being
     // toggled. Both outlive the HUD, which is last in the pipeline.

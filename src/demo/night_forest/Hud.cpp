@@ -9,48 +9,42 @@ import gldx;
 #include <cmath>
 #include <cstdio>
 #include <string>
-#include <vector>
 
 #include <glm/glm.hpp>
 
 namespace night_forest {
 namespace {
 
-// One overlay line plus its colour. Amber is reserved for "this frame is missing
-// something the demo is claiming": the whole point of the panel is that you can
-// tell at a glance whether the crate is really mirroring a forest or only a sky.
+// The three panel roles come from the engine now, so amber means the same
+// thing here as it does in glass_water: "this frame is missing something the
+// panel is claiming". Aliased rather than spelled out because the line list
+// below is long, and because a demo palette that could drift from the engine's
+// is exactly how two panels end up meaning different things by the same colour.
 //
 // Everything here is ASCII 32..126 on purpose - the baked font atlas covers
 // exactly that range and TextRenderer silently skips anything outside it, so a
 // typographic arrow would not render as an arrow but as a missing glyph.
-constexpr glm::vec4 kFg{1.0f, 1.0f, 1.0f, 0.92f};
-constexpr glm::vec4 kWarn{1.0f, 0.72f, 0.28f, 0.95f};
-constexpr glm::vec4 kDim{0.72f, 0.80f, 0.92f, 0.72f};
-
-struct Line {
-    std::string text;
-    glm::vec4 color = kFg;
-};
+using Hud = gldx::Hud;
+constexpr glm::vec4 kFg   = Hud::kFg;
+constexpr glm::vec4 kDim  = Hud::kDim;
+constexpr glm::vec4 kWarn = Hud::kWarn;
 
 const char* YesNo(bool v) { return v ? "on " : "off"; }
 
 } // namespace
 
-void NightHudPass::Execute(gldx::RenderFrame& f) {
-    gldx::RenderContext::AssertRenderThread("NightHudPass::Execute");
-    if (!in || !scene || f.fbWidth <= 0) {
-        if (f.overlay.profiler) f.overlay.profiler->EndFrame();
-        return;
-    }
+void NightHudPass::Build(gldx::RenderFrame& f) {
+    if (!in || !scene) return;
     // H hides the panel, not the instrumenting: NightPass still tallies its draws
     // and reads back which cube was bound every frame, so a clean screenshot has the
-    // same numbers in the process log it would have had on screen.
-    if (!in->hud) {
-        if (f.overlay.profiler) f.overlay.profiler->EndFrame();
-        return;
-    }
+    // same numbers in the process log it would have had on screen. Only the string
+    // building is skipped, because that is the panel's own cost.
+    hud.SetVisible(in->hud);
+    if (!in->hud) return;
 
-    std::vector<Line> lines;
+    // The evidence block: one section, top-left, sized by the engine to the
+    // widest line rather than by a number this file used to keep in its head.
+    hud.BeginSection(Hud::Anchor::TopLeft, 13.0f);
     char buf[256];
 
     // Read before this pass calls EndFrame(), so the number on screen is the
@@ -60,10 +54,10 @@ void NightHudPass::Execute(gldx::RenderFrame& f) {
 
     std::snprintf(buf, sizeof(buf), "night_forest   fps %.1f   cpu %.2f ms",
                   f.smoothedFps, cpuMs);
-    lines.push_back({buf, kDim});
+    hud.AddLine(buf, kDim);
     std::snprintf(buf, sizeof(buf), "pos (%.1f, %.1f, %.1f)  fov %.0f  speed %.1f",
                   in->pos.x, in->pos.y, in->pos.z, in->fov, in->speed);
-    lines.push_back({buf, kDim});
+    hud.AddLine(buf, kDim);
 
     // ---- the claim, in two numbers ------------------------------------------
     // Counted by the pass as it submitted, from the InstancedMesh objects it drew,
@@ -75,20 +69,20 @@ void NightHudPass::Execute(gldx::RenderFrame& f) {
         std::snprintf(buf, sizeof(buf),
                       "world %d draws / %u instances on the last frame",
                       pass->drawsLastFrame(), pass->instancesLastFrame());
-        lines.push_back({buf, kFg});
+        hud.AddLine(buf, kFg);
         std::snprintf(buf, sizeof(buf),
                       "capture %d draws for %d faces   (6 views of the same world)",
                       pass->captureDrawsLastFrame(), pass->facesCaptured());
-        lines.push_back({buf, kDim});
+        hud.AddLine(buf, kDim);
     }
     std::snprintf(buf, sizeof(buf), "planted %u fir + %u broadleaf, %u rejected  seed %u",
                   scene->plantedFir(), scene->plantedBroad(), scene->rejected(),
                   scene->config.seed);
     // Amber when the field could not hold what was asked for: the scatter gives up
     // after eight attempts per tree, so a dense ring silently plants fewer.
-    lines.push_back({buf,
+    hud.AddLine(buf,
         scene->plantedFir() + scene->plantedBroad()
-            < static_cast<std::uint32_t>(scene->config.treeCount) ? kWarn : kDim});
+            < static_cast<std::uint32_t>(scene->config.treeCount) ? kWarn : kDim);
 
     // ---- the ground ---------------------------------------------------------
     // The flat sheet gets a line of its own rather than silence, because a panel
@@ -101,15 +95,15 @@ void NightHudPass::Execute(gldx::RenderFrame& f) {
         if (t.reliefActive()) {
             std::snprintf(buf, sizeof(buf), "terrain %s  %u x %u cells at %.2f m  relief %.1f m",
                           TerrainModeName(t.mode()), t.cells(), t.cells(), t.cell(), t.relief());
-            lines.push_back({buf, kFg});
+            hud.AddLine(buf, kFg);
             std::snprintf(buf, sizeof(buf), "  %llu verts / %llu indices  %+.1f..%+.1f m"
                           "  smooth %d  levels %d",
                           static_cast<unsigned long long>(t.vertexCount()),
                           static_cast<unsigned long long>(t.indexCount()),
                           t.minHeight(), t.maxHeight(), t.smoothing(), t.levels());
-            lines.push_back({buf, kDim});
+            hud.AddLine(buf, kDim);
             std::snprintf(buf, sizeof(buf), "  %s", t.source().c_str());
-            lines.push_back({buf, kDim});
+            hud.AddLine(buf, kDim);
             // Gradient of the height field under the eye, sampled two cells apart so
             // it is the slope the shading uses rather than one vertex's noise spike.
             const float span = std::max(t.cell(), 0.5f);
@@ -121,17 +115,17 @@ void NightHudPass::Execute(gldx::RenderFrame& f) {
             std::snprintf(buf, sizeof(buf), "  under foot %+.2f m  slope %.0f deg",
                           scene->heightAt(in->pos.x, in->pos.z),
                           std::atan(grad) * 57.29577951308232f);
-            lines.push_back({buf, kDim});
+            hud.AddLine(buf, kDim);
         } else {
             std::snprintf(buf, sizeof(buf), "ground flat sheet  %.0f m half-width  %d uv tiles",
                           scene->groundHalf(), scene->grassTile());
-            lines.push_back({buf, kDim});
+            hud.AddLine(buf, kDim);
         }
     }
     if (in->walk) {
         std::snprintf(buf, sizeof(buf), "walk path  t %.1f s  eye %.2f m  heading %.0f deg",
                       animTime, scene->config.walkEye, in->yaw * 57.29577951308232f);
-        lines.push_back({buf, kFg});
+        hud.AddLine(buf, kFg);
     }
 
     // ---- what the crate is sampling -----------------------------------------
@@ -142,20 +136,20 @@ void NightHudPass::Execute(gldx::RenderFrame& f) {
         const bool live = pass->captureLive();
         std::snprintf(buf, sizeof(buf), "env %s  %d px  mix %.2f  lod %.1f",
                       pass->envSource(), pass->envSizeLive(), in->envMix, envLod);
-        lines.push_back({buf, live ? kFg : kWarn});
+        hud.AddLine(buf, live ? kFg : kWarn);
         if (!in->capture) {
-            lines.push_back({"> capture OFF: the box mirrors the sky, not the", kWarn});
-            lines.push_back({"  forest behind it. 1 brings the FBO cube back.", kWarn});
+            hud.AddLine("> capture OFF: the box mirrors the sky, not the", kWarn);
+            hud.AddLine("  forest behind it. 1 brings the FBO cube back.", kWarn);
         } else if (live && pass->facesCaptured() == 0) {
             std::snprintf(buf, sizeof(buf), "   faces 0 = crate parked, cube reused");
-            lines.push_back({buf, kDim});
+            hud.AddLine(buf, kDim);
         }
     }
     std::snprintf(buf, sizeof(buf), "crate  ior %.2f  refract %s   at (%.1f, %.1f, %.1f)",
                   ior, YesNo(in->refract),
                   scene->cratePose().pos.x, scene->cratePose().pos.y,
                   scene->cratePose().pos.z);
-    lines.push_back({buf, in->refract ? kDim : kWarn});
+    hud.AddLine(buf, in->refract ? kDim : kWarn);
 
     // Where the wander has got to. The heading is the table's own yaw, so watching
     // it change is watching the seeded path, and the distance is the camera's to the
@@ -169,7 +163,7 @@ void NightHudPass::Execute(gldx::RenderFrame& f) {
                       moving ? "moving" : "parked", animTime,
                       scene->cratePose().yaw * 57.29577951308232f,
                       std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z));
-        lines.push_back({buf, moving ? kDim : kWarn});
+        hud.AddLine(buf, moving ? kDim : kWarn);
     }
 
     // ---- the light model ----------------------------------------------------
@@ -180,92 +174,57 @@ void NightHudPass::Execute(gldx::RenderFrame& f) {
         const NightPass::Settings& s = pass->settings;
         std::snprintf(buf, sizeof(buf), "gooch band %.2f  warm(%.2f,%.2f,%.2f)",
                       s.bandWidth, s.lightTint.x, s.lightTint.y, s.lightTint.z);
-        lines.push_back({buf, kDim});
+        hud.AddLine(buf, kDim);
         std::snprintf(buf, sizeof(buf), "  cold(%.2f,%.2f,%.2f) lift(%.3f,%.3f,%.3f)",
                       s.shadowTint.x, s.shadowTint.y, s.shadowTint.z,
                       s.shadowLift.x, s.shadowLift.y, s.shadowLift.z);
-        lines.push_back({buf, kDim});
+        hud.AddLine(buf, kDim);
     }
     if (field) {
         std::snprintf(buf, sizeof(buf), "moon dir (%.2f, %.2f, %.2f)  %.1f x",
                       field->moonDir.x, field->moonDir.y, field->moonDir.z,
                       field->moonIntensity);
-        lines.push_back({buf, kDim});
+        hud.AddLine(buf, kDim);
     }
     if (!skySource.empty()) {
-        lines.push_back({skySource, kDim});
+        hud.AddLine(skySource, kDim);
     }
     std::snprintf(buf, sizeof(buf), "lanterns %s (%d points)   fog %s %.0f-%.0f m",
                   YesNo(in->lights), static_cast<int>(scene->lanterns().size()),
                   YesNo(in->fog), fogStart, fogEnd);
-    lines.push_back({buf, (in->lights && in->fog) ? kDim : kWarn});
+    hud.AddLine(buf, (in->lights && in->fog) ? kDim : kWarn);
     if (frozenAt > 0.0) {
         std::snprintf(buf, sizeof(buf), "clock frozen at %.2f s", frozenAt);
-        lines.push_back({buf, kWarn});
+        hud.AddLine(buf, kWarn);
+    }
+
+    // Who drew the glyphs is a build fact, and the panel is the only place it
+    // can show up: FreeType and the stb_truetype fallback print the same
+    // strings, so "the text is baked from a system TTF" is true either way and
+    // only this line says which rasteriser filled the atlas this run.
+    if (f.overlay.font) {
+        std::snprintf(buf, sizeof(buf), "font %s  %.0f px bake  %d glyphs  %dx%d atlas",
+                      gldx::Font::backend(), f.overlay.font->bakeSize(),
+                      gldx::Font::kNumGlyphs, gldx::Font::kAtlasW, gldx::Font::kAtlasH);
+        hud.AddLine(buf, kDim);
     }
 
     // ---- controls, in their own panel so the evidence stays readable ---------
-    const std::vector<Line> keys = {
-        {"WASD/Space/Ctrl fly  Shift brake  mouse look", kDim},
-        {"1 capture  2 refract  3 lanterns  4 fog  R roam", kDim},
-        {"G walk the path  C cull  V wire  B bloom  H hud", kDim},
-        {"F cursor  wheel fov  [ ] env mix  - = speed", kDim},
-        {"X quit  Esc release", kDim},
-    };
+    hud.BeginSection(Hud::Anchor::BottomLeft, 12.0f,
+                     glm::vec4(0.0f, 0.0f, 0.0f, 0.45f));
+    hud.AddLines({
+        "WASD/Space/Ctrl fly  Shift brake  mouse look",
+        "1 capture  2 refract  3 lanterns  4 fog  R roam",
+        "G walk the path  C cull  V wire  B bloom  H hud",
+        "F cursor  wheel fov  [ ] env mix  - = speed",
+        "X quit  Esc release",
+    });
 
-    if (!f.overlay.sprite || !f.overlay.font || !f.overlay.white ||
-        !f.overlay.font->loaded()) {
-        if (f.overlay.profiler) f.overlay.profiler->EndFrame();
-        return;
-    }
-
-    const gldx::Font& font = *f.overlay.font;
-    const float topPx = 13.0f;
-    const float keyPx = 12.0f;
-    const float advTop = font.lineGap() * (topPx / font.bakeSize());
-    const float advKey = font.lineGap() * (keyPx / font.bakeSize());
-    const float pad = 6.0f;
-
-    auto widest = [&font](const std::vector<Line>& v, float px) {
-        float w = 0.0f;
-        for (const Line& l : v) w = std::max(w, gldx::TextRenderer::Measure(font, l.text, px));
-        return w;
-    };
-
-    const float wTop = widest(lines, topPx);
-    const float hTop = advTop * static_cast<float>(lines.size()) + pad * 2.0f;
-    const float wKey = widest(keys, keyPx);
-    const float hKey = advKey * static_cast<float>(keys.size()) + pad * 2.0f;
-    const float keyY = static_cast<float>(f.fbHeight) - hKey - pad;
-
-    f.overlay.sprite->Begin(*f.overlay.white, f.fbWidth, f.fbHeight);
-    f.overlay.sprite->Draw(*f.overlay.white, pad, pad, wTop + pad * 2.0f, hTop,
-                           0.0f, 0.0f, 1.0f, 1.0f, glm::vec4(0.0f, 0.0f, 0.0f, 0.55f));
-    f.overlay.sprite->Draw(*f.overlay.white, pad, keyY, wKey + pad * 2.0f, hKey,
-                           0.0f, 0.0f, 1.0f, 1.0f, glm::vec4(0.0f, 0.0f, 0.0f, 0.45f));
-
-    float y = pad + advTop * 0.25f;
-    for (const Line& l : lines) {
-        gldx::TextRenderer::Draw(*f.overlay.sprite, font, l.text, pad * 2.0f, y, topPx, l.color);
-        y += advTop;
-    }
-    float ky = keyY + advKey * 0.25f;
-    for (const Line& l : keys) {
-        gldx::TextRenderer::Draw(*f.overlay.sprite, font, l.text, pad * 2.0f, ky, keyPx, l.color);
-        ky += advKey;
-    }
-
-    // Not a crosshair: a fly camera has nothing under the centre of the screen worth
-    // aiming at. The dot only says the pointer is captured, i.e. that the mouse
-    // drives the view rather than the OS.
-    if (in->captured) {
-        const float cx = f.fbWidth * 0.5f, cy = f.fbHeight * 0.5f;
-        f.overlay.sprite->Draw(*f.overlay.white, cx - 1.5f, cy - 1.5f, 3.0f, 3.0f,
-                               0.0f, 0.0f, 1.0f, 1.0f, glm::vec4(1.0f, 1.0f, 1.0f, 0.35f));
-    }
-    f.overlay.sprite->End();
-
-    if (f.overlay.profiler) f.overlay.profiler->EndFrame();
+    // Not a crosshair: a fly camera has nothing under the centre of the screen
+    // worth aiming at. The dot only says the pointer is captured, i.e. that the
+    // mouse drives the view rather than the OS. HudPass::Execute draws it, and
+    // closes the profiler frame, on every path out of here.
+    hud.SetMarker(in->captured ? Hud::Marker::Dot : Hud::Marker::None);
 }
 
 } // namespace night_forest

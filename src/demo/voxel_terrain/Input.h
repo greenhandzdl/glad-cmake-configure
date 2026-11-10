@@ -47,11 +47,6 @@ struct Input {
     bool doubleSided = false;                 // B: draw terrain two-sided (no back cull)
 };
 
-// A few well-known system fonts, tried in order; HUD text just no-ops if none
-// are found, so a missing font never breaks the render.
-extern const char* const kFontCandidates[];
-extern const int kFontCandidateCount;
-
 // Unit vector pointing from the scene toward the sun (elevation > 0 => upward).
 glm::vec3 SunToward(const Input& in);
 
