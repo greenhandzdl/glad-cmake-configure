@@ -181,12 +181,21 @@ jobs:
       # MSVC 对象写出限制取证（仅 Windows，仅构建已失败时）
       #   v1.7.0 起 Windows job 碎在 `fatal error C1605: compiler limit: object
       #   file size cannot exceed 4 GB`，只打在 glass_water/Hud.cpp 与
-      #   night_forest/Hud.cpp 上。两个看似合理的答案都被 action 自身证伪了：
-      #   /bigobj 在命令行上时错误一字不差（run 42760865230），而更大的
-      #   main.cpp 同源文件能过——所以下一步不是再猜一轮，而是把取证做成一个
-      #   只编译单个 TU 的变体矩阵（每个变体几十秒，一轮出全部结论）。
-      #   clang 没有这条限制，本地无法复现；具体变体清单与读法见
-      #   scripts/msvc-object-probe.sh 的文件头注释。本步骤不影响 job 结论。
+      #   night_forest/Hud.cpp 上。/bigobj（run 42760865230）、TU 体量、导入
+      #   模块数量（C5050 按源文件路径计数）三种解释都被 action 自身证伪了。
+      #   run 42765315428 的变体矩阵把范围收窄到正文：六个 flag 变体一字不差，
+      #   只留 `import gldx; + Hud.h` 的空函数体骨架编成 1.5 KB 通过，而对
+      #   glass_water/Hud.cpp 的前缀二分在 L85 过、L97 起失败，且**所有失败的
+      #   前缀都花 11.1 s、所有通过的前缀都只花 1.2 s**——耗时不随代码量增长，
+      #   就不是尺寸上限的形状：触发点一旦存在，写出器径直冲到墙上。
+      #   所以本轮不再抽样：对两个 TU 做精确二分取回那一行翻转的语句，把它原样
+      #   打进日志，再试从未变过的优化器轴（/Od /Gw /GS-）与 /Fa 清单（带看门狗，
+      #   防写出器把 runner 的盘写满）。具体读法见脚本文件头注释；本步骤不影响
+      #   job 结论，clang 侧无此限制、本地无法复现，取证只能安排在 action 里。
+      #   但探针本身不是：除 cl 命令行外全是 shell，改它之前先跑
+      #   scripts/msvc-object-probe-selftest.sh（假 cl.exe，含看门狗必须被杀成
+      #   rc=124 的断言）。这条不是洁癖——看门狗的第一版用 timeout，只杀到了 bash
+      #   包装进程，cl 作为子进程继续写清单，是 selftest 把它报出来的。
       # ------------------------------------------------------------------
       - name: Probe MSVC object-writer limit (Windows, on failure)
         if: failure() && matrix.os == 'windows'

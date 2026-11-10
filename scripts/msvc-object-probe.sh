@@ -41,11 +41,39 @@
 #                  glm) with an empty body, which separates "any importer of
 #                  this interface hits the wall" from "something in these two
 #                  bodies does"
-# Then, for glass_water/Hud.cpp only, it walks the real file in prefixes that
-# end at statement boundaries, with the open scopes closed synthetically, which
-# localises the construct that trips the object writer instead of describing it
-# again. Cuts that stop parsing are reported as such, so an inconclusive row
-# cannot be read as a pass. The whole probe is time-bounded.
+#
+# What that matrix already settled (run 42765315428, master 40e63a3):
+#   - all six flag variants reproduce the byte-identical error, so nothing on
+#     that axis is involved;
+#   - the skeleton TU compiles into ~1.5 KB, so importing gldx is not the wall;
+#   - prefixes of glass_water/Hud.cpp pass up to L85 and fail from L97 onward,
+#     and *every* failing prefix takes 11.1 s while every passing one takes
+#     ~1.2 s. Time that does not grow with the amount of code is not the shape
+#     of a size limit: once the trigger is present the writer runs to the wall.
+#
+# So this round stops sampling and closes the case:
+#   bisect         exact binary search over the statement-boundary prefixes of
+#                  BOTH failing TUs, which returns the one statement that flips
+#                  pass -> C1605 and prints the culprit region verbatim;
+#   isolated       that region dropped into the preamble with the rest of the
+#                  body deleted, separating "this statement alone" from "only in
+#                  this position";
+#   /Od /Gw /GS-   the optimiser itself is the one code path that was never
+#                  varied (/Ob1, /Os and /Zc:inline- only tune how it inlines);
+#   /Fa listing    ask the compiler what it is emitting, under a watchdog so a
+#                  runaway writer cannot fill the runner's disk. A listing that
+#                  balloons means the writer is being fed garbage; one that stays
+#                  small means the runaway is inside the object writer alone.
+# Cuts that stop parsing are reported as such and stepped over, so an
+# inconclusive row cannot be read as a pass. The whole probe is time-bounded.
+#
+# All of it except cl.exe itself is plain shell, and it is checked locally:
+# scripts/msvc-object-probe-selftest.sh puts a fake `cl.exe` on PATH (C1605 above
+# a chosen source length, an endless /Fa listing on a failing source, which is
+# how the watchdog gets tested), points the probe at the real src/demo tree, and
+# asserts that every row carries a verdict, that both bisections converge, and
+# that no intermediate file outlives the step. It has already earned its keep:
+# the first version of the watchdog killed the shell wrapper and left cl writing.
 #
 # The script never fails the build: it is meant to run from a step guarded by
 # `if: failure()`.
@@ -55,8 +83,9 @@ export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
 BUILD_DIR="${1:-build}"
-TIME_BUDGET="${PROBE_TIME_BUDGET:-600}"   # seconds spent on the prefix walk
-MaxCuts="${PROBE_MAX_CUTS:-16}"           # probes in the prefix walk
+TIME_BUDGET="${PROBE_TIME_BUDGET:-600}"   # seconds spent per bisect
+ASM_BUDGET="${PROBE_ASM_BUDGET:-3}"       # seconds of /Fa listing before the watchdog
+                                          # (~1 GB at the observed write rate)
 if [ ! -d "$BUILD_DIR" ]; then
     echo "no build directory at $BUILD_DIR" >&2
     exit 0
@@ -64,7 +93,6 @@ fi
 cd "$BUILD_DIR" || exit 0
 
 Demos="glass_water night_forest"
-BisectDemo="glass_water"
 
 # replay_cl <exe-and-flags> <out-obj> <source> <log>  -> cl's exit code
 replay_cl() {
@@ -104,24 +132,13 @@ run_variant() {
     report "$1" "$rc" "$3.log" "$3"
 }
 
-# prefix_walk <demo> <prefix> - does C1605 survive a TU that stops halfway
-# through Build()? Cuts that stop parsing are reported as such, so an
-# inconclusive row cannot be read as a pass.
-prefix_walk() {
-    local demo="$1" prefix="$2"
-    local full="../src/demo/${demo}/Hud.cpp"
-    echo "================ prefix walk: ${demo}/Hud.cpp ================"
-    if [ ! -f "$full" ]; then
-        echo "  $full not found, skipping the walk"
-        return 0
-    fi
-    mkdir -p probe_src
-    # Candidate cut points are statement-terminating lines whose open scopes can
-    # be closed synthetically (1..3 of them). Braces inside strings and comments
-    # are counted as well, so a cut that turns out to be invalid simply reports
-    # its own syntax error rather than being mistaken for a pass.
-    local cands n stride i=0 cut opens rc text probe verdict deadline
-    cands="$(awk '{
+# cut_points <file> - candidate statement-boundary cuts, as "line opens" pairs:
+# statement-terminating lines whose still-open scopes (1..3) can be closed
+# synthetically. Braces inside strings and comments are counted as well, so a
+# cut that turns out to be invalid reports its own syntax error rather than
+# being mistaken for a pass - the bisect below steps over those.
+cut_points() {
+    awk '{
         for (i = 1; i <= length($0); i++) {
             c = substr($0, i, 1)
             if (c == "{") b++
@@ -131,35 +148,216 @@ prefix_walk() {
         sub(/[ \t\r]+$/, "", line)
         last = substr(line, length(line), 1)
         if ((last == ";" || last == "}") && b >= 1 && b <= 3) printf "%d %d\n", NR, b
-    }' "$full")"
-    n="$(printf '%s\n' "$cands" | grep -c .)"
-    stride=$(( (n + MaxCuts - 1) / MaxCuts ))
-    [ "$stride" -lt 1 ] && stride=1
-    echo "  $n usable cut points, every ${stride}th one (${MaxCuts} probes max, ${TIME_BUDGET}s budget)"
+    }' "$1"
+}
+
+# cut_write <file> <line> <opens> <out> - the first <line> lines, closed out
+cut_write() {
+    head -n "$2" "$1" > "$4"
+    printf '%*s' "$3" '' | tr ' ' '}' >> "$4"
+}
+
+# verdict_of <log> <rc> [obj] - exactly three kinds of answer, so an
+# inconclusive row can never be read as a pass
+verdict_of() {
+    local log="$1" rc="$2" obj="${3:-}"
+    if grep -q 'error C1605' "$log"; then
+        echo "C1605"
+    elif [ "$rc" -ne 0 ]; then
+        echo "other:$(grep -m1 -oE 'error [A-Z][0-9]+' "$log" | awk '{print $2}')"
+    elif [ -n "$obj" ]; then
+        echo "pass $(objsize "$obj")B"
+    else
+        echo "pass"
+    fi
+}
+
+# cut_probe <prefix> <file> <line> <opens> <objbase> - sets PV and RC
+cut_probe() {
+    cut_write "$2" "$3" "$4" "probe_cut.cpp"
+    replay_cl "$1" "$5" "probe_cut.cpp" "$5.log"; RC=$?
+    PV="$(verdict_of "$5.log" "$RC" "$5")"
+}
+
+# source_line <file> <line> - one line, trimmed and clipped for the log
+source_line() {
+    sed -n "$2p" "$1" | sed 's/^[[:space:]]*//' | cut -c1-44
+}
+
+# kill_tree <pid> - stop a runaway writer and everything it spawned.
+#
+# Killing the shell that was used to launch cl is not enough: cl is that shell's
+# child, and it keeps writing. On Windows `taskkill /F /T` does the whole tree; on
+# any other platform (which is where the selftest runs) the same thing has to be
+# done by hand, recursion from the leaves up, or the local test would be proving a
+# weaker property than the runner relies on.
+kill_tree() {
+    local pid="$1" kid
+    if command -v taskkill >/dev/null 2>&1; then
+        taskkill //F //T //PID "$pid" >/dev/null 2>&1
+        return 0
+    fi
+    for kid in $(pgrep -P "$pid" 2>/dev/null); do kill_tree "$kid"; done
+    kill -9 "$pid" 2>/dev/null
+}
+
+# listing_probe <prefix> <source> - ask the compiler what it is emitting. /Fa
+# writes the listing as it goes, so a runaway shows up as a growing file.
+#
+# The watchdog is done by hand rather than with `timeout`, and it kills the whole
+# process tree: `timeout` signals the shell wrapper, while cl.exe is that
+# wrapper's child. A local selftest (scripts/msvc-object-probe-selftest.sh) caught
+# exactly this - the killed writer kept appending, so the listing was still there
+# and still growing after the probe reported itself finished. On a runner whose
+# disk the build already used, a surviving 4 GB/s-capable writer is a worse
+# problem than the bug being investigated. The rate implied by the observed
+# failure is 4 GB in 11.1 s, so ASM_BUDGET seconds costs about that many GB.
+listing_probe() {
+    local prefix="$1" src="$2" asm="probe_listing.asm" log="probe_listing.log"
+    local cmd="probe_listing_cmd.sh" rc waited=0 sz lines
+    rm -f "$asm" probe_listing.obj
+    printf '%s /Fa%s /Foprobe_listing.obj /FS -c %s\n' "$prefix" "$asm" "$src" > "$cmd"
+    bash "$cmd" >"$log" 2>&1 &
+    local wpid=$!
+    while [ "$waited" -lt "$ASM_BUDGET" ] && kill -0 "$wpid" 2>/dev/null; do
+        sleep 1; waited=$((waited + 1))
+    done
+    if kill -0 "$wpid" 2>/dev/null; then
+        kill_tree "$wpid"
+        wait "$wpid" 2>/dev/null
+        rc=124
+    else
+        wait "$wpid"; rc=$?
+    fi
+    sz="$(objsize "$asm")"; lines="$(wc -l < "$asm" 2>/dev/null | tr -d ' ')"
+    printf '  listing       rc=%-4s (%ss watchdog, 124 = killed) %s bytes, %s lines\n' \
+        "$rc" "$ASM_BUDGET" "$sz" "${lines:-?}"
+    if [ -s "$asm" ]; then
+        echo "     most frequent listing lines (of the first 200k):"
+        head -200000 "$asm" | sort | uniq -c | sort -rn | head -3 |
+            cut -c1-120 | sed 's/^/     /'
+    fi
+    grep -oE 'error [A-Z][0-9]+' "$log" 2>/dev/null | head -3 | sed 's/^/     /'
+    rm -f "$asm" probe_listing.obj "$cmd" "$log"
+    # One more sweep after the kill has been reaped, so a writer that flushed a
+    # final buffer between the check and the delete cannot leave the file behind.
+    sleep 1
+    rm -f "$asm"
+}
+
+# bisect_prefix <demo> <prefix> <file> - the smallest prefix that still trips
+# C1605, the culprit region verbatim, and the probes that only pay off once the
+# region is known.
+bisect_prefix() {
+    local demo="$1" prefix="$2" full="$3"
+    echo "================ bisect: ${demo}/Hud.cpp ================"
+    if [ ! -f "$full" ]; then
+        echo "  $full not found, skipping the bisect"
+        return 0
+    fi
+    mkdir -p probe_src
+    local -a L O
+    L=(); O=()
+    local l o
+    while read -r l o; do
+        [ -n "$l" ] || continue
+        L+=("$l"); O+=("$o")
+    done <<< "$(cut_points "$full")"
+    local n=${#L[@]}
+    if [ "$n" -lt 3 ]; then
+        echo "  only $n usable cut points, nothing to bisect"
+        return 0
+    fi
+    local lo=0 hi=$((n - 1)) mid=0 tries=0 deadline PV="" RC=0
+    echo "  $n usable cut points, bisecting under a ${TIME_BUDGET}s budget"
+
+    # Invariant: probe(lo) passes and probe(hi) fails. Both ends are established
+    # before the range is split, because a file that fails from its first
+    # statement or survives to its last one has no window to search.
+    cut_probe "$prefix" "$full" "${L[lo]}" "${O[lo]}" "probe_bisect.obj"
+    while [ "${PV:0:4}" != "pass" ] && [ "$lo" -lt "$((n - 2))" ]; do
+        lo=$((lo + 1))
+        cut_probe "$prefix" "$full" "${L[lo]}" "${O[lo]}" "probe_bisect.obj"
+    done
+    if [ "${PV:0:4}" != "pass" ]; then
+        echo "  even the shortest prefix L${L[lo]} gave $PV - the trigger is in the preamble, not the body"
+        return 0
+    fi
+    printf '  lo L%-4d %-6s %s\n' "${L[lo]}" "pass" "$(source_line "$full" "${L[lo]}")"
+    cut_probe "$prefix" "$full" "${L[hi]}" "${O[hi]}" "probe_bisect.obj"
+    if [ "$PV" != "C1605" ]; then
+        echo "  the complete file gave $PV, not C1605: the probe does not reproduce the real build, bisect void"
+        return 0
+    fi
+    printf '  hi L%-4d %-6s %s\n' "${L[hi]}" "C1605" "$(source_line "$full" "${L[hi]}")"
+
     deadline=$((SECONDS + TIME_BUDGET))
-    while read -r cut opens; do
-        [ -n "$cut" ] || continue
-        i=$((i + 1))
-        [ $(( (i - 1) % stride )) -eq 0 ] || continue
+    while [ "$((hi - lo))" -gt 1 ]; do
         if [ "$SECONDS" -gt "$deadline" ]; then
-            echo "  time budget reached at candidate $i/$n ($cut) - walk stops here"
+            echo "  time budget reached, window stays [L${L[lo]}, L${L[hi]}]"
             break
         fi
-        text="$(sed -n "${cut}p" "$full" | sed 's/^[[:space:]]*//' | cut -c1-44)"
-        probe="probe_src/cut_${demo}_${cut}.cpp"
-        head -n "$cut" "$full" > "$probe"
-        printf '%*s' "$opens" '' | tr ' ' '}' >> "$probe"
-        replay_cl "$prefix" "probe_cut.obj" "$probe" "probe_cut.log"; rc=$?
-        if grep -q 'error C1605' probe_cut.log; then
-            verdict="C1605"
-        elif [ "$rc" -ne 0 ]; then
-            verdict="other: $(grep -m1 -oE 'error [A-Z][0-9]+' probe_cut.log | awk '{print $2}')"
-        else
-            verdict="compiled $(objsize probe_cut.obj) bytes"
-        fi
-        printf '  L%-4d (+%d)   %-30s %s\n' "$cut" "$opens" "$verdict" "$text"
-    done <<< "$cands"
-    rm -f probe_src/cut_${demo}_*.cpp probe_cut.obj probe_cut.log
+        mid=$(( (lo + hi) / 2 )); tries=0
+        cut_probe "$prefix" "$full" "${L[mid]}" "${O[mid]}" "probe_bisect.obj"
+        while [ "${PV:0:5}" = "other" ] && [ "$tries" -lt 3 ] &&
+              [ "$((mid - 1))" -gt "$lo" ]; do
+            tries=$((tries + 1)); mid=$((mid - 1))
+            cut_probe "$prefix" "$full" "${L[mid]}" "${O[mid]}" "probe_bisect.obj"
+        done
+        case "$PV" in
+            C1605) hi=$mid ;;
+            pass*) lo=$mid ;;
+            *) echo "  inconclusive at L${L[mid]} ($PV), window stays [L${L[lo]}, L${L[hi]}]"; break ;;
+        esac
+        printf '  mid L%-4d %-14s window [%d, %d]  %s\n' "${L[mid]}" "$PV" \
+            "${L[lo]}" "${L[hi]}" "$(source_line "$full" "${L[mid]}")"
+    done
+
+    echo "  minimal failing prefix: L${L[hi]} (last passing L${L[lo]})"
+    echo "  ---- culprit region, verbatim (L$((L[lo] + 1))..L${L[hi]}) ----"
+    sed -n "$((L[lo] + 1)),${L[hi]}p" "$full" | cut -c1-100 | sed 's/^/  | /'
+
+    # Isolated: the culprit region dropped into the function with the rest of
+    # the body deleted. Still failing means the region alone is the trigger;
+    # passing means it only trips together with what came before it.
+    local fstart iso isoopens isoV minimal v
+    fstart="$(head -n "${L[lo]}" "$full" |
+             grep -nE '^[A-Za-z].*::[A-Za-z0-9_~]+ *\(.*\{[[:space:]]*$' |
+             tail -1 | cut -d: -f1)"
+    if [ -n "$fstart" ]; then
+        iso="probe_src/iso_${demo}.cpp"
+        { head -n "$fstart" "$full"; sed -n "$((L[lo] + 1)),${L[hi]}p" "$full"; } > "$iso"
+        isoopens="$(awk '{
+            for (i = 1; i <= length($0); i++) {
+                c = substr($0, i, 1)
+                if (c == "{") b++; else if (c == "}") b--
+            }
+        } END { print b }' "$iso")"
+        printf '%*s' "$isoopens" '' | tr ' ' '}' >> "$iso"
+        replay_cl "$prefix" "probe_iso.obj" "$iso" "probe_iso.log"; RC=$?
+        isoV="$(verdict_of "probe_iso.log" "$RC" "probe_iso.obj")"
+        printf '  isolated region  %-14s (body from L%s, region L%d..L%d)\n' \
+            "$isoV" "$fstart" "$((L[lo] + 1))" "${L[hi]}"
+        case "$isoV" in
+            pass*) ;;
+            *) head -3 probe_iso.log | cut -c1-160 | sed 's/^/     /' ;;
+        esac
+        rm -f "$iso" probe_iso.obj probe_iso.log
+    else
+        echo "  isolated: no function header found before L${L[lo]}, skipped"
+    fi
+
+    # The optimiser itself, on the minimal repro: /Od is a different code path,
+    # /Gw and /GS- change what gets described to the writer. None of the six
+    # original variants touched this axis.
+    minimal="probe_src/min_${demo}.cpp"
+    cut_write "$full" "${L[hi]}" "${O[hi]}" "$minimal"
+    for v in "/Od" "/Gw" "/GS-"; do
+        run_variant "min $v" "$prefix $v" "probe_mv.obj" "$minimal"
+    done
+    listing_probe "$prefix" "$minimal"
+
+    rm -f "$minimal" probe_cut.* probe_bisect.obj.* probe_mv.obj.* probe_iso.*
 }
 
 for demo in $Demos; do
@@ -211,10 +409,13 @@ PROBE_EOF
     run_variant "skeleton"    "$prefix"                     "probe_${demo}_skel.obj"  "$skel"
     rm -f "$skel"
 
-    if [ "$demo" = "$BisectDemo" ]; then
-        prefix_walk "$demo" "$prefix"
-    fi
+    bisect_prefix "$demo" "$prefix" "../src/demo/${demo}/Hud.cpp"
 done
 
 echo "probe complete (${SECONDS}s total)"
+# Sweep, not a courtesy: this runs on a runner whose disk the build already
+# used, and a killed /Fa writer can leave gigabytes behind if any variant
+# reopened it. The probe's value is its log, not its intermediate files.
+rm -rf probe_src probe_cut.cpp probe_listing_cmd.sh
+rm -f probe_*.obj probe_*.obj.log probe_*.asm probe_*.log
 exit 0
