@@ -7,13 +7,18 @@
  *        GLOBAL MODULE FRAGMENT of both libraries.
  *
  * Window::CaptureScreenshot (gldxwin) reads the pixels back itself but hands the
- * PNG encoding to gldx::EncodeScreenshot (Screenshot.cpp, stb_image_write), so
- * stb stays a private dependency of the engine. For that call to link, the
+ * PNG encoding to gldx::EncodeScreenshot (ScreenshotHook.cpp, stb_image_write),
+ * so stb stays a private dependency of the engine. For that call to link, the
  * declaration must attach to the *global module* on BOTH sides: gldxwin's
  * gmf.hpp includes this header and gldx's Screenshot.cpp includes it in its own
  * global module fragment. Declaring it inside either module purview would
  * mangle the symbol with a module bound (@gldxwin / @gldx) and the linker would
  * not match the two halves.
+ *
+ * The DEFINITION therefore cannot live in a global module fragment either - a
+ * GMF may contain preprocessing directives only ([module.global.frag], MSVC
+ * C5202) - so it sits in ScreenshotHook.cpp, a plain textual TU linked into the
+ * gldx static library. Do not move it back into Screenshot.cpp.
  */
 
 #include <string>
@@ -21,8 +26,8 @@
 namespace gldx {
 
 // Encode a top-down, tightly packed RGB row buffer (width*height*3 bytes) into
-// `path` as PNG. Defined in gldx/util/Screenshot.cpp; returns false on a bad
-// buffer or an unwritable file.
+// `path` as PNG. Defined in gldx/util/ScreenshotHook.cpp (a non-module TU);
+// returns false on a bad buffer or an unwritable file.
 bool EncodeScreenshot(const std::string& path, int width, int height,
                       const unsigned char* rgbTopDown);
 
