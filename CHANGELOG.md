@@ -5,6 +5,17 @@
 
 ## Unreleased
 
+### 修复 Windows 下一道墙：模块与导入方的编译环境不一致（C2011 重定义风暴）
+
+- **现象**（run 42798303106，别名修复之后）：`fatal error` 没有了，`glass_water` 与 `night_forest` 的 HUD TU 都编译通过，构建第一次走到第 498 步 `src/demo/voxel_terrain/Hud.cpp`——此前每一轮都在 486/491 就死，这个 TU 从未被编过——在那里碎成 `error C2011: 'glm::qualifier': 'enum' type redefinition`、C2572、C2953，紧接着 `<vector>`/`std::vector` 也全套重定义。别名修复只是拆掉第一道墙，这不是同一个 bug。
+- **根因**：模块方的编译环境与导入方不一致。`gldx`/`gldxwin`/`gldxcli` 三个库里 `/utf-8` 是 `PRIVATE`，它带出的 `_UTF8` 被 MSVC 烘进 `.ifc`；30 多个 demo/可执行导入方都没有这个选项，于是**每条 import 都报一条 C5050**（那场构建共 114 条，日志里逐条带源文件路径）。环境一旦不一致，导入方再文本 `#include` 模块已经挂到 global module 的同一批头（`gmf.hpp` 预包含的 glm 与常用 std），MSVC 就把同一批实体当作第二次定义，报出来的是一整棵树的重定义，而不是“这是同一个类型”。
+- **为什么偏偏是 `voxel_terrain/Hud.cpp`**：它是唯一一个把 `#include <glm/glm.hpp>` 放在 `import gldx;` **之后**、且中间只隔一个 `Hud.h` 的 demo HUD TU；`glass_water`/`night_forest` 在 import 与 glm 之间还夹了 `<algorithm>/<cstdio>/<string>/<vector>`，恰好绕开了这个顺序。这类“靠邻居的 include 顺序活着”的写法本身就是隐患，所以三个文件一起改成统一形状。
+- **修复**（两条，都不删依赖、都不动引擎行为）：
+  1. `/utf-8` 从三个模块库的 `PRIVATE` 升为 **`PUBLIC`**（`src/gldx/CMakeLists.txt`、`src/gldxwin/CMakeLists.txt`、`src/gldxcli/CMakeLists.txt`；`/bigobj` 保持 PRIVATE），导入方经由 `target_link_libraries` 继承同一环境，C5050 从 114 条降到 0，环境不一致这一整类间歇性失败按构造消失。顺带把 `GLFW_Template` 漏掉的 `/bigobj` 补上（AGENTS.md 早已把“自有目标都带 /bigobj”写成策略，实际只有 demo 有）。
+  2. 三个 demo 的 `Hud.cpp` 统一成 `src/main.cpp` 的形状：global-module 头（glm 与常用 std）**全部 include 在 import 之前**，只有依赖导入类型才声明的 `Hud.h` 留在 `import gldx;` 之后。
+- **本地验证**：Homebrew clang 23 Release 全量构建 exit 0、自有 `src/**` 告警 0、28 个可执行不变；三个受影响的 demo（`voxel_terrain`/`glass_water`/`night_forest`）`GLDX_SNAPSHOT` 回读均非空（抽样颜色 2815/1734/3494 种），末帧回归行不变（`47 blend submissions, 79 total draws` / `5 world draws / 1406 instances, 0 capture faces, env FBO capture`）。clang 对这两条都无感（它容忍环境不一致，也不因 include 顺序重定义），所以 C2011 是否真的消失只能由 Windows action 判定。
+- **约定落文档**：AGENTS.md 不变量 7 改写成“global module 类型必须 include 在 import 之前 + `/utf-8` 是模块库的 PUBLIC 要求”；`src/gldx|gldxwin|gldxcli/CMakeLists.txt`、`src/demo/CMakeLists.txt`、`src/CMakeLists.txt`、`doc/developer/release.md`、workflow 探针注释同步记下第六轮取证。**任何 Windows 失败先看有没有 C5050**——它比错误码本身更接近根因。
+
 ### 修复 Windows `C1605`：删掉 demo HUD 对引擎色常量的本地 constexpr 别名
 
 - **根因**（run 42781895430 的 B 族对照矩阵，两个 TU 一致）：会 `import gldx` 的 TU 里，`constexpr glm::vec4 kDim = Hud::kDim;` 这类命名空间作用域别名一旦被 ODR-use，MSVC 14.44 的 .obj 写出器就在“导入方欠这个变量的定义”这一步失控到 4 GB 上限。对照：最小失败前缀上删掉那一句调用（别名声明仍在）→ 过（5595/5613 字节）；实参直接写 `Hud::kDim` → 过（6712/6730 字节）；别名包 prvalue、函数内非 constexpr 副本、函数内 const 引用、char 数组换字符串字面量（全都仍 ODR-use 别名）→ 一律 C1605。所以触发的是 **ODR-use 而非声明本身**。A 族 `delete all N sites` 仍 C1605 也由此解释：它只删精确同形行，其余调用点仍在 ODR-use 别名。

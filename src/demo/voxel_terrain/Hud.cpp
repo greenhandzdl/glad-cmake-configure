@@ -1,11 +1,20 @@
 // voxel_terrain demo — HUD render pass implementation (see Hud.h).
 #include "gldx/core/Platform.h"
 
+// GLM belongs to the GLOBAL MODULE: gldx's global module fragment already
+// included <glm/glm.hpp>, so the exported signatures (gldx::Hud's glm::vec4
+// parameters) refer to global-module glm types. An importer must therefore
+// include GLM *before* its import declarations as well - `import gldx;` first
+// and `#include <glm/glm.hpp>` after it is the wrong order: clang accepts the
+// redeclaration, MSVC 14.44 reports it as C2011 ('glm::qualifier': 'enum' type
+// redefinition), then C2572/C2953 down the whole header tree, and finally the
+// same for <vector>. Same rule gmf.hpp follows on the module side; see
+// AGENTS.md invariant 7.
+#include <glm/glm.hpp>
+
 import gldx;
 
 #include "Hud.h"
-
-#include <glm/glm.hpp>
 
 namespace voxel_terrain {
 

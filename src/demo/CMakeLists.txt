@@ -51,6 +51,19 @@ function(add_gldx_demo name)
     # and night_forest/Hud.cpp and spells `Hud::kX` at every call site; the
     # forensic rounds that got there are in CHANGELOG.md and in the header of
     # scripts/msvc-object-probe.sh, which still runs on any Windows failure.
+    #
+    # C1605 was not the last thing hiding behind it. With the aliases gone the
+    # next Windows run got one step further - to voxel_terrain/Hud.cpp, which no
+    # earlier run had reached - and died there on a redefinition storm instead
+    # (C2011 'glm::qualifier', C2572/C2953, then the same for <vector>). That is
+    # the *importer environment* problem, not an object-writer one: the module
+    # was built with /utf-8, every importer without it, so MSVC flagged each
+    # import with C5050 (114 of them in that build) and then re-parsed the
+    # global-module headers the module had already attached. /utf-8 is now a
+    # PUBLIC requirement of gldx/gldxwin/gldxcli so importers match by
+    # construction, and importers include their global-module headers (glm, std)
+    # BEFORE the import declarations - see invariant 7 in AGENTS.md. Both are
+    # clang-invisible, hence this note.
     if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         target_compile_options(d_${name} PRIVATE /bigobj)
     endif()

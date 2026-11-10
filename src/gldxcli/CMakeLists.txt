@@ -14,7 +14,13 @@ target_sources(gldxcli PUBLIC FILE_SET CXX_MODULES FILES gldxcli.cppm)
 target_include_directories(gldxcli PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-    # /utf-8 for the source encoding; /bigobj as cheap insurance against C1128.
-    # It is not a C1605 fix - see the note in src/demo/CMakeLists.txt.
-    target_compile_options(gldxcli PRIVATE /utf-8 /bigobj)
+    # /bigobj as cheap insurance against C1128; it is not a C1605 fix - see the
+    # note in src/demo/CMakeLists.txt. /utf-8 is PUBLIC because MSVC bakes the
+    # preprocessor state into the .ifc: an importer built without it gets C5050
+    # for every import and then a redefinition storm over the global-module
+    # headers (glm / <vector>) that the module already attached. The long
+    # explanation lives in src/gldx/CMakeLists.txt.
+    target_compile_options(gldxcli
+        PUBLIC  /utf-8
+        PRIVATE /bigobj)
 endif()

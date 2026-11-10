@@ -33,4 +33,13 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     OUTPUT_NAME ${TARGET_NAME}
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/output)
 
+# MSVC: /bigobj for the same reason every demo target carries it (see
+# src/demo/CMakeLists.txt) - this TU imports three modules. It is NOT a C1605 /
+# C2011 fix; what fixes those is the module-environment rule in
+# src/gldx/CMakeLists.txt (/utf-8 exported PUBLIC, inherited here through
+# target_link_libraries) plus the include-before-import ordering rule.
+if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+    target_compile_options(${TARGET_NAME} PRIVATE /bigobj)
+endif()
+
 add_subdirectory(demo)

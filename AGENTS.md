@@ -187,7 +187,7 @@ AGENTS.md                    本文件（agent 速查，留在仓库根便于自
 4. **错误用 `std::expected<T,E>`，不跨线程抛异常**。（`ThreadPool::WorkerMain` 顶层有 `try/catch` 兜底，防逃逸出 `std::thread` 触发 `std::terminate`。）
 5. **场景节点持非拥有指针**：`SceneNode` 存 `const Mesh*`/`const PbrMaterial*`，GL 对象生命周期归应用（demo 的 `app` 回调，在其中构造并在 `glfwTerminate` 前析构）。
 6. **依赖只向下**：application→orchestration(render/scene)→features→core。高层可用低层，反之不行。
-7. **named module 边界**：宏与 `<GLFW/glfw3.h>` 不跨模块 → `Platform.h` 必须文本 include；global module 类型（`glm::vec3`/`GLuint`）消费者自行 include。
+7. **named module 边界**：宏与 `<GLFW/glfw3.h>` 不跨模块 → `Platform.h` 必须文本 include；global module 类型（`glm::vec3`/`GLuint`）消费者自行 include，且**必须 include 在 `import` 之前**——`gmf.hpp` 已把 glm 与常用 std 头挂到 global module，导入方若在 `import gldx;` 之后才文本 include 同一批头，MSVC 会把同一批实体解析第二遍并报成一串重定义（C2011 `glm::qualifier` → C2572/C2953 → 紧接着 `<vector>` 也重定义）。`src/main.cpp` 是范本：所有 `#include` 在前，三条 `import` 在后；只有依赖导入类型才声明的头（各 demo 的 `Hud.h`）留在 `import` 之后。另：MSVC 把 `_UTF8`（`/utf-8` 带出）烘进 `.ifc`，所以 `/utf-8` 是 `gldx`/`gldxwin`/`gldxcli` 的 **PUBLIC** 编译选项而非私有——否则每个导入方都报 C5050「environment 不一致」，而那条不一致正是上面这串重定义的温床。
 
 ## 常见任务 how-to
 

@@ -1,16 +1,23 @@
 // night_forest demo — HUD render pass implementation (see Hud.h).
 #include "gldx/core/Platform.h"
 
-import gldx;
-
-#include "Hud.h"
+// Global-module headers go BEFORE the imports, exactly like src/main.cpp:
+// gmf.hpp already attached glm and the common std headers to the global module
+// on the engine side, so an importer that re-parses them *after* `import gldx;`
+// hands MSVC the same entities twice and it answers with redefinitions (C2011
+// 'glm::qualifier', C2572/C2953, and <vector> right behind it). Only a header
+// that names internal linkage types and therefore needs the import (Hud.h)
+// stays below it. See AGENTS.md invariant 7.
+#include <glm/glm.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
 
-#include <glm/glm.hpp>
+import gldx;
+
+#include "Hud.h"
 
 namespace night_forest {
 namespace {

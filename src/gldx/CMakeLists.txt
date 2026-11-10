@@ -83,13 +83,30 @@ endif()
 
 # Per-compiler module tweaks. CMake >= 3.28 drives named-module compilation and
 # the import-graph scan for all three vendors, so this only patches up details:
-#   * MSVC: /utf-8 so the embedded GLSL raw strings + any non-ASCII comments are
-#     read as UTF-8 regardless of the system code page, and /bigobj as cheap
-#     insurance against C1128 (a module TU can exceed the default 65,279
-#     addressable COFF sections). /bigobj does *not* address the C1605 that the
-#     v1.7.0 Windows job hit on two demo TUs - see the note in
-#     src/demo/CMakeLists.txt and the failure-time probe in
-#     .github/workflows/release.yml.
+#   * MSVC: /bigobj as cheap insurance against C1128 (a module TU can exceed the
+#     default 65,279 addressable COFF sections). /bigobj does *not* address
+#     C1605 - see the note in src/demo/CMakeLists.txt and the failure-time probe
+#     in .github/workflows/release.yml.
+#   * MSVC: /utf-8 is PUBLIC, and that is load-bearing, not hygiene. It defines
+#     `_UTF8` on the module's command line, and MSVC bakes that macro set into
+#     the .ifc: an importer whose macro environment differs is not compatible
+#     with the interface, and MSVC says so once per import statement with
+#     C5050 ("_UTF8 is defined in module command line and not in current
+#     command line"). Every importer therefore has to see the identical
+#     environment - not `_UTF8` itself, but the *preprocessor state* the module
+#     was built under. Leaving it PRIVATE put the three libraries on one side
+#     and all 30-odd demo/executable TUs on the other, which is where the
+#     v1.7.0 Windows failures came from: the importer's own `#include
+#     <glm/glm.hpp>` (glm is attached to the global module by gmf.hpp) then
+#     re-parsed headers whose global-module entities had already been imported,
+#     and MSVC reported the whole tree as redefinitions - C2011
+#     'glm::qualifier', C2572/C2953, and the same for <vector> - instead of
+#     treating them as the same types. That is a *cross-platform* inconsistency:
+#     clang happened to tolerate the mismatch, so only the Windows job died.
+#     Exporting /utf-8 makes the importer environment match by construction, and
+#     it doubles as the source-encoding rule the demos' non-ASCII comments need.
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-    target_compile_options(gldx PRIVATE /utf-8 /bigobj)
+    target_compile_options(gldx
+        PUBLIC  /utf-8
+        PRIVATE /bigobj)
 endif()

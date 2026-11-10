@@ -20,7 +20,13 @@ target_link_libraries(gldxwin PUBLIC
     ${GLAD_TARGET})
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-    # /utf-8 for the source encoding; /bigobj as cheap insurance against C1128.
-    # It is not a C1605 fix - see the note in src/demo/CMakeLists.txt.
-    target_compile_options(gldxwin PRIVATE /utf-8 /bigobj)
+    # /bigobj as cheap insurance against C1128; it is not a C1605 fix - see the
+    # note in src/demo/CMakeLists.txt. /utf-8 is PUBLIC because MSVC bakes the
+    # preprocessor state into the .ifc: an importer built without it gets C5050
+    # for every import and then a redefinition storm over the global-module
+    # headers (glm / <vector>) that the module already attached. The long
+    # explanation lives in src/gldx/CMakeLists.txt.
+    target_compile_options(gldxwin
+        PUBLIC  /utf-8
+        PRIVATE /bigobj)
 endif()

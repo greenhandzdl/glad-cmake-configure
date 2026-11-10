@@ -212,6 +212,16 @@ jobs:
       #   本地别名的改写全 C1605，而 delete 对照行（留声明、删调用）也过——所以触发
       #   的是 ODR-use 而非声明本身。两个 demo HUD TU 的别名已删、实参直接写
       #   `Hud::kX`。探针保留：任何 Windows 构建失败仍会跑它。
+      #   第六轮（run 42798303106，别名修复之后）证明 C1605 只是第一道墙：glass_water
+      #   与 night_forest 的 HUD TU 都过了，构建第一次走到第 498 步 voxel_terrain/Hud.cpp
+      #   ——此前每一轮都在 486/491 就死了，这个 TU 从没被编过——那里碎成另一副样子：
+      #   C2011 `glm::qualifier` / C2572 / C2953，紧接着 `<vector>` 同样重定义。这不是
+      #   写出器问题而是**导入方环境问题**：模块带 /utf-8 编译，30 多个导入方都没有，
+      #   于是 MSVC 对每条 import 报 C5050（那场构建共 114 条），并把模块已挂到 global
+      #   module 的头再解析一遍。修复＝/utf-8 升级成 gldx/gldxwin/gldxcli 的 PUBLIC 要求
+      #   （src/gldx/CMakeLists.txt）+ 导入方的 global-module 头（glm / std）一律 include
+      #   在 import 之前（三个 demo HUD TU 已统一，AGENTS.md 不变量 7）。两处 clang 都
+      #   看不见，所以这轮起探针不再是唯一的判据：任何 Windows 失败先看有没有 C5050。
       # ------------------------------------------------------------------
       - name: Probe MSVC object-writer limit (Windows, on failure)
         if: failure() && matrix.os == 'windows'
