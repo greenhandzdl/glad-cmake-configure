@@ -37,6 +37,10 @@
 | 网格上传 / `Update`（含细分实时可调的重网格）/ `DrawAs(GL_PATCHES)` | [3 §1](3-geometry-scene.md) | `geometry_upload`、`textured_sphere` |
 | 硬件细分（TCS/TES）与 CPU 重网格的同缓冲对照 / 自适应 level 防裂 | [3 §1.2](3-geometry-scene.md) + [8 §5.1](8-advanced.md) | `textured_sphere`、`shader_stages` |
 | 绕序约定与“球体画成开口的碗”的诊断 | [3 §1.1](3-geometry-scene.md) / [5 §3](5-lighting-ubo.md) | `textured_sphere`（`C` 键） |
+| 骨架与 GPU 蒙皮：`Skeleton`（FK + 每帧 `ComputeSkinning` palette）、`SkinnedMesh`、`ModelLoader::LoadSkinned`；骨骼索引必须走整数属性（`AttachIntegerAttribute` / `glVertexAttribIPointer`，浮点归一化会读错骨骼） | [10 §2](10-demos.md) | `anim-rigid` |
+| 绑定姿态的来历：rest pose 由 inverse-bind 矩阵推导（不是文件的节点变换）、mesh 节点变换烘进顶点、`aiBone::mNode` 为空时父级按名字从节点树取 | [10 §2](10-demos.md) | `anim-rigid` |
+| 内嵌贴图的资产路径：`LoadedSkinnedModelData` 直接带解码后的 `SkinnedTexture`（工作线程 `stbi_load_from_memory`、按用途定 sRGB、v 翻一次），缺图时绑 1×1 哑元而不是让 active sampler 悬空 | [10 §2](10-demos.md) | `anim-rigid` |
+| 程序化动画（资产没有任何 clip）：步态是时钟的纯函数、世界轴经骨骼 rest world 矩阵折进局部系、接触点解出骨盆高度、treadmill 步频与地面行程同源（脚不滑） | [10 §2](10-demos.md) | `anim-rigid` |
 | 实例化 | [3](3-geometry-scene.md) | `instancing`、`night_forest`（1400 棵树 5 次 draw） |
 | 场景层级 / 变换传播 | [3](3-geometry-scene.md) | `pbr_showcase` |
 | 异步两阶段资源加载 | [4](4-assets-loading.md) | `model_loading` |

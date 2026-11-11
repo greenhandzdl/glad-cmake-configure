@@ -35,6 +35,16 @@ public:
     void AttachAttribute(GLuint index, GLint componentCount, GLenum type,
                          GLboolean normalized, GLsizei stride, const void* offset) const;
 
+    // Same wiring through glVertexAttribIPointer: the buffer holds integers and
+    // the shader declares an integer attribute (ivec/uvec), so the values must
+    // NOT be converted to float on the way in. Used by SkinnedMesh for the bone
+    // index attribute, where a float round-trip would be one rounding step away
+    // from reading a neighbouring bone's matrix. `type` is an integer GL type
+    // (GL_UNSIGNED_INT, GL_UNSIGNED_BYTE, ...); normalization is not part of the
+    // integer path by definition, which is why there is no flag for it here.
+    void AttachIntegerAttribute(GLuint index, GLint componentCount, GLenum type,
+                                GLsizei stride, const void* offset) const;
+
     // Draw against this VAO. These are the engine's only owners of the raw
     // glDraw* entry points: pass/demo code calls one of these instead of
     // reaching for glDrawArrays/glDrawElements directly, so the draw primitive

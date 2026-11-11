@@ -20,6 +20,8 @@ set(GLDX_SOURCES
     core/UniformBuffer.cpp
     core/Sampler.cpp
     shader/ShaderProgram.cpp
+    anim/Skeleton.cpp
+    anim/SkinnedMesh.cpp
     geometry/Mesh.cpp
     geometry/GeometryFactory.cpp
     geometry/InstancedMesh.cpp

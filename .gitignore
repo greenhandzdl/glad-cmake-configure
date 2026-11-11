@@ -42,3 +42,10 @@
 *.so
 *.dylib
 *.exe
+
+# Rigged model assets are never versioned. The anim-rigid demo loads its FBX at
+# run time from src/demo/anim-rigid/ (see doc/user/10-demos.md); real mesh data is
+# staged through src/assets/models/, which has its own ignore-everything rule.
+# This is a whole-tree rule on purpose: it is the difference between "we read the
+# FBX" and "we committed the FBX".
+*.fbx

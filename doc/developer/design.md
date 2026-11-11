@@ -247,8 +247,9 @@ pass 中，从而让整帧（场景*与*自发光*与*天空盒）被一致地�
 │   │   ├── voxel/            #   BlockRegistry / Chunk / ChunkMesher / VoxelMeshGpu（纯 CPU 网格化 + 上传记录）
 │   │   ├── util/             #   Noise（Perlin 2D/3D + fBm，确定性、无全局状态）
 │   │   ├── scene/            #   Scene / SceneNode / Transform（纯 CPU 层级）
+│   │   ├── anim/             #   Skeleton（parents-first 骨骼数组 + `RestWorld`/`ComputeWorld`/`ComputeSkinning`；rest pose 由 inverse-bind 矩阵推导，故空姿态严格等于 bind 姿态；`kMaxBonePalette=64`）· SkinnedVertex/SkinnedMesh（4 影响、loc 5 是 `uvec4` 骨骼索引，走 `AttachIntegerAttribute` 的整数属性路径）
 │   │   ├── render/           #   Renderer / RenderPass / RenderFrame / 后期链 / SpriteBatch / TextRenderer / ParticleBatch / Voxel 两 pass
-│   │   ├── text/ assets/ debug/     # 字体（双后端：FreeType 光栅 + stb_truetype fallback，一个 atlas、同一份度量字段）· Hud/HudPass（引擎侧仪表面板：行列表 + 角上定位 + 面板自 sizing，demo 只交字符串）· 异步资源 · DebugDraw/Profiler/Picking/Frustum
+│   │   ├── text/ assets/ debug/     # 字体（双后端：FreeType 光栅 + stb_truetype fallback，一个 atlas、同一份度量字段）· Hud/HudPass（引擎侧仪表面板：行列表 + 角上定位 + 面板自 sizing，demo 只交字符串）· 异步资源（ModelLoader：`Load` 静态网格 / `LoadSkinned` 带骨架资产，后者在工作线程解码文件内嵌贴图）· DebugDraw/Profiler/Picking/Frustum
 │   │   ├── ...               #   引擎各 .cpp 均为 `module gldx;` 实现单元
 │   │   └── third_party/      #   stb_image_impl.cpp（唯一第三方实现 TU，非模块接口）
 │   ├── gldxwin/              # 引擎无关窗口库：named module `gldxwin`（gldx::win::App 单例 + 多窗口 Window + 帧循环），仅链 glfw+GLAD，不 import gldx
@@ -268,6 +269,7 @@ pass 中，从而让整帧（场景*与*自发光*与*天空盒）被一致地�
 │   │   ├── instancing/ particles/ text_hud/ camera_picking/ debug_draw/            # 各能力单功能 demo
 │   │   ├── geometry_upload/ model_loading/                                       # 几何上传 / 异步模型 demo
 │   │   ├── texture_samplers/ #   采样器 demo（main + SamplerPass.{h,cpp}：VertexArray/GLBuffer/Sampler RAII，无裸 GL 脚手架）
+│   │   ├── anim-rigid/       #   带骨架/蒙皮/内嵌 PBR 贴图的 FBX 走路（main + Shaders.h）：资产零动画片段，步态程序化生成——世界轴经骨骼 rest world 折进局部系、接触点解出骨盆高度、treadmill 周期由腿长推出；两阶段加载（LoadSkinned 在工作线程）
 │   │   ├── textured_sphere/  #   贴图球体 demo：一条索引流、两种细分——CPU 侧 `segments`/`rings` 实时重网格，同一份 MeshData 以 `Mesh::DrawAs(GL_PATCHES)` 送进 TCS/TES 做硬件细分；三张程序化 equirectangular 贴图免外部文件
 │   │   ├── shader_file/      #   从磁盘加载 GLSL（CreateFromFiles 两文件版）：坏路径 exit 1、无路径退回内嵌源
 │   │   ├── geometry_shader/  #   选择性装配几何阶段：CreateFromSources({Vertex,Geometry,Fragment})，喂 GL_POINTS 扩成方块阵

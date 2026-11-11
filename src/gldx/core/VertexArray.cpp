@@ -53,6 +53,13 @@ void VertexArray::AttachAttribute(GLuint index, GLint componentCount, GLenum typ
     glEnableVertexAttribArray(index);
 }
 
+void VertexArray::AttachIntegerAttribute(GLuint index, GLint componentCount, GLenum type,
+                                         GLsizei stride, const void* offset) const {
+    RenderContext::AssertRenderThread("VertexArray::AttachIntegerAttribute");
+    glVertexAttribIPointer(index, componentCount, type, stride, offset);
+    glEnableVertexAttribArray(index);
+}
+
 void VertexArray::DrawArrays(GLenum mode, GLint first, GLsizei count) const {
     RenderContext::AssertRenderThread("VertexArray::DrawArrays");
     glDrawArrays(mode, first, count);

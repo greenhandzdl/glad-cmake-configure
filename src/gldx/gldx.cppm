@@ -56,6 +56,14 @@ export {
 #include "gldx/shader/ParticleShaders.h"
 #include "gldx/shader/VoxelShaders.h"
 
+// --- animation -------------------------------------------------------------
+// Skinning is split like every other asset: the CPU side (Skeleton, the
+// SkinnedVertex layout, ModelLoader::LoadSkinned) builds on a worker thread and
+// the GPU side (SkinnedMesh) is uploaded on the render thread.
+#include "gldx/anim/Skeleton.h"
+#include "gldx/anim/SkinnedVertex.h"
+#include "gldx/anim/SkinnedMesh.h"
+
 // --- geometry --------------------------------------------------------------
 #include "gldx/geometry/Vertex.h"
 #include "gldx/geometry/Mesh.h"

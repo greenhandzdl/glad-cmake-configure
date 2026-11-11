@@ -10,7 +10,7 @@
 
 ## 2. 成品演示
 
-四个把 HUD 当产物写的 demo（`voxel_terrain` / `glass_water` / `night_forest`，加单功能 demo `text_hud`）用的是同一个引擎类 `gldx::Hud`（`src/gldx/text/Hud.h`）：行列表、面板按最宽行自 sizing、四角锚定、右对齐测量、行高推进、屏幕中心标记、以及"整块 overlay 只 begin/end 一次批"的记账全在引擎侧，demo 的 `Hud.{h,cpp}` 派生 `gldx::HudPass` 后**只写一个 `Build()` 负责拼字符串**（数字可以是 pass 的统计量、输入结构体的字段，或 `main.cpp` `snprintf` 好的一个 `std::string`）。面板颜色只有三个常量，全仓含义一致：`kFg` 是这个 demo 在主张的那件事、`kDim` 是上下文与键位、`kWarn`（琥珀）是"本帧缺了面板断言的东西"。写法与逐条口径见 [进阶 §6](8-advanced.md)。还在手排 `TextRenderer` 的是 `textured_sphere`（自己 `Measure` 量宽 + 画底板 + 手推 y 的左上角三行面板，正是 `gldx::Hud` 要替掉的那种写法——本轮只收敛上面四个 demo，它还没迁）与 `pbr_showcase`（用引擎自带的 `DebugHudPass`）。
+五个把 HUD 当产物写的 demo（`voxel_terrain` / `glass_water` / `night_forest` / `anim-rigid`，加单功能 demo `text_hud`）用的是同一个引擎类 `gldx::Hud`（`src/gldx/text/Hud.h`）：行列表、面板按最宽行自 sizing、四角锚定、右对齐测量、行高推进、屏幕中心标记、以及"整块 overlay 只 begin/end 一次批"的记账全在引擎侧，demo 的 `Hud.{h,cpp}` 派生 `gldx::HudPass` 后**只写一个 `Build()` 负责拼字符串**（数字可以是 pass 的统计量、输入结构体的字段，或 `main.cpp` `snprintf` 好的一个 `std::string`）。面板颜色只有三个常量，全仓含义一致：`kFg` 是这个 demo 在主张的那件事、`kDim` 是上下文与键位、`kWarn`（琥珀）是"本帧缺了面板断言的东西"。写法与逐条口径见 [进阶 §6](8-advanced.md)。还在手排 `TextRenderer` 的是 `textured_sphere`（自己 `Measure` 量宽 + 画底板 + 手推 y 的左上角三行面板，正是 `gldx::Hud` 要替掉的那种写法——本轮只收敛上面四个 demo，它还没迁）与 `pbr_showcase`（用引擎自带的 `DebugHudPass`）。
 
 ### `pbr_showcase`：全链路交互场景
 
@@ -64,6 +64,73 @@
 
 **操作**：`W`/`A`/`S`/`D` 飞行、`Space`/`Ctrl` 上下、`Shift` 减速（反射只有一米半宽，6 m/s 一步就跨过箱子）、鼠标转向（指针捕获）；`1` FBO 抓取、`2` 折射、`3` 灯笼点光、`4` 雾、`R` 放行/停住箱子；`[`/`]` 环境混合（0–0.60）、`-`/`=` 飞行速度、滚轮 fov；`C` 剔除、`V` 线框、`B` Bloom、`H` HUD、`G` 切贴地漫游、`F` 释放/捕获指针、`Esc` 只释放指针、`X` 退出。CLI features `capture,refract,lights,fog,roam,hud,bloom,cull,wireframe,cursor,walk` + options `stars,star-size,seed,trees,env-size,env-mix,env-lod,emissive,ior,band,moon-x,moon-y,moon-z,moon-int,density,start-at,speed,fov,yaw,pitch,pos-x,pos-y,pos-z,freeze-at,snapshot,snap-at,terrain,terrain-cells,terrain-cell,terrain-relief,terrain-smooth,terrain-levels,terrain-map,terrain-tile,walk-radius`；HUD 打印的是回读到的 GL/路径状态（`planted 817 fir + 583 broadleaf`、`env FBO capture 256 px mix 0.18 lod 1.5`、`faces 0 = crate parked`、`wander moving t 6.0 s heading 214 deg 4.1 m away`、`gooch band 0.16 warm/cold/lift` 三组实际进 GPU 的数），改了 uniform 而这一行不变就说明改动根本没上 GPU；面板末行还会报字体后端与图集（`font freetype  48 px bake  95 glyphs  1024x1024 atlas`）——这是唯一一行“截图本身证明不了”的事实，因为 FreeType 与 stb_truetype 兜底画出来的字几乎一样。
 
+### `anim-rigid`：带骨架与内嵌贴图的 FBX、GPU 蒙皮、和一段自己写的走路
+
+`./scripts/run.sh anim-rigid` 的画面只有一个角色：站在一块无限延伸的淡蓝灰地面上，腿一前一后地走，地面网格朝镜头滚过来，脚下有一团跟着移动的接触阴影。它要演示的事是**骨架、蒙皮权重与材质贴图全部来自文件本身，动画则完全不是**。参考资产带 23 根骨骼、17 个 skinned mesh、36443 顶点 / 17531 三角形、四种 PBR 贴图**内嵌在 FBX 二进制里**（最大 4096²），却**一个动画片段都没有**（`AnimationStack` 数为 0），所以走路是 demo 按钟表算出来的：姿态是时钟的纯函数，不播放任何 clip，也不累积 dt（逐帧读 `min(time, freezeAt)`）。这也是为什么 `--freeze-at` 之后同一组参数能画出同一帧——取证时唯一要注意的是快照时刻必须**晚于** freeze 时刻（见下面的一行命令）。
+
+**加载链路**（两阶段，Stage A 在工作线程）：`ModelLoader::LoadSkinned` 返回 `LoadedSkinnedModelData`（`meshes` + `skeleton` + `materials`/`meshMaterial` + `textures` + `missingTexturePaths`），它做的四件事各自都会静默出错，所以都写在注释里：① **把每个 mesh 节点的场景变换烘进顶点**——assimp 交出的是节点局部空间的顶点，而 cluster 的 bind 矩阵在 bind 场景空间（这份 FBX 是 Z-up，Y-up 转换停在 mesh 节点上），不烘就会让骨架相对自己的皮转 90 度；② **静止姿态由 inverse-bind 矩阵推导**而不是读文件的节点变换（这份资产上两者互相矛盾），于是“空姿态 == bind 姿态”是构造出来的，`W` 关掉走路回到 bind pose 就是这条性质的现场证据；③ **贴图字节自己解码**：这份 FBX 把图**内嵌**在文件里、材质指向一个并不存在的 `".fbm/"` 目录，只回路径的契约会把一个贴满图的身体报成裸模，所以 loader 用 `stbi_load_from_memory` 在工作线程解码，按用途定 `desc.srgb`（只有 albedo 是 sRGB），并把 **v 翻一次**（assimp 的 UV 以左下角为原点、解码后的 PNG 首行在上，不翻就是镜像采样）；④ **父子关系按名字从节点树取**：这个 FBX 里 `aiBone::mNode` 全是空的，只沿 mNode 爬会得到一具“全平”的骨架——而平骨架在 bind pose 下画得完美无缺，只有动起来才暴露成“脚不跟着腿”。`SkinnedMesh` 只是几何 owner（loc 0/1/2 = position/normal/uv、**5 = 骨骼索引**、6 = 权重），骨骼索引走 `VertexArray::AttachIntegerAttribute`（`glVertexAttribIPointer`：`uvec4` 经浮点归一化读出来可能指向隔壁骨骼）。每帧 `Skeleton::ComputeSkinning` 产出一份 `palette`（最多 `kMaxBonePalette = 64`，本资产用 23），顶点着色器做 4 影响线性混合。第一帧会**等** worker 返回再上传，所以相同 argv 的每一次运行后续帧完全一致。
+
+**走路**是绕**世界轴**写的（大腿绕横向轴摆），而每根骨骼自己的轴来自绑定，所以 `PoseRotation()` 用该骨骼的 rest world 矩阵把世界轴折进它的局部系；哪个方向是上/横向也不是常量，而是加载时从骨骼位置**量**出来的（上 = hips→head，横向 = 左大腿 − 右大腿，前向 = 叉乘）。步态本身按“支撑相 60% + 摆动相 40%”的两段曲线写：髋角在支撑相里线性后扫（脚是钉住的，骨盆匀速越过它，缓动反而会让角色一冲一冲）、摆动相用余弦缓动；膝屈只在摆动相前段达到峰值（峰值放在摆动中段就是正步走）；踝在脚跟着地时背屈、蹬地时跖屈，脚趾关节只在支撑相末尾、脚跟已经离地时弯；手臂与同侧腿反向摆。
+
+**手臂有三个各自的坑，一处都不能少**。这套绑定**手部一根骨骼都没有**（23 根骨骼全在躯干与四肢，没有手指），但手部网格**同时受 Hips/Spine/Head 和腕部链影响**——它自带一个会动的扇形（四根手指随腕部旋转张开、收拢），所以“手看起来是活的”只需要腕部转动就够了；换成一个 100% 绑在自己骨骼上的手，同一段代码就会显得僵硬。三个坑：
+
+- **T-pose 必须降到 A-pose**。绑定姿态是 T-pose，在 T-pose 上绕横向轴“摆”是让手臂绕自己长度自转，画面上等于没动，所以手臂先绕前向轴降下来（`armDown`）。**但不是降得越多越好**：降到 1.45 rad（83°，几乎垂直向下）时手腕正好落进裙子的锥体里——肩 x≈0.17、腕 y≈0.85 那圈的裙半径≈0.21，而腕在≈0.20，于是**手和裙子穿模**。现在的值是 **1.05 rad（60°）**。
+- **摆幅要跟着裙子收敛**：裙子是蒙在大腿上的（skinned），大步幅会把裙摆拖着走，所以 `hipSwing` 是 0.33 rad 而不是 0.36，`kneeSwingFlex` 0.72、`armSwing` 0.38。
+- **间隙靠外展拿，不靠更往前屈肘**。裙摆在髋高处有 0.2 m 宽，垂下来的腕会被它吞掉，所以除去屈肘（`elbowBase` 0.55，两个摆动相都保持）之外还要 0.05 rad 的前臂**外展**（`armOut`）；继续把肘往前屈只会让前臂更靠近裙面，方向正好相反。
+- 于是手不再是“两连杆钟摆的末端、朝向永远不变”那个死样子，而有三处远端旋转：±0.045 rad 的**锁骨前伸**（`clavicleRoll`，肩膀跟着手臂走一点）、**腕屈**（`wristBase` 0.14 起步、`wristSwing` 0.16 让手掌滞后于前臂）、**腕偏**（`wristDeviate` ±0.07，掌心随摆动内外转）。腕一转，手网格那个扇形跟着张开收拢——手指不是骨骼驱动的，但它们也不是刚性的。
+
+**这三处一度全是死代码——查句柄比调参数更值钱**：`ClassifyRig()` 只填了 `armUp`/`legUp`/`foot`/`toe` 这些链条，`rig.hand[2]` 与 `rig.clavicle[2]` 停在初始化值 `-1`；而所有腕/肩的调用都写成 `rotate(rig.hand[s], …)` / `rotate(rig.clavicle[s], …)`，`rotate()` 见 `bone < 0` 直接返回。于是**此前每一个渲染帧、每一张截图里腕屈、腕偏、锁骨前伸都是空操作**，而那套参数一直看起来“已经调好了”——手仍然是僵的，原因不在角度而在句柄。修法是把 `LeftHand`/`RightHand`/`LeftShoulder`/`RightShoulder` 和手臂链一起按名字查出来（这套资产里 `hand = {22, 14}`、`clavicle = {16, 11}`），而不是再加一个旋转：**先让已有的旋转真的落在骨头上，手的动作是捡回来的，不是新写的**。这也是本页处处坚持“量出来再写进正文”的原因——参数表本身不会告诉你它有没有接上。**这个 bug 现在是可复现的一行断言**：`--on report` 除了步态表还打一行 `[anim-rigid] rig: 20/20 slots bound`，任何一个槽位没解析出来都会被点名（坏构建上是 `; unbound: hand.L hand.R clavicle.L clavicle.R`）。把它写进文档的理由不是“多了个功能”，而是这条教训：**静默降级比崩溃更难查，所以给降级路径补一条出声的断言**——`rotate(-1)` 那种“参数越界就当没发生”的写法，会让一个真实缺陷以“手感差”的形态活过好几轮；换一套骨骼命名不同的资产，今后是当场报出未绑定的槽位，而不是再画一只僵硬的手。
+
+**骨盆的上下不是手写的 bob**：每只脚取脚跟与脚掌两个接触点（从 bind pose 一次取好，之后由 foot/toe 骨骼带着走），摆完姿势后找到最低的那个鞋底点，再把整个 `palette` 平移同样的量。于是“一个周期沉两次、双支撑最深”是解出来的而不是调出来的。这条求解在 HUD 上可以当场读出来：默认 `ground: pelvis  +9.4 mm | lowest sole  +0.0 mm`，而**关掉求解**（`--off ground`）同一帧变成 `lowest sole -13.0 mm`——脚陷进地板 13 mm，因为刚性骨骼链在 `p=0.000`（脚跟着地那一刻）根本无法让两只脚同时贴地（报告里 `soleL +0.0307 / soleR -0.0278`），求解器只能把前脚脚跟抬起来约 6 cm。这是没有 foot IK 的**诚实残差**，不是 bug：真实答案要么是脚 IK，要么是烘焙好的步态。
+
+**第二处残差在裙子上，没有修，也不假称修了**：走路时裙摆有一道撕开的三角翻片——下摆有一块面被拖到锥体之外，像被掀起来的一角；它在多个相位（`--freeze-at 0.9` 与 `3.4`）都在，只是形状随相位变，而 bind pose（`--off walk`）里完全没有。原因是资产权重：那圈下摆顶点的**主导影响是大腿骨**，于是它们按全权重绕髋旋转，而不是在髋与腿之间过渡（`hipSwing` 只是把它们转出去的那只手）；所以翻片**保持形状**、像一块刚体三角被拖到锥体外，而不是被拉长——这是“权重没有过渡”，不是姿态代码的问题。它与上面“刚性两连杆无法同时踩平两只脚”是同一类诚实残差，解法同样不在角度里：要么给裙子补一条骨骼链（本资产没有），要么重新刷权重；调 `hipSwing` 只会让裂口换个位置。
+
+**原地走（treadmill）与 `--speed`**：地面网格按 `speed*time` 往后滚，屏幕取景因此固定，变的只有走路本身。一个周期的行程由腿长与髋摆幅推出来（`4 * legLength * sin(hipSwing)`；参考资产腿长 0.90 m、周期 1.17 m），地面行程与步频共用这一个数——所以 `--speed` 改的是**步频与地面滚动**，不是步幅；两者一旦脱钩，脚就在地上打滑。
+
+**渲染**是两个 GLSL 410 程序，都直渲默认帧缓冲（不走 `PostProcessChain`，所以着色器自己 ACES + `pow(1/2.2)` 收尾）：一个单太阳的蒙皮 PBR（GGX + 高度相关 Smith + Schlick，albedo/metallic/roughness 贴图与材质标量相乘，法线贴图用 cotangent frame，半球天光补光），一个地面（程序化网格线 + 椭圆接触阴影 + 向天空的远处淡出）。程序里的四个 sampler **每次 draw 都绑一张完整贴图**：文件缺哪一种图就绑 1×1 的哑元（白 albedo、平法线 `(128,128,255)`、白色标量），因为 Apple 驱动上 active sampler 指向不完整贴图会直接丢掉整个 draw，看起来像“模型不见了”。
+
+**draw 数只数在 HUD 那一行上，而这一行本身就是那台天平**：默认 `palette 23/64 bones | bind check 4.8e-07 | 18 draws`，也就是 **17 次 skinned mesh 提交 + 1 次地面网格**；`--off ground` 变成 **17 draws**——正好少掉地面那一次，说明地面求解只占一个 draw、没有别的东西寄生在它上面；而 `--off walk` / `--off maps` / `--off normalmap` 都还是 **18 draws**。两句合起来才是这个 demo 的诚实说法：**走路是免费的**（同一个 18，关掉走路一次 draw 都不省），动画不是播放出来的 clip，而是几十行三角函数；能省下 draw 的只有地面。`--on report` 只往 stderr 打步态表，不打画面里的数字。
+
+还有一条与画面无关但值得写下来的约定：这个 pass 在 `Execute` 开头**自己设 GL 状态**（深度测试/深度写/背面剔除/关混合）。`SpriteBatch::End()` 只恢复 blending，所以一个从上一帧 HUD pass 继承状态的 3D pass 会在深度测试与剔除都关着的情况下画——症状是角色自己的背面与内层衣物透出来，看起来像蒙皮坏了。
+
+**自备一个模型**：仓内**不放** FBX（`*.fbx` 是整树 gitignore：仓库从不提交模型），默认路径 `src/demo/anim-rigid/demo_should_be_ignored.fbx` 只是一个投放位置——把自己的“带骨架 + 带蒙皮权重”的 FBX 丢到那里，或者用 `--model PATH` 指向别处；没有骨骼的文件 `LoadSkinned` 返回 `std::unexpected`（HUD 打红字），而不是画一具静态模型假装成功。加载结果与贴图情况会打在 stderr 上，不用凭猜。
+
+**操作**：`W` 走路开/关（关掉即 bind pose，可作为蒙皮的 A/B 对照组）、`G` 地面、`F` 线框、`H` HUD；拖拽轨道旋转、滚轮缩放；`Esc` 退出。CLI features `hud,walk,ground,wireframe,maps,normalmap,report` + options `model,speed,fov,yaw,pitch,distance,freeze-at,target-y`（`--target-y` 抬轨道中心，默认 0.92 m 在胸口附近）。这些开关**只认 `--on`/`--off`**（`--off ground`、`--on wireframe`），写 `--walk`/`--ground` 会被 `Flags` 报 unknown argument。
+
+**`--on report` 的步态表**（16 行采样，这里摘 7 行；相位是周期比例，关节角是 rad，鞋底是**求解前**离地高度，单位 m。同一路径还会打一行绑定断言 `[anim-rigid] rig: 20/20 slots bound`，见下面「手臂」一节）：
+
+```
+0.000 -0.330 +0.140 -0.180 | +0.0307 -0.0278     # 脚跟着地：刚性链两只脚无法同时贴地
+0.188 -0.124 +0.031 +0.000 | -0.0054 +0.1681
+0.375 +0.083 +0.000 +0.000 | -0.0182 +0.0087
+0.562 +0.289 +0.000 +0.315 | -0.0214 +0.0156     # 支撑相末尾，踝跖屈 + 趾关节
+0.688 +0.255 +0.720 +0.042 | +0.1766 -0.0038     # 摆动腿抬到最高 0.177 m，而且在身体后侧
+0.750 +0.126 +0.634 +0.000 | +0.0877 -0.0093     # 移到身体下方时已经降到 0.088 m
+0.938 -0.291 +0.000 -0.162 | +0.0373 -0.0235
+```
+
+峰值 0.177 m 出现在 `p=0.688`（还在身体后方）、到 `p=0.750`（移到身体下方）已经掉到 0.088 m——这个**不对称**正是“不像正步走”的来源：正步走会把抬腿的峰值放在脚下最需要间隙的那一瞬。
+
+**无头取证**（`--off hud` 让两次运行之间只剩姿态一个变量；**快照时刻必须晚于 `--freeze-at`**，写同一个值会拍到时钟还没被夹住的那一帧）：
+
+```bash
+# 基线帧。A/A：同参数连跑三次逐字节全等（cmp 全等）
+GLDX_SNAPSHOT=/tmp/a.bmp GLDX_SNAPSHOT_AT=3.0 ./output/anim-rigid --off hud --freeze-at 2 --quit-after 6
+
+# 对照组一：关掉走路，画的是 bind pose
+GLDX_SNAPSHOT=/tmp/b.bmp GLDX_SNAPSHOT_AT=3.0 ./output/anim-rigid --off hud --off walk --freeze-at 2 --quit-after 6
+
+# 对照组二：关掉贴图，退回材质标量（证明那四张图确实来自 FBX 内嵌字节）
+GLDX_SNAPSHOT=/tmp/c.bmp GLDX_SNAPSHOT_AT=3.0 ./output/anim-rigid --off hud --off maps --freeze-at 2 --quit-after 6
+
+# 对照组三：线框，看 17531 个三角形真的都在
+GLDX_SNAPSHOT=/tmp/d.bmp GLDX_SNAPSHOT_AT=3.0 ./output/anim-rigid --off hud --on wireframe --freeze-at 2 --quit-after 6
+```
+
+参考资产在 2560×1520 上、对最终二进制 `e171a9020a734afc` 实测：`--off walk` 差 **3.20%** 的像素（阈值 >8/255，最大通道差 **228**）、`--off maps` 差 **3.44%**（最大 **231**）、`--on wireframe` 差 **62.72%**（最大 **237**）。`walk` 这一项在腕/锁骨修复**之前**是 3.21%，修复只搬动了阈值边缘约 250 个像素（手在画面里很小，这本身是个有用的尺度感）；三个数字在修复后重测、且最终二进制的基线帧与修复构建逐字节相同（`md5 bbf2e477d46e5695f107164135c618d8`），所以复现时应当看到 3.20%。参考资产同一帧的 stderr 与 HUD 是同一组数：`23 bones, 17 meshes, 36443 verts (17531 tris), height 1.64 m, palette 23/64, bind check 4.8e-07`、`textures: albedo yes, normal yes, metallic yes, roughness yes (up to 4096x4096 px); 0 unreferenced map path(s)`、`hierarchy: 1 root bone(s), depth 8, foot chain 4 -> 5 -> 6`；HUD 另报 `leg 0.90 m | cycle 1.17 m` 与 `18 draws`。
+
+**还有一处诚实的粗糙**：`--on wireframe` 会把角色与地面一起画成线框，所以 62.72% 这个数字是“整幅画面的三角形都被改画了”，不是“角色轮廓变了”的度量；要单独量角色就用 `--off ground`（此时 17 draws、27.4% 的画面仍是天空）。
+
 ## 3. Demo 索引
 
 | demo（目录 = 可执行名） | 演示的子系统 | 运行 |
@@ -95,6 +162,7 @@
 | `geometry_shader_file` | `CreateFromFiles({{Vertex},{Geometry},{Fragment}})` 多阶段从磁盘加载（含从文件装配的几何阶段；坏路径 exit 1，无路径退回内嵌源） | `./scripts/run.sh geometry_shader_file` |
 | `shader_stages` | `CreateFromSources` 一次装配全 5 个图形阶段（V+TC+TE+G+F），画 GL_PATCHES 细分线框 | `./scripts/run.sh shader_stages` |
 | `menger_sponge` | 顶点/几何阶段**生成**几何：`uniform int uLevel` 即细分层级（无 mesh 重建）；另一臂用 `gldx::TransformFeedback` 让 GPU 自行细分，绘制数直接取 `PRIMITIVES_GENERATED` | `./scripts/run.sh menger_sponge` |
+| `anim-rigid` | 骨架 + GPU 蒙皮 + 内嵌贴图：`ModelLoader::LoadSkinned`（烘 mesh 节点变换、rest pose 由 inverse-bind 矩阵推、`aiBone::mNode` 为空时按名字从节点树取父级、内嵌 PNG 在工作线程解码并翻一次 v）→ `gldx::Skeleton`（FK + 每帧 palette）→ `SkinnedMesh`（`uvec4` 骨骼索引走 `AttachIntegerAttribute`），fragment 是单太阳 PBR 且 albedo/normal/metallic/roughness 四张图都来自 FBX 本体；资产没有动画片段，走路是按钟表算的程序化步态（世界轴经 rest world 折进骨骼局部系、对侧摆臂、膝屈峰值放在摆动前段、接触点解出骨盆高度而不手写 bob），treadmill 地面按 `speed*time` 滚，周期 1.27 m 由腿长与髋摆幅推出 | `./scripts/run.sh anim-rigid` |
 
 > 最小实现基线不在表内：`./scripts/run.sh`（默认目标 `GLFW_Template`）即 `src/main.cpp` 的 hello-triangle（高层 `Mesh` 路径）；其手搭底层对照版在表内的 `hello_triangle` 行。
 

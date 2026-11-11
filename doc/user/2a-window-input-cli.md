@@ -458,8 +458,9 @@ const double quit = flags.quitAfter();                        // --quit-after �
 | `--pos-x/--pos-y/--pos-z` + `--yaw/--pitch` | 设定 `glass_water` 飞行相机的出生点与朝向（透明错序只在“视线穿过两层以上”时可见，所以取证视角必须钉死） |
 | `--blend straight\|premultiplied\|additive` | 选混合方程（`glass_water`，**默认 `premultiplied`**：三种方程对“a=0.5 是什么”给三种答案，additive 是排序开关的对照组；标量 alpha 下 straight 与 premultiplied 逐字节相同） |
 | `--wave N` / `--speed N` | 海面波幅 / 飞行速度（`glass_water`，全部夹在合法区间内） |
+| `--off walk` / `--off maps,normalmap` + `--target-y N` | `anim-rigid` 的两侧对照组：关 `walk` 即回到 **bind pose**（`Skeleton` 的 rest pose 由 inverse-bind 矩阵推出，所以“空姿态 == bind 姿态”，与走路帧差 3.21% 像素（阈值 >8/255，最大通道差 228））；关 `maps` 退回材质标量、关 `normalmap` 只用几何法线（关 `maps` 与基线差 3.44%，证明四张图真来自 FBX 内嵌字节；`--on wireframe` 差 62.72%，但它连地面一起画成线框）；`--target-y` 抬轨道中心（默认 0.92 m 在胸口，不是脚踝）。`--on report` 不打画面，只往 stderr 打 16 行步态表 + 一行 `rig: 20/20 slots bound`（骨骼槽位绑定断言，未绑定的会被点名）；关 `walk`/`maps`/`normalmap` 都不改 draw 数（仍是 18 = 17 次 skinned mesh + 1 次地面，走路与贴图都是免费的），只有关 `ground` 才掉到 17；这些开关只认 `--on`/`--off`，写 `--walk` 会被报 unknown argument |
 | `--on ortho` + `--fov N` / `--ortho-height N` | `glass_water` 的投影：`--on ortho` 直接以正交取景出生（把掠射渐变拿掉，是菲涅耳项的对照组），`--fov`（8..110）与 `--ortho-height`（盒高 2..80 m）是同一个滚轮在两种模式下驱动的两个量，`Tab` 在交互里切换 |
-| `--snapshot PATH` [--snap-at SEC] | 无头出一张图（不弹窗），与 `--freeze-at` 配合做像素对照 |
+| `--snapshot PATH` [--snap-at SEC] | 无头出一张图（不弹窗），与 `--freeze-at` 配合做像素对照。**快照时刻必须晚于 `--freeze-at`**：写同一个值时可能拍到时钟还没被夹住的那一帧（`anim-rigid` 同参数两次因此差 64% 像素），这类“不确定”先查取景时刻，别先怀疑渲染开关 |
 
 拿这些开关做过的事（逐 demo 的取证像素差、退出统计行、畸形 argv 的对抗输入自检）记在 [Demo 画廊 §4](10-demos.md) 与 [进阶 §1.1](8-advanced.md)。
 
