@@ -16,7 +16,7 @@
 - 平台：Windows / macOS / Linux。
 - 依赖：GLFW（系统包）、GLAD（系统优先/子模块回退）、GLM（header-only）、STB（git 子模块内置）、Assimp（git 子模块，可选：`GLDX_ENABLE_ASSIMP` 默认 `ON`）、FreeType（git 子模块，字体光栅器，可选：`GLDX_ENABLE_FREETYPE` 默认 `ON`）。
 - 子模块：`third_party/glad`、`third_party/stb`、`third_party/assimp`、`third_party/freetype`。
-- 许可证：见 `LICENSE`。当前正式版 tag：`v1.7.1`。
+- 许可证：见 `LICENSE`。当前正式版 tag：`v1.7.2`。
 
 ## 硬性前提（先检查，否则必失败）
 
