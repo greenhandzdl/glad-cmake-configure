@@ -46,6 +46,7 @@
 
 #include <glm/glm.hpp>
 
+#include "gldx/anim/RigProfile.h"
 #include "gldx/anim/Skeleton.h"
 #include "gldx/anim/SkinnedMesh.h"
 #include "gldx/assets/ModelLoader.h"
@@ -76,7 +77,15 @@ public:
     // Afterwards ready() tells whether anything arrived. A model that uploaded 0
     // meshes is not an error to throw over: the caller may still want the
     // diagnostics (sourcePath, skeleton bone count) to print.
-    void Upload(LoadedSkinnedModelData&& data);
+    //
+    // `rig` is optional and only exists to avoid classifying twice: the caller has
+    // usually built a RigProfile already (it needs one for SetOrientation and for
+    // its own gait), and the leg-length measurement below needs one too. Passing it
+    // in keeps this class from growing a second classification pass - and, less
+    // obviously, keeps Upload's cost from depending on how many times a caller
+    // looked at the rig. Pass std::nullopt (or omit) and Upload classifies once
+    // itself; that is correct, just not free.
+    void Upload(LoadedSkinnedModelData&& data, const RigProfile* rig = nullptr);
 
     [[nodiscard]] bool ready() const noexcept { return !meshes_.empty(); }
     [[nodiscard]] const std::string& sourcePath() const noexcept { return sourcePath_; }

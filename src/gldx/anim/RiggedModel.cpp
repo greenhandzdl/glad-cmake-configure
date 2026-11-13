@@ -31,7 +31,7 @@ glm::vec3 BonePosition(const Skeleton& skeleton, int bone) {
 
 } // namespace
 
-void RiggedModel::Upload(LoadedSkinnedModelData&& data) {
+void RiggedModel::Upload(LoadedSkinnedModelData&& data, const RigProfile* rig) {
     RenderContext::AssertRenderThread("RiggedModel::Upload");
 
     skeleton_   = std::move(data.skeleton);
@@ -161,9 +161,23 @@ void RiggedModel::Upload(LoadedSkinnedModelData&& data) {
     // visible approximation rather than a safe default - this number feeds stride
     // length and cadence, so a rig at a very different proportion skates its feet.
     {
-        const int hips = skeleton_.Find("Hips");
-        const int ankle = (skeleton_.Find("LeftFoot") >= 0) ? skeleton_.Find("LeftFoot")
-                                                            : skeleton_.Find("Foot.L");
+        // Classify through RigProfile rather than `Find("Hips")` etc. This class must
+        // not look names up itself: the paragraph above says so, and the first version
+        // of this block broke its own rule (it hardcoded "Hips"/"LeftFoot"/"Foot.L"),
+        // which meant every non-Mixamo rig - a Hunyuan asset, say - silently fell back
+        // to the 0.52 * height guess with no diagnostic at all. Going through
+        // RigProfile instead means a new naming family is picked up here for free, and
+        // the only way to get the fallback is a rig that genuinely has no leg chain.
+        // Reuse the caller's classification when it handed one over; classifying
+        // again here would be the same answer computed twice (and, on a demo whose
+        // first frame is timing-sensitive, two extra passes over a 23-bone rig).
+        RigProfile local;
+        if (rig == nullptr) {
+            local = RigProfile::Classify(skeleton_);
+            rig = &local;
+        }
+        const int hips = rig->hips;
+        const int ankle = rig->foot[kRigLeft];
         if (hips >= 0 && ankle >= 0) {
             const float span = glm::length(BonePosition(skeleton_, hips)
                                            - BonePosition(skeleton_, ankle)) * unitScale_;

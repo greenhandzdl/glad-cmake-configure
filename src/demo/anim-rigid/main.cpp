@@ -664,7 +664,9 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         }
     }
 
-    character.model.Upload(std::move(data));
+    // Hand the classification in rather than letting Upload redo it: we already
+    // have one, and Upload's leg-length measurement needs exactly this answer.
+    character.model.Upload(std::move(data), &character.rig);
     const gldx::RiggedModel& model = character.model;
     if (!model.ready()) {
         character.error = "the file carried no skinned mesh";
