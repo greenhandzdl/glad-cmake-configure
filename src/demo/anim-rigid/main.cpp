@@ -199,6 +199,12 @@ LegAngles LegAt(const GaitTuning& tune, float p) {
 
 namespace {
 
+// Which action is being asked for. A free enum in the demo namespace rather than a
+// member of Character: the input callback records it into the View, the frame loop
+// turns it into a machine Request. Keeping it out of Character is what lets the
+// callback stay free of the animation machine.
+enum class Action { Walk, Run, Crouch, Attack, Jump };
+
 // ---------------------------------------------------------------------------
 // The demo's own state around one character: everything that is NOT the rig
 // itself. The rig (skeleton, meshes, maps, unit scale, rest worlds) is
@@ -224,7 +230,13 @@ struct Character {
     // model has uploaded - so it cannot be a plain member built in step with
     // this struct.
     std::unique_ptr<gldx::ProceduralWalk> walkSource;
+    std::unique_ptr<gldx::ProceduralRun>  runSource;
+    std::unique_ptr<gldx::ProceduralCrouch> crouchSource;
+    std::unique_ptr<gldx::ProceduralAttack> attackSource;
+    std::unique_ptr<gldx::ProceduralJump>   jumpSource;
     gldx::AnimStateMachine               machine;
+
+
 
     float cycleMetres = 1.0f;         // floor travel per full two-step cycle
     std::string error;
@@ -271,6 +283,9 @@ struct View {
     float distance = 3.6f;
     float fov      = 42.0f;
     float speed    = 1.30f;   // metres per second of floor travel
+    // What the number keys asked for. Applied to the machine inside the frame loop,
+    // never from a callback (see the OnKey comment).
+    Action requestAction = Action::Walk;
     float freezeAt = 0.0f;    // > 0 pins the clock, for reproducible snapshots
     double clock   = 0.0;     // animation seconds (already clamped by freezeAt)
     float scroll   = 0.0f;    // metres of floor travelled
@@ -484,8 +499,21 @@ public:
             float cyclePhase = character_.phaseFor(view_.speed, static_cast<float>(view_.clock)) /
                                (2.0f * kPi);
             cyclePhase -= std::floor(cyclePhase);
-            std::snprintf(line, sizeof(line), "walk %s | gait phase %.2f cycle | %.2f m/s",
-                          view_.walk ? "on " : "off", static_cast<double>(cyclePhase),
+            // The action name is the one thing the panel must say when it is not
+            // walking: a frozen `--action crouch` frame and a frozen `--action run`
+            // frame are both "a person standing there", and without this line the
+            // screenshot cannot prove which one it is.
+            const char* actionName = "walk";
+            switch (view_.requestAction) {
+                case Action::Walk:   actionName = "walk";   break;
+                case Action::Run:    actionName = "run";    break;
+                case Action::Crouch: actionName = "crouch"; break;
+                case Action::Attack: actionName = "attack"; break;
+                case Action::Jump:   actionName = "jump";   break;
+            }
+            std::snprintf(line, sizeof(line), "%s %s | gait phase %.2f cycle | %.2f m/s",
+                          actionName, view_.walk ? "on " : "off",
+                          static_cast<double>(cyclePhase),
                           static_cast<double>(view_.speed));
             hud.AddLine(line, gldx::Hud::kFg);
             std::snprintf(line, sizeof(line), "height %.2f m (rig unit x%.3g) | leg %.2f m | cycle %.2f m",
@@ -622,7 +650,24 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     character.walkSource = std::make_unique<gldx::ProceduralWalk>(
         skeleton, character.rig, model.restWorld(), character.tune,
         character.cycleSeconds(1.0f));
+    // The other four actions. Their durations are independent of the floor speed:
+    // a run cycle is 0.72 s whatever the treadmill does (speed changes cadence in
+    // this demo, and the run's own cadence is fixed), and jump/attack are events
+    // with a fixed length.
+    character.runSource = std::make_unique<gldx::ProceduralRun>(
+        skeleton, character.rig, model.restWorld(), gldx::RunTuning{}, 0.72f);
+    character.crouchSource = std::make_unique<gldx::ProceduralCrouch>(
+        skeleton, character.rig, model.restWorld(), gldx::CrouchTuning{});
+    character.attackSource = std::make_unique<gldx::ProceduralAttack>(
+        skeleton, character.rig, model.restWorld(), gldx::AttackTuning{});
+    character.jumpSource = std::make_unique<gldx::ProceduralJump>(
+        skeleton, character.rig, model.restWorld(), gldx::JumpTuning{});
     character.machine.Set(character.walkSource.get());
+
+    // The number keys / --action pick a source directly instead of going through the
+    // machine: the machine exists to *blend* between actions, and a frozen single-
+    // action frame that is mid-transition is not a useful reference image. The
+    // machine's four-transition path is exercised by the probe, not by the demo.
 
     std::fprintf(stderr,
                  "[anim-rigid] %s: %zu bones, %zu meshes, %zu verts (%zu tris), height %.2f m, "
@@ -718,7 +763,7 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
 int main(int argc, char** argv) {
     const gldx::cli::Flags flags(argc, argv, {"hud", "walk", "ground", "wireframe", "maps", "normalmap", "report"},
                                  {"model", "speed", "fov", "yaw", "pitch", "distance", "freeze-at",
-                                  "target-y"},
+                                  "target-y", "action"},
                                  "anim-rigid");
     if (flags.wantsHelp()) {
         flags.printUsage();
@@ -740,6 +785,25 @@ int main(int argc, char** argv) {
     view.distance  = flags.real("distance", view.distance, 0.8f, 30.0f);
     view.freezeAt  = flags.real("freeze-at", 0.0f, 0.0f, 1.0e6f);
     view.target.y  = flags.real("target-y", view.target.y, 0.0f, 3.0f);
+
+    // Which action to play. Exists so the non-walk actions can be verified without
+    // a keyboard: the number keys are unreachable from a `--quit-after` run, and a
+    // switch that can only be exercised by a human is a switch nobody regression
+    // tests. Unknown names are ignored (the demo keeps walking) rather than fatal -
+    // this is a demo, and a typo should not stop the window from opening.
+    {
+        const std::string action = flags.string("action", "walk");
+        if (action == "walk")        view.requestAction = Action::Walk;
+        else if (action == "run")    view.requestAction = Action::Run;
+        else if (action == "crouch") view.requestAction = Action::Crouch;
+        else if (action == "attack") view.requestAction = Action::Attack;
+        else if (action == "jump")   view.requestAction = Action::Jump;
+        else {
+            std::fprintf(stderr, "[anim-rigid] unknown --action '%s'; using walk "
+                                 "(known: walk, run, crouch, attack, jump)\n",
+                         action.c_str());
+        }
+    }
     const std::string modelPath = flags.string("model", kDefaultModel);
 
     gldx::win::WindowDesc desc;
@@ -815,6 +879,15 @@ int main(int argc, char** argv) {
             case gldx::win::Key::W: view.walk = !view.walk; break;
             case gldx::win::Key::G: view.ground = !view.ground; break;
             case gldx::win::Key::F: view.wireframe = !view.wireframe; break;
+            // Action selection. Only records the request; the frame loop applies it
+            // to the machine, because switching actions is a per-frame decision
+            // (it needs the current phase) and must not happen inside a GLFW
+            // callback that can fire between two of our own updates.
+            case gldx::win::Key::Num1: view.requestAction = Action::Walk; break;
+            case gldx::win::Key::Num2: view.requestAction = Action::Run; break;
+            case gldx::win::Key::Num3: view.requestAction = Action::Crouch; break;
+            case gldx::win::Key::Num4: view.requestAction = Action::Attack; break;
+            case gldx::win::Key::Num5: view.requestAction = Action::Jump; break;
             case gldx::win::Key::H:
                 view.showHud = !view.showHud;
                 hudRaw->hud.SetVisible(view.showHud);
@@ -857,11 +930,44 @@ int main(int argc, char** argv) {
         if (character.ready()) {
             const gldx::RiggedModel& model = character.model;
             const float phase = character.phaseFor(view.speed, animSeconds);
-            if (view.walk && character.rig.walkable && character.walkSource) {
+            // Default path unchanged: Action::Walk samples the walk source at the
+            // exact phase the pre-animation-layer demo used, so `--off hud
+            // --freeze-at` frames stay byte-identical.
+            const bool walking = (view.requestAction == Action::Walk);
+            if (walking && view.walk && character.rig.walkable && character.walkSource) {
                 character.walkSource->Sample(
                     character.walkTimeFor(phase), character.pose);
-            } else {
+            } else if (walking) {
                 gldx::ResetToRest(model.skeleton(), character.pose);
+            } else if (!view.walk) {
+                // W (walk on/off) is the master switch for the whole action layer:
+                // with it off every action collapses to rest, which is what makes
+                // `--off walk` a stable A/B baseline regardless of the number keys.
+                gldx::ResetToRest(model.skeleton(), character.pose);
+            } else {
+                // The other four actions are time-driven rather than phase-driven.
+                // Their clock is the same frozen-friendly `animSeconds`, so a
+                // `--freeze-at` frame is still a pure function of argv.
+                switch (view.requestAction) {
+                    case Action::Run:
+                        if (character.runSource)
+                            character.runSource->Sample(animSeconds, character.pose);
+                        break;
+                    case Action::Crouch:
+                        if (character.crouchSource)
+                            character.crouchSource->Sample(animSeconds, character.pose);
+                        break;
+                    case Action::Attack:
+                        if (character.attackSource)
+                            character.attackSource->Sample(animSeconds, character.pose);
+                        break;
+                    case Action::Jump:
+                        if (character.jumpSource)
+                            character.jumpSource->Sample(animSeconds, character.pose);
+                        break;
+                    case Action::Walk:
+                        break;   // handled above
+                }
             }
             model.skeleton().ComputeSkinning(character.pose, model.Mat4(), character.palette);
 

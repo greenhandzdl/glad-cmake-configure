@@ -129,8 +129,23 @@ class AnimPoseSource {
 
 - `gldx::ProceduralWalk`（+ `WalkTuning`）—— 程序化步态。曲线的**形状**是通用人形知识（支撑相 60%、摆动早期抬膝、蹬离后踝解旋），所以住在引擎；**数值**是调出来的（`armDown = 1.05` 只因为那具角色穿裙子），所以由调用方通过 `WalkTuning` 给，默认值就是参考资产的调好值。`WalkTuning::crouch` 让"蹲下行走"成为行走的一个参数，而不是第二套步态曲线——两套曲线迟早会不一致。
 - `gldx::ProceduralJump`（+ `JumpTuning`）—— 起跳/腾空/落地三段。除了 `Sample`，它还多给两个数：`GroundedAt(t)` 与 `AirborneRiseAt(t)`。
+- `gldx::ProceduralRun`（+ `RunTuning`）—— 跑步。**不是"更快的走路"**：支撑相从 0.6 降到 0.35，两条腿的支撑区间不再相接，中间留出腾空，所以它是独立类型而不是一个参数。`AirborneWeightAt(t)` 给 0..1 的连续腾空权重。
+- `gldx::ProceduralCrouch`（+ `CrouchTuning`）—— 原地蹲伏 + 呼吸。"蹲着走"不在这一类，那是 `WalkTuning::crouch`。`ContactPhase()` 返回 -1：蹲着时没有落脚瞬间。
+- `gldx::ProceduralAttack`（+ `AttackTuning`）—— 挥砍：蓄力 → 挥出 → 收势。三段的同步压成一个 `drive` 标量。`HitReachedAt(t)` 问命中时刻。**末帧不等于 rest pose**（手臂下放是常驻的）。
 
 关键帧动画是第三种实现：写一个 `AnimPoseSource` 子类包住采样结果即可，**上层一行都不用改**。这也是这一层存在的理由。
+
+### 跑步的腾空相也要衰减地面解算
+
+跑步和跳跃不同：跳跃是一整段明确的腾空，跑步每个周期有两段很短的（`0.35→0.5` 与 `0.85→1.0`，各约 15%）。这里不用布尔，用连续权重：
+
+```cpp
+const float air = character.run.AirborneWeightAt(t);
+const auto s = ground.Solve(palette);
+GroundContact::ApplyLift(palette, s.lift * (1.0f - air));
+```
+
+布尔量会在腾空边界那一帧让骨盆高度突变（看起来"跳一下"）；权重衰减是一条连续过渡。
 
 ### 跳跃必须关掉地面解算
 
@@ -161,3 +176,22 @@ machine.Evaluate(pose);                              // 拿到混合结果
 `AnimTransition::atContact = true` 会让请求**挂起等待当前动作的落脚相位**再切，期间继续播旧动作、请求不会丢（有 `contactTimeout` 兜底）。走路中途起跳切在双支撑相才不像踉跄——状态机不认识步态曲线，只认识 `ContactPhase()`。
 
 一个已知的取舍：混合用逐元素矩阵 lerp，对现有这些由 `RotateBone` 叠出来的小角度旋转是够的；若将来接入手工关键帧（可能出现大角度差），过渡途中会把肢体压扁，届时换成四元数 slerp——混合只关在 `AnimStateMachine` 里，那次替换是局部的。
+
+### 攻击末帧停在哪
+
+`ProceduralAttack` 播完的最后一帧**不等于** `ResetToRest()`，因为 `armDown`（把 T-pose 的手臂放下来）是常驻的——挥砍必须发生在一条下垂的手臂上，否则"挥"读起来像把整条手臂从肩膀横着扫地。
+
+所以从攻击切回行走是平滑的（两者都带 `armDown`），但直接切到一个真正的静止 rest pose 时手臂会突然横回去。想要干净收尾就让收势结束后切到另一个动作，而不是停在 rest。
+
+### 五种动作一次看全
+
+`anim-rigid` 的 `--action` 可以脚本化选中任意一种（`1`-`5` 键在窗口里做同样的事）：
+
+```bash
+for a in walk run crouch attack jump; do
+  GLDX_SNAPSHOT=/tmp/$a.bmp GLDX_SNAPSHOT_AT=3.0 \
+    ./output/anim-rigid --action $a --off hud --freeze-at 2 --quit-after 6
+done
+```
+
+默认（`--action walk`）与引入动作层之前**逐字节相同**，所以这条命令同时是回归测试：第一个 md5 必须等于旧基线。
