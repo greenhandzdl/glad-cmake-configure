@@ -203,7 +203,7 @@ namespace {
 // member of Character: the input callback records it into the View, the frame loop
 // turns it into a machine Request. Keeping it out of Character is what lets the
 // callback stay free of the animation machine.
-enum class Action { Idle, Walk, Run, Crouch, Attack, Jump };
+enum class Action { Idle, Walk, Run, Crouch, CrouchWalk, Attack, Jump };
 
 // ---------------------------------------------------------------------------
 // The demo's own state around one character: everything that is NOT the rig
@@ -233,6 +233,7 @@ struct Character {
     std::unique_ptr<gldx::ProceduralWalk> walkSource;
     std::unique_ptr<gldx::ProceduralRun>  runSource;
     std::unique_ptr<gldx::ProceduralCrouch> crouchSource;
+    std::unique_ptr<gldx::ProceduralWalk>   crouchWalkSource;
     std::unique_ptr<gldx::ProceduralAttack> attackSource;
     std::unique_ptr<gldx::ProceduralJump>   jumpSource;
 
@@ -542,6 +543,7 @@ public:
                 case Action::Walk:   actionName = "walk";   break;
                 case Action::Run:    actionName = "run";    break;
                 case Action::Crouch: actionName = "crouch"; break;
+                case Action::CrouchWalk: actionName = "crouchwalk"; break;
                 case Action::Attack: actionName = "attack"; break;
                 case Action::Jump:   actionName = "jump";   break;
             }
@@ -692,6 +694,17 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // with a fixed length.
     character.runSource = std::make_unique<gldx::ProceduralRun>(
         skeleton, character.rig, model.restWorld(), gldx::RunTuning{}, 0.72f);
+    // Crouch-walking is walk's own curve with `crouch = 1`, not a separate action:
+    // same gait, narrower stride, knees held bent. Making it a second set of curves
+    // is how the two drift apart. The pelvis drop is still solved from ground contact,
+    // so nothing here hard-codes a height.
+    {
+        gldx::WalkTuning crouchTune = character.tune;
+        crouchTune.crouch = 1.0f;
+        character.crouchWalkSource = std::make_unique<gldx::ProceduralWalk>(
+            skeleton, character.rig, model.restWorld(), crouchTune,
+            character.cycleSeconds(1.0f));
+    }
     character.crouchSource = std::make_unique<gldx::ProceduralCrouch>(
         skeleton, character.rig, model.restWorld(), gldx::CrouchTuning{});
     character.attackSource = std::make_unique<gldx::ProceduralAttack>(
@@ -833,11 +846,12 @@ int main(int argc, char** argv) {
         else if (action == "walk")   view.requestAction = Action::Walk;
         else if (action == "run")    view.requestAction = Action::Run;
         else if (action == "crouch") view.requestAction = Action::Crouch;
+        else if (action == "crouchwalk") view.requestAction = Action::CrouchWalk;
         else if (action == "attack") view.requestAction = Action::Attack;
         else if (action == "jump")   view.requestAction = Action::Jump;
         else {
             std::fprintf(stderr, "[anim-rigid] unknown --action '%s'; using walk "
-                                 "(known: idle, walk, run, crouch, attack, jump)\n",
+                                 "(known: idle, walk, run, crouch, crouchwalk, attack, jump)\n",
                          action.c_str());
         }
     }
@@ -1010,6 +1024,13 @@ int main(int argc, char** argv) {
                     case Action::Crouch:
                         if (character.crouchSource)
                             character.crouchSource->Sample(animSeconds, character.pose);
+                        break;
+                    case Action::CrouchWalk:
+                        // Phase-driven like walk, because it *is* walk - the floor
+                        // and the feet have to stay in step or the character skates.
+                        if (character.crouchWalkSource)
+                            character.crouchWalkSource->Sample(
+                                character.walkTimeFor(phase), character.pose);
                         break;
                     case Action::Attack:
                         if (character.attackSource)

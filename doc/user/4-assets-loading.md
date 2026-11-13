@@ -130,7 +130,7 @@ class AnimPoseSource {
 - `gldx::ProceduralWalk`（+ `WalkTuning`）—— 程序化步态。曲线的**形状**是通用人形知识（支撑相 60%、摆动早期抬膝、蹬离后踝解旋），所以住在引擎；**数值**是调出来的（`armDown = 1.05` 只因为那具角色穿裙子），所以由调用方通过 `WalkTuning` 给，默认值就是参考资产的调好值。`WalkTuning::crouch` 让"蹲下行走"成为行走的一个参数，而不是第二套步态曲线——两套曲线迟早会不一致。
 - `gldx::ProceduralJump`（+ `JumpTuning`）—— 起跳/腾空/落地三段。除了 `Sample`，它还多给两个数：`GroundedAt(t)` 与 `AirborneRiseAt(t)`。
 - `gldx::ProceduralRun`（+ `RunTuning`）—— 跑步。**不是"更快的走路"**：支撑相从 0.6 降到 0.35，两条腿的支撑区间不再相接，中间留出腾空，所以它是独立类型而不是一个参数。`AirborneWeightAt(t)` 给 0..1 的连续腾空权重。
-- `gldx::ProceduralCrouch`（+ `CrouchTuning`）—— 原地蹲伏 + 呼吸。"蹲着走"不在这一类，那是 `WalkTuning::crouch`。`ContactPhase()` 返回 -1：蹲着时没有落脚瞬间。
+- `gldx::ProceduralCrouch`（+ `CrouchTuning`）—— 原地蹲伏 + 呼吸。"蹲着走"不在这一类，那是 `WalkTuning::crouch = 1`（**同一条步态曲线**，只是步幅收窄、膝盖常态屈曲；做成两套曲线之后必然有一天会不一致，demo 里 `--action crouchwalk` 就是它）。`ContactPhase()` 返回 -1：蹲着时没有落脚瞬间。
 - `gldx::ProceduralAttack`（+ `AttackTuning`）—— 挥砍：蓄力 → 挥出 → 收势。三段的同步压成一个 `drive` 标量。`HitReachedAt(t)` 问命中时刻。**末帧不等于 rest pose**（手臂下放是常驻的）。
 
 关键帧动画是第三种实现：写一个 `AnimPoseSource` 子类包住采样结果即可，**上层一行都不用改**。这也是这一层存在的理由。
