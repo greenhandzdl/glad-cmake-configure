@@ -265,6 +265,21 @@ struct Character {
     // must not involve the runtime speed: the phase already encodes it. Passing a
     // speed here looks harmless and costs 30% of the cycle - the source then wraps at
     // a different period than the phase was measured on.
+    //
+    // Measured limit of this round trip: the phase is built as
+    // `2*pi*(speed*t/cycleMetres)` and inverted back, so a clock difference of exactly
+    // one cycle does NOT return the same time to the last bit. At t=0.37 s the folded
+    // source time is 0.481000 s; one cycle later it is 0.480950 s and three cycles
+    // later 0.480850 s (error grows with t because `speed*t` is where the precision
+    // goes first). That is 1e-4 s of phase, which is invisible in the pose itself
+    // (max bone delta ~1e-4) but IS enough to move a few percent of pixels at 8-bit:
+    // snapshotting `t` and `t + one cycle` therefore shows ~3.4% differing pixels, and
+    // that number does not shrink when you fix the period. The four time-driven
+    // actions (idle/run/crouch and the non-looping pair) close to 0 px because they
+    // are sampled at the raw clock with no phase round trip at all.
+    //
+    // So: do not use `t` vs `t + cycle` snapshots to regression-test walk's loop
+    // closure. Probe the source directly instead (its own drift is 1.2e-7).
     [[nodiscard]] float walkTimeFor(float phaseRadians) const {
         // Algebraically this is just `speed * seconds / cycleMetres` inverted, but it
         // is written through the same two quantities phaseFor uses so that sampling
