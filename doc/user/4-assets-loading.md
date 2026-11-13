@@ -135,6 +135,22 @@ class AnimPoseSource {
 
 关键帧动画是第三种实现：写一个 `AnimPoseSource` 子类包住采样结果即可，**上层一行都不用改**。这也是这一层存在的理由。
 
+### demo 里怎么按动作决定要不要解算
+
+`anim-rigid` 的写法可以直接照搬——跳跃用布尔，跑步用权重：
+
+```cpp
+float groundWeight = 1.0f;
+switch (action) {
+    case Jump: if (!jump.GroundedAt(t)) groundWeight = 0.0f; break;
+    case Run:  groundWeight = 1.0f - run.AirborneWeightAt(t); break;
+    default:   break;   // walk / idle / crouch / attack 始终着地
+}
+const auto s = ground.Solve(palette);
+if (s.valid() && groundWeight > 0.0f)
+    GroundContact::ApplyLift(palette, s.lift * groundWeight);
+```
+
 ### 跑步的腾空相也要衰减地面解算
 
 跑步和跳跃不同：跳跃是一整段明确的腾空，跑步每个周期有两段很短的（`0.35→0.5` 与 `0.85→1.0`，各约 15%）。这里不用布尔，用连续权重：

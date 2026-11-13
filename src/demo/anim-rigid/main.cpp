@@ -988,11 +988,41 @@ int main(int argc, char** argv) {
             // support) and it cannot drift out of sync with the legs - which is
             // exactly the failure mode of the first version, where the legs
             // scissored and the feet stayed flat on the floor.
-            const gldx::GroundContact::Solution solved = character.ground.Solve(character.palette);
-            view.groundLift = solved.lift;
-            if (solved.valid() && view.walk) {
-                gldx::GroundContact::ApplyLift(character.palette, solved.lift);
+            // How much of the ground solve to apply. 1 = fully grounded (walk,
+            // idle, crouch, attack), 0 = fully airborne.
+            //
+            // This gate is the whole reason `GroundedAt` / `AirborneWeightAt` are on
+            // the pose-source interface: the solve finds the lowest sole point and
+            // slides the character so it touches the floor, which is exactly right
+            // while a foot is planted and exactly wrong while both feet are off the
+            // ground - during a jump it drags the character back down, and the
+            // result looks like it is hanging from an invisible wire. The demo
+            // cannot know the flight schedule itself, so it asks the source.
+            float groundWeight = 1.0f;
+            switch (view.requestAction) {
+                case Action::Jump:
+                    // Boolean is correct here: a jump has one clearly defined flight
+                    // arc, so there is nothing to fade.
+                    if (character.jumpSource && !character.jumpSource->GroundedAt(animSeconds))
+                        groundWeight = 0.0f;
+                    break;
+                case Action::Run:
+                    // Continuous, because a run has two short flights per cycle and a
+                    // boolean would snap the pelvis height on the boundary frame.
+                    if (character.runSource)
+                        groundWeight = 1.0f - character.runSource->AirborneWeightAt(animSeconds);
+                    break;
+                default: break;   // walk / idle / crouch / attack are always grounded
             }
+
+            const gldx::GroundContact::Solution solved = character.ground.Solve(character.palette);
+            view.groundLift = solved.lift * groundWeight;
+            if (solved.valid() && view.walk && groundWeight > 0.0f) {
+                gldx::GroundContact::ApplyLift(character.palette, solved.lift * groundWeight);
+            }
+            // During full flight there is no ground contact to report, and printing
+            // the unsolved value would misrepresent the frame.
+            if (groundWeight <= 0.0f) view.groundLift = 0.0f;
             // What the solve achieved, measured the same way it was solved: the
             // lowest sole point after the shift. Printed in millimetres because
             // "0.000 m" in a panel is indistinguishable from "not measured".
