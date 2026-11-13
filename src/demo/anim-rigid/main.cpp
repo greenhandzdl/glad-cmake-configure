@@ -235,6 +235,22 @@ struct Character {
     std::unique_ptr<gldx::ProceduralCrouch> crouchSource;
     std::unique_ptr<gldx::ProceduralAttack> attackSource;
     std::unique_ptr<gldx::ProceduralJump>   jumpSource;
+
+    // Which one-shot action is still running, if any, and whether it has ended.
+    //
+    // Attack and jump are **events**, not modes: once the swing lands or the feet
+    // touch down the character should go back to idling on its own. Without this the
+    // last frame stays on screen until the user presses another number, which reads
+    // as "it froze" rather than "it finished".
+    //
+    // Kept as a query rather than a stored "finished" flag so it cannot go stale
+    // when the action is changed underneath it.
+    [[nodiscard]] bool oneShotFinished(Action a, float t) const {
+        const gldx::AnimPoseSource* src = nullptr;
+        if (a == Action::Attack) src = attackSource.get();
+        else if (a == Action::Jump) src = jumpSource.get();
+        return src != nullptr && src->FinishedAt(t);
+    }
     gldx::AnimStateMachine               machine;
 
 
@@ -302,6 +318,7 @@ struct View {
     // What the number keys asked for. Applied to the machine inside the frame loop,
     // never from a callback (see the OnKey comment).
     Action requestAction = Action::Walk;
+
     float freezeAt = 0.0f;    // > 0 pins the clock, for reproducible snapshots
     double clock   = 0.0;     // animation seconds (already clamped by freezeAt)
     float scroll   = 0.0f;    // metres of floor travelled
@@ -950,6 +967,18 @@ int main(int argc, char** argv) {
 
         if (character.ready()) {
             const gldx::RiggedModel& model = character.model;
+
+            // One-shot actions hand control back to idle when they end. Suppressed
+            // under --freeze-at: a frozen frame is meant to sit exactly where the
+            // clock put it, and auto-returning would make attack/jump's final frame
+            // impossible to snapshot at all (which is the point of
+            // `--action attack --freeze-at 2`).
+            if (view.freezeAt <= 0.0f
+                && (view.requestAction == Action::Attack || view.requestAction == Action::Jump)
+                && character.oneShotFinished(view.requestAction, animSeconds)) {
+                view.requestAction = Action::Idle;
+            }
+
             const float phase = character.phaseFor(view.speed, animSeconds);
             // Default path unchanged: Action::Walk samples the walk source at the
             // exact phase the pre-animation-layer demo used, so `--off hud

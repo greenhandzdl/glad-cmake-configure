@@ -92,6 +92,26 @@ public:
      * （两只脚都在地上）则自然得多。状态机不认识步态曲线，只认识这个数。
      */
     [[nodiscard]] virtual float ContactPhase() const noexcept { return -1.0f; }
+
+    /**
+     * 这段动作在 t 时刻是否**已经播完并停在最后一帧**。
+     *
+     * 只对 `Looping() == false` 有意义（循环动作永远返回 false）。默认实现就是按
+     * Duration 判：非循环动作在 t >= Duration() 之后钳住末帧，所以那就是"播完了"。
+     *
+     * 为什么这条必须在接口上：`Sample` 只回答"t 时刻什么样"，而一个已经停在末帧的
+     * 攻击动作与一个刚好播到末帧的攻击动作**姿态完全相同**，上层无法从姿态反推。
+     * 没有这个数，状态机就只能靠猜——比如"非循环动作播了 2 秒大概够了吧"，而那个
+     * 2 秒在换动作、换骨架之后就不对了。有了它，"挥砍播完自动回待机"才是上游能写的
+     * 一条规则，而不是一段写死的计时。
+     *
+     * 实现方若在某段动作里改变了结束语义（例如收势后有一段静止的 follow-through，
+     * 那段时间不该算"还需要等"），覆盖它即可。
+     */
+    [[nodiscard]] virtual bool FinishedAt(float t) const noexcept {
+        if (Looping()) return false;
+        return t >= Duration();
+    }
 };
 
 } // namespace gldx

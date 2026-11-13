@@ -126,6 +126,15 @@ public:
     [[nodiscard]] float BlendWeight() const noexcept { return blendWeight_; }
     [[nodiscard]] bool Transitioning() const noexcept { return pending_ != nullptr; }
 
+    /**
+     * 当前动作是否已经播完（非循环动作停在末帧）。供调用方写"攻击播完回待机"
+     * 这类回落规则——状态机自己**不**做这个决定：往哪回落是应用的事（战斗时
+     * 回战斗待机、探索时回普通待机），状态机只负责如实报告。
+     */
+    [[nodiscard]] bool Finished() const noexcept {
+        return current_ != nullptr && current_->FinishedAt(currentTime_);
+    }
+
 private:
     /** 把 t 按 source 的循环性折进有效区间。 */
     static float Fold(const AnimPoseSource& source, float t);
