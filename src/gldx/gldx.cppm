@@ -89,6 +89,7 @@ export {
 #include "gldx/anim/Pose.h"
 #include "gldx/anim/AnimPoseSource.h"
 #include "gldx/anim/ProceduralWalk.h"
+#include "gldx/anim/ProceduralIdle.h"
 #include "gldx/anim/ProceduralRun.h"
 #include "gldx/anim/ProceduralCrouch.h"
 #include "gldx/anim/ProceduralAttack.h"

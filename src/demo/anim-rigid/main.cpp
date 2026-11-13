@@ -203,7 +203,7 @@ namespace {
 // member of Character: the input callback records it into the View, the frame loop
 // turns it into a machine Request. Keeping it out of Character is what lets the
 // callback stay free of the animation machine.
-enum class Action { Walk, Run, Crouch, Attack, Jump };
+enum class Action { Idle, Walk, Run, Crouch, Attack, Jump };
 
 // ---------------------------------------------------------------------------
 // The demo's own state around one character: everything that is NOT the rig
@@ -229,6 +229,7 @@ struct Character {
     // construction (restWorld, rig, skeleton), and those only exist after the
     // model has uploaded - so it cannot be a plain member built in step with
     // this struct.
+    std::unique_ptr<gldx::ProceduralIdle>   idleSource;
     std::unique_ptr<gldx::ProceduralWalk> walkSource;
     std::unique_ptr<gldx::ProceduralRun>  runSource;
     std::unique_ptr<gldx::ProceduralCrouch> crouchSource;
@@ -505,6 +506,7 @@ public:
             // screenshot cannot prove which one it is.
             const char* actionName = "walk";
             switch (view_.requestAction) {
+                case Action::Idle:   actionName = "idle";   break;
                 case Action::Walk:   actionName = "walk";   break;
                 case Action::Run:    actionName = "run";    break;
                 case Action::Crouch: actionName = "crouch"; break;
@@ -647,6 +649,8 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // (Rebuilding the source on a speed change would be the alternative, but speed is
     // a view parameter and the source only needs its Duration to agree; passing the
     // matching time is enough, as below.)
+    character.idleSource = std::make_unique<gldx::ProceduralIdle>(
+        skeleton, character.rig, model.restWorld(), gldx::IdleTuning{});
     character.walkSource = std::make_unique<gldx::ProceduralWalk>(
         skeleton, character.rig, model.restWorld(), character.tune,
         character.cycleSeconds(1.0f));
@@ -793,14 +797,15 @@ int main(int argc, char** argv) {
     // this is a demo, and a typo should not stop the window from opening.
     {
         const std::string action = flags.string("action", "walk");
-        if (action == "walk")        view.requestAction = Action::Walk;
+        if (action == "idle")        view.requestAction = Action::Idle;
+        else if (action == "walk")   view.requestAction = Action::Walk;
         else if (action == "run")    view.requestAction = Action::Run;
         else if (action == "crouch") view.requestAction = Action::Crouch;
         else if (action == "attack") view.requestAction = Action::Attack;
         else if (action == "jump")   view.requestAction = Action::Jump;
         else {
             std::fprintf(stderr, "[anim-rigid] unknown --action '%s'; using walk "
-                                 "(known: walk, run, crouch, attack, jump)\n",
+                                 "(known: idle, walk, run, crouch, attack, jump)\n",
                          action.c_str());
         }
     }
@@ -883,6 +888,7 @@ int main(int argc, char** argv) {
             // to the machine, because switching actions is a per-frame decision
             // (it needs the current phase) and must not happen inside a GLFW
             // callback that can fire between two of our own updates.
+            case gldx::win::Key::Num0: view.requestAction = Action::Idle; break;
             case gldx::win::Key::Num1: view.requestAction = Action::Walk; break;
             case gldx::win::Key::Num2: view.requestAction = Action::Run; break;
             case gldx::win::Key::Num3: view.requestAction = Action::Crouch; break;
@@ -949,6 +955,10 @@ int main(int argc, char** argv) {
                 // Their clock is the same frozen-friendly `animSeconds`, so a
                 // `--freeze-at` frame is still a pure function of argv.
                 switch (view.requestAction) {
+                    case Action::Idle:
+                        if (character.idleSource)
+                            character.idleSource->Sample(animSeconds, character.pose);
+                        break;
                     case Action::Run:
                         if (character.runSource)
                             character.runSource->Sample(animSeconds, character.pose);

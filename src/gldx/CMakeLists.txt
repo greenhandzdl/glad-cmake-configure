@@ -29,6 +29,7 @@ set(GLDX_SOURCES
     anim/GroundContact.cpp
     anim/ProceduralWalk.cpp
     anim/ProceduralJump.cpp
+    anim/ProceduralIdle.cpp
     anim/ProceduralRun.cpp
     anim/ProceduralCrouch.cpp
     anim/ProceduralAttack.cpp
