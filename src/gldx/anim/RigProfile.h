@@ -36,58 +36,13 @@
 #include <glm/glm.hpp>
 
 #include "gldx/anim/Skeleton.h"
+// 槽位枚举与侧别常量拆在 RigSlot.h：RigNaming.h（"一个族怎么叫这些槽位"）也要用它们，
+// 放在这里会形成 RigNaming ⇄ RigProfile 的循环包含。见 RigSlot.h 文件头。
+#include "gldx/anim/RigSlot.h"
 
 namespace gldx {
 
-// 侧别下标。0 = 左，1 = 右；左右以**角色自己**的左右为准（不是屏幕左右），
-// 这也正是 side 轴 = 左大腿 − 右大腿 的定义方向。
-inline constexpr int kRigLeft  = 0;
-inline constexpr int kRigRight = 1;
-inline constexpr int kRigSides = 2;
-
-/**
- * 语义槽位的枚举形式。存在的理由只有一个：`Missing()` / `BindingReport()` 要能**遍历**槽位，
- * 而结构体里的具名成员（hips、legUp[2]……）没法遍历。具名成员保留给调用方读写用，枚举给
- * 诊断用，两者通过 Index()/SlotName() 连接。
- *
- * 两个 switch（Index 与 SlotName）都覆盖全部枚举值且没有 default：新增一个枚举值而忘了在
- * 其中一个里处理，`-Wall` 的 `-Wswitch` 会当场报出来。这就是不写 default 的目的，别"补全"。
- */
-enum class RigSlot : int {
-    Hips,
-    Spine,
-    Spine1,        // 辅助槽位（躯干中段），不计入 20/20，见下方 kRigRequiredSlotCount
-    Chest,
-    Head,
-    LegUpLeft,
-    LegUpRight,
-    LegLowLeft,
-    LegLowRight,
-    FootLeft,
-    FootRight,
-    ToeLeft,
-    ToeRight,
-    ArmUpLeft,
-    ArmUpRight,
-    ArmLowLeft,
-    ArmLowRight,
-    HandLeft,
-    HandRight,
-    ClavicleLeft,
-    ClavicleRight,
-};
-
-// 枚举总数（含辅助槽位）。BoundCount()/Missing() 就是按 [0, kRigSlotCount) 遍历的。
-// 用 static_assert 把它钉在枚举上，而不是靠"数一遍写个 21"：`static_cast<RigSlot>(i)` 的
-// 遍历写法要求这两个数永远一致，写错时后果是**遍历漏掉最后一个槽位**（clavicle.R 悄悄从
-// 20/20 的分母里消失，报表还显示"全绑上了"），而这种错不会有任何编译期提示。
-inline constexpr int kRigSlotCount = static_cast<int>(RigSlot::ClavicleRight) + 1;
-static_assert(kRigSlotCount == 21, "RigSlot 多了/少了成员：同步更新 kRigSlotCount 与遍历");
-
-// "20/20 slots bound" 里的那个 20：步态/蒙皮真正会用到的槽位。spine1 是辅助槽位（躯干中段，
-// 给裙摆/腰线的间隙探针当锚点用，可以拿来量也能拿来轻微旋转），缺了不影响走路，所以它不在
-// 断言的分母里——把它算进去会让"骨架只有两节脊柱"这种完全正常的情况永远报 19/20。
-inline constexpr int kRigRequiredSlotCount = 20;
+class RigNaming;   // 前向声明：RigProfile 只在 Classify 的签名里用到它
 
 /**
  * 一具骨架的语义分类结果。纯数据，可拷贝、可跨线程传（不含 GL、不含指针）。
@@ -116,6 +71,9 @@ struct RigProfile {
     glm::vec3 up{0.0f, 1.0f, 0.0f};
     glm::vec3 forward{0.0f, 0.0f, 1.0f};  // 角色行走的方向
 
+    // 解析时实际选中的命名族（指向静态字面量，不拥有）。见 namingFamily()。
+    const char* namingFamily_ = "";
+
     // hips + 两条完整的大腿链都绑上才为 true。步态没有这个前提就不是"走得像不像"的问题，
     // 而是单腿原地摆的问题，所以这个标志必须由消费方检查，而不是"反正摆不出错就不管"。
     bool walkable = false;
@@ -123,11 +81,28 @@ struct RigProfile {
     /**
      * 名字表 → 槽位，并量出三个轴。不打印、不失败，缺失槽位留在 -1（见文件头）。
      *
+     * `naming` 决定"这份资产用哪一族骨骼名"。传 nullptr 时按 `DetectBestNaming()` 自动挑
+     * 命中最多的那一族——这是绝大多数调用方该用的方式；显式传一个族只在"我知道它是什么、
+     * 别猜了"的时候（例如一个已知是混元导出的资产，但它的名字恰好也命中了别的族的少数槽位）。
+     *
      * 为什么是 static 成员而不是自由函数 `ClassifyRig`：`RigProfile::Classify(skeleton)` 在
      * 编辑器自动补全里能被"Rig"找到，而 `ClassifyRig` 只能被人记着；仓库里同类一次性工厂
      * （GeometryFactory::Cube 之流）也都是挂在类型上的。
      */
-    [[nodiscard]] static RigProfile Classify(const Skeleton& skeleton);
+    [[nodiscard]] static RigProfile Classify(const Skeleton& skeleton, const RigNaming* naming = nullptr);
+
+    /**
+     * 自动挑族：遍历引擎内置的每一族（Mixamo/Blender、3ds Max Biped、UE…），取 `Detect()`
+     * 最高的那个。返回的引用永远有效（指向无状态单例），不会返回 nullptr。
+     *
+     * 平手时的顺序是固定的（按内置列表顺序），不是为了"更聪明"，而是为了同一份资产在两次
+     * 运行里挑到同一族——否则槽位解析结果会随编译期无关改动漂移。
+     */
+    [[nodiscard]] static const RigNaming& DetectBestNaming(const Skeleton& skeleton);
+
+    // 实际选中那一族的名字（"mixamo/Blender"…），写进诊断，让人知道这份资产被当成谁。
+    // 混元族接进来之后，这一行是"它到底有没有被认出来"的唯一证据。
+    [[nodiscard]] const char* namingFamily() const noexcept { return namingFamily_; }
 
     // 槽位的诊断名，形如 "legUp.L"，直接可打进日志。返回静态字符串字面量，不分配。
     [[nodiscard]] static const char* SlotName(RigSlot slot) noexcept;

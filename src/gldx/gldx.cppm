@@ -63,8 +63,12 @@ export {
 //
 // On top of that split sit the four pieces a *user* of a rig needs, so a demo
 // only has to author motion instead of re-discovering the plumbing:
-//   - RigProfile     which bone is the hip, and which way is up (measured from
-//                    the rig, never assumed - names differ per exporter)
+//   - RigSlot        the semantic joints a rig user asks about, name-agnostic
+//   - RigNaming      one bone-naming *family* per exporter (Mixamo, Biped, UE);
+//                    an abstract class so a new family is a subclass, not more
+//                    strings in a table
+//   - RigProfile     resolves slots against a Skeleton via a RigNaming, and
+//                    measures which way is up (never assumed)
 //   - Pose           "rotate this bone about a world axis", plus rest == bind
 //   - GroundContact  solve the pelvis height from where the soles actually are
 //   - RiggedModel    upload + own one rig, including the 1x1 stand-in maps that
@@ -72,6 +76,8 @@ export {
 #include "gldx/anim/Skeleton.h"
 #include "gldx/anim/SkinnedVertex.h"
 #include "gldx/anim/SkinnedMesh.h"
+#include "gldx/anim/RigSlot.h"
+#include "gldx/anim/RigNaming.h"
 #include "gldx/anim/RigProfile.h"
 #include "gldx/anim/Pose.h"
 #include "gldx/anim/GroundContact.h"

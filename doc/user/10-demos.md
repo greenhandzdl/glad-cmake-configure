@@ -87,7 +87,7 @@
 
 **原地走（treadmill）与 `--speed`**：地面网格按 `speed*time` 往后滚，屏幕取景因此固定，变的只有走路本身。一个周期的行程由腿长与髋摆幅推出来（`4 * legLength * sin(hipSwing)`；参考资产腿长 0.90 m、周期 1.17 m），地面行程与步频共用这一个数——所以 `--speed` 改的是**步频与地面滚动**，不是步幅；两者一旦脱钩，脚就在地上打滑。
 
-**这个故事里哪部分现在归引擎**：骨架解析、姿态数学、GPU 持有与地面反解都已经搬进 `src/gldx/anim/`，这个 demo 只剩"走路"这一件属于它自己的事。四件东西各有明确归属——`RigProfile`（骨名→21 个语义槽位，并从髋→头和左右大腿**量出**三轴，所以换一套骨骼命名的资产是"报出未绑定的槽位"而不是"手变僵了"）、`Pose`（`RotateBone` 把世界轴角度折进骨骼局部系）、`RiggedModel`（Stage-B 持有者，含 1×1 哑元贴图的兜底）、`GroundContact`（四个鞋底接触点反解骨盆离地量）。**刻意没搬的是步态本身**：`GaitTuning`、髋/膝/踝曲线、treadmill 都是这个 demo 的主张，不是通用能力——把它塞进引擎只会让下一个使用者被迫接受一套走路风格。这条界线的判据是"换一个 demo 会不会原样再用一次"：`RigProfile` 会，步态不会。用法见 [🟡 ③ 资产加载 §5](4-assets-loading.md)。
+**这个故事里哪部分现在归引擎**：骨架解析、姿态数学、GPU 持有与地面反解都已经搬进 `src/gldx/anim/`，这个 demo 只剩"走路"这一件属于它自己的事。四件东西各有明确归属——`RigSlot`/`RigNaming`/`RigProfile`（语义槽位 + 一张**可扩展的命名族接口**：Mixamo/Biped/UE 各是一个 `RigNaming` 派生类，加混元只需再写一个派生类；解析完再从髋→头和左右大腿**量出**三轴，所以换一套骨骼命名的资产是"报出未绑定的槽位"而不是"手变僵了"）、`Pose`（`RotateBone` 把世界轴角度折进骨骼局部系）、`RiggedModel`（Stage-B 持有者，含 1×1 哑元贴图的兜底）、`GroundContact`（四个鞋底接触点反解骨盆离地量）。**刻意没搬的是步态本身**：`GaitTuning`、髋/膝/踝曲线、treadmill 都是这个 demo 的主张，不是通用能力——把它塞进引擎只会让下一个使用者被迫接受一套走路风格。这条界线的判据是"换一个 demo 会不会原样再用一次"：`RigProfile` 会，步态不会。用法见 [🟡 ③ 资产加载 §5](4-assets-loading.md)。
 
 **渲染**是两个 GLSL 410 程序，都直渲默认帧缓冲（不走 `PostProcessChain`，所以着色器自己 ACES + `pow(1/2.2)` 收尾）：一个单太阳的蒙皮 PBR（GGX + 高度相关 Smith + Schlick，albedo/metallic/roughness 贴图与材质标量相乘，法线贴图用 cotangent frame，半球天光补光），一个地面（程序化网格线 + 椭圆接触阴影 + 向天空的远处淡出）。程序里的四个 sampler **每次 draw 都绑一张完整贴图**：文件缺哪一种图就绑 1×1 的哑元（白 albedo、平法线 `(128,128,255)`、白色标量），因为 Apple 驱动上 active sampler 指向不完整贴图会直接丢掉整个 draw，看起来像“模型不见了”。这条兜底现在由 `RiggedModel::AlbedoOrFallback()` 家族负责，demo 侧没有 null 分支可写。
 

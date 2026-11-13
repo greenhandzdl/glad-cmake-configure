@@ -7,20 +7,14 @@ module;
 
 module gldx;
 
+// RigNaming 的类型全部从模块本身拿（RigProfile.h 已经文本 include 了 RigNaming.h，
+// 而两者都在 gldx.cppm 里 export）。这里**不要**再文本 include RigNaming.h：那会把
+// Skeleton/Bone/kRigSlotCount 等已导出实体再解析一遍，报成一串 redefinition——
+// 与 SkinnedMesh.cpp 不文本 include Skeleton.h 是同一条规则。
+
 namespace gldx {
 
 namespace {
-
-// 第一个命中的名字胜出。别名表内部的顺序就是优先级：先列资产自己那一族的写法，
-// 再列别的族的等价写法——同一个骨架里真出现两个候选（例如同时有 `Spine` 和
-// `Spine1`）时，先列的那个才是这个资产的主力骨骼。
-int FindBone(const Skeleton& skeleton, std::initializer_list<const char*> names) {
-    for (const char* name : names) {
-        const int index = skeleton.Find(name);
-        if (index >= 0) return index;
-    }
-    return -1;
-}
 
 // 骨骼在 bind 姿态下的世界位置。用 rest world 的第 4 列（平移），不是当前姿态：
 // 分类只在加载后做一次，那时候还没有 pose，而且轴的量法必须与"资产自己的静止姿态"
@@ -35,63 +29,46 @@ inline constexpr float kAxisEpsilon = 1e-4f;
 
 } // namespace
 
-RigProfile RigProfile::Classify(const Skeleton& skeleton) {
+RigProfile RigProfile::Classify(const Skeleton& skeleton, const RigNaming* naming) {
+    // 没指定族就自动挑一个。挑错了不会静默绑错——槽位会大面积 -1，BindingReport 会点名。
+    const RigNaming& family = naming ? *naming : DetectBestNaming(skeleton);
+
     RigProfile rig;
+    rig.namingFamily_ = family.family();
 
-    // ---- 躯干 -----------------------------------------------------------------
-    // 注意 `spine` 的别名表里带着 "Spine1"，`spine1` 的别名表里带着 "Spine2"/"Chest"。
-    // 这不是抄错，是刻意的降级链：只有两节脊柱的骨架（Spine1/Spine2 命名）用 Spine1 当
-    // 腰、Spine2 当胸；三节以上的骨架（Spine/Spine1/Spine2）则由前面的名字先命中。
-    // 代价是：两节脊柱时 `spine` 与 `spine1` 会指向同一根骨头，两处旋转会叠加。
-    rig.hips  = FindBone(skeleton, {"Hips", "hips", "Pelvis", "pelvis", "Bip01 Pelvis",
-                                    // 纯 Mixamo 导出会给**每一根**骨头加 `mixamorig:` 前缀；
-                                    // 原 demo 表只给四肢加了前缀（它自己的资产是无前缀的
-                                    // Blender FBX），于是原样搬到别的 Mixamo 资产上时
-                                    // hips/head 会静默绑不上，walkable 直接变 false。
-                                    "mixamorig:Hips"});
-    rig.spine = FindBone(skeleton, {"Spine", "spine", "Spine1", "Bip01 Spine", "mixamorig:Spine", "spine_01"});
-    rig.chest = FindBone(skeleton, {"Spine2", "Chest", "chest", "spine.003", "Bip01 Spine2",
-                                    "mixamorig:Spine2", "spine_03"});
-    rig.head  = FindBone(skeleton, {"Head", "head", "Bip01 Head", "mixamorig:Head", "head_01"});
-    // 躯干中段，只用来把裙摆/腰线的间隙探针挂上去，不参与断言。
-    rig.spine1 = FindBone(skeleton, {"Spine1", "Spine2", "Chest", "mixamorig:Spine1",
-                                     "Bip01 Spine1", "mixamorig:Spine2", "spine_02"});
+    // 槽位解析全部委托给命名的族。这里不再有任何骨名：加一族（例如混元）只要新增一个
+    // RigNaming 派生类并注册进 DetectBestNaming 的内置列表，本函数一行都不用改。
+    //
+    // 曾经的写法是一张全局别名表，读起来没问题但表达不了两件事：同一个名字在不同族里
+    // 指不同的骨头（Spine1 在 Blender 是腰椎、在 Biped 是胸），以及"给每根骨头加前缀"
+    // 这种规律（Mixamo 的 mixamorig:）。前者会让合并表必然绑错一族，后者会逼出 21 条
+    // 重复字符串。
+    auto slot = [&](RigSlot s) { return family.Find(skeleton, s); };
 
-    // ---- 腿 -------------------------------------------------------------------
-    rig.legUp[kRigLeft]  = FindBone(skeleton, {"LeftUpLeg", "LeftUpperLeg", "LeftThigh", "UpperLeg.L",
-                                               "Thigh.L", "mixamorig:LeftUpLeg", "Bip01 L Thigh", "thigh_l"});
-    rig.legLow[kRigLeft] = FindBone(skeleton, {"LeftLeg", "LeftLowerLeg", "LowerLeg.L", "Calf.L",
-                                               "Shin.L", "mixamorig:LeftLeg", "Bip01 L Calf", "calf_l"});
-    rig.foot[kRigLeft]   = FindBone(skeleton, {"LeftFoot", "Foot.L", "mixamorig:LeftFoot",
-                                               "Bip01 L Foot", "foot_l"});
-    rig.toe[kRigLeft]    = FindBone(skeleton, {"LeftToeBase", "LeftToe", "Toe.L", "mixamorig:LeftToeBase",
-                                               "Bip01 L Toe0", "ball_l"});
-    rig.legUp[kRigRight]  = FindBone(skeleton, {"RightUpLeg", "RightUpperLeg", "RightThigh", "UpperLeg.R",
-                                                "Thigh.R", "mixamorig:RightUpLeg", "Bip01 R Thigh", "thigh_r"});
-    rig.legLow[kRigRight] = FindBone(skeleton, {"RightLeg", "RightLowerLeg", "LowerLeg.R", "Calf.R",
-                                                "Shin.R", "mixamorig:RightLeg", "Bip01 R Calf", "calf_r"});
-    rig.foot[kRigRight]   = FindBone(skeleton, {"RightFoot", "Foot.R", "mixamorig:RightFoot",
-                                                "Bip01 R Foot", "foot_r"});
-    rig.toe[kRigRight]    = FindBone(skeleton, {"RightToeBase", "RightToe", "Toe.R", "mixamorig:RightToeBase",
-                                                "Bip01 R Toe0", "ball_r"});
+    rig.hips   = slot(RigSlot::Hips);
+    rig.spine  = slot(RigSlot::Spine);
+    rig.spine1 = slot(RigSlot::Spine1);
+    rig.chest  = slot(RigSlot::Chest);
+    rig.head   = slot(RigSlot::Head);
 
-    // ---- 臂 -------------------------------------------------------------------
-    rig.armUp[kRigLeft]  = FindBone(skeleton, {"LeftArm", "LeftUpperArm", "UpperArm.L", "Arm.L",
-                                               "mixamorig:LeftArm", "Bip01 L UpperArm", "upperarm_l"});
-    rig.armLow[kRigLeft] = FindBone(skeleton, {"LeftForeArm", "LeftLowerArm", "LowerArm.L", "ForeArm.L",
-                                               "mixamorig:LeftForeArm", "Bip01 L Forearm", "lowerarm_l"});
-    rig.armUp[kRigRight]  = FindBone(skeleton, {"RightArm", "RightUpperArm", "UpperArm.R", "Arm.R",
-                                                "mixamorig:RightArm", "Bip01 R UpperArm", "upperarm_r"});
-    rig.armLow[kRigRight] = FindBone(skeleton, {"RightForeArm", "RightLowerArm", "LowerArm.R", "ForeArm.R",
-                                                "mixamorig:RightForeArm", "Bip01 R Forearm", "lowerarm_r"});
-    rig.hand[kRigLeft]  = FindBone(skeleton, {"LeftHand", "Hand.L", "mixamorig:LeftHand",
-                                              "Bip01 L Hand", "hand_l"});
-    rig.hand[kRigRight] = FindBone(skeleton, {"RightHand", "Hand.R", "mixamorig:RightHand",
-                                              "Bip01 R Hand", "hand_r"});
-    rig.clavicle[kRigLeft]  = FindBone(skeleton, {"LeftShoulder", "LeftClavicle", "Shoulder.L", "Clavicle.L",
-                                                  "mixamorig:LeftShoulder", "Bip01 L Clavicle", "clavicle_l"});
-    rig.clavicle[kRigRight] = FindBone(skeleton, {"RightShoulder", "RightClavicle", "Shoulder.R", "Clavicle.R",
-                                                  "mixamorig:RightShoulder", "Bip01 R Clavicle", "clavicle_r"});
+    rig.legUp[kRigLeft]     = slot(RigSlot::LegUpLeft);
+    rig.legLow[kRigLeft]    = slot(RigSlot::LegLowLeft);
+    rig.foot[kRigLeft]      = slot(RigSlot::FootLeft);
+    rig.toe[kRigLeft]       = slot(RigSlot::ToeLeft);
+    rig.legUp[kRigRight]    = slot(RigSlot::LegUpRight);
+    rig.legLow[kRigRight]   = slot(RigSlot::LegLowRight);
+    rig.foot[kRigRight]     = slot(RigSlot::FootRight);
+    rig.toe[kRigRight]      = slot(RigSlot::ToeRight);
+
+    rig.armUp[kRigLeft]     = slot(RigSlot::ArmUpLeft);
+    rig.armLow[kRigLeft]    = slot(RigSlot::ArmLowLeft);
+    rig.armUp[kRigRight]    = slot(RigSlot::ArmUpRight);
+    rig.armLow[kRigRight]   = slot(RigSlot::ArmLowRight);
+    rig.hand[kRigLeft]      = slot(RigSlot::HandLeft);
+    rig.hand[kRigRight]     = slot(RigSlot::HandRight);
+    rig.clavicle[kRigLeft]  = slot(RigSlot::ClavicleLeft);
+    rig.clavicle[kRigRight] = slot(RigSlot::ClavicleRight);
+
     // 没有 `Neck` 槽位：颈只影响"头看向哪"，步态里由 head 槽位承担，多一个槽位就多一处
     // 会漏绑的地方，而漏绑是静默的（见文件头）。
 
@@ -136,6 +113,32 @@ RigProfile RigProfile::Classify(const Skeleton& skeleton) {
     // 所以这个不一致以代码为准，注释在这里改正。
     rig.walkable = rig.hips >= 0 && rig.legUp[kRigLeft] >= 0 && rig.legUp[kRigRight] >= 0;
     return rig;
+}
+
+const RigNaming& RigProfile::DetectBestNaming(const Skeleton& skeleton) {
+    // 内置族的注册点：**加一族只改这一行**。顺序是平手时的裁决顺序，固定下来是为了让
+    // 同一份资产在两次运行里挑到同一族——否则槽位解析结果会随无关改动漂移，而"报告变了"
+    // 看起来像资产变了。
+    //
+    // 新增一族（例如混元）的步骤：写一个 RigNaming 派生类 → 加进这个数组。Classify() 与
+    // 所有调用方都不用改。
+    const RigNaming* const builtin[] = {
+        &MixamoNaming::Instance(),
+        &BipedNaming::Instance(),
+        &UeNaming::Instance(),
+    };
+
+    const RigNaming* best = builtin[0];
+    int bestScore = best->Detect(skeleton);
+    for (std::size_t i = 1; i < std::size(builtin); ++i) {
+        const int score = builtin[i]->Detect(skeleton);
+        // 严格大于：平手时保留先注册的那一族，保证结果稳定。
+        if (score > bestScore) {
+            bestScore = score;
+            best = builtin[i];
+        }
+    }
+    return *best;
 }
 
 const char* RigProfile::SlotName(RigSlot slot) noexcept {

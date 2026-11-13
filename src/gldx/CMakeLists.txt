@@ -23,6 +23,7 @@ set(GLDX_SOURCES
     anim/Skeleton.cpp
     anim/SkinnedMesh.cpp
     anim/RigProfile.cpp
+    anim/RigNaming.cpp
     anim/Pose.cpp
     anim/RiggedModel.cpp
     anim/GroundContact.cpp

@@ -248,7 +248,7 @@ pass 中，从而让整帧（场景*与*自发光*与*天空盒）被一致地�
 │   │   ├── util/             #   Noise（Perlin 2D/3D + fBm，确定性、无全局状态）
 │   │   ├── scene/            #   Scene / SceneNode / Transform（纯 CPU 层级）
 │   │   ├── anim/             #   Skeleton（parents-first 骨骼数组 + `RestWorld`/`ComputeWorld`/`ComputeSkinning`；rest pose 由 inverse-bind 矩阵推导，故空姿态严格等于 bind 姿态；`kMaxBonePalette=64`）· SkinnedVertex/SkinnedMesh（4 影响、loc 5 是 `uvec4` 骨骼索引，走 `AttachIntegerAttribute` 的整数属性路径）
-│   │   │                     #   RigProfile（骨名→语义槽位分类 + 量出的 side/up/forward）· Pose（`PoseRotation`/`RotateBone`，只取旋转 3×3）· RiggedModel（Stage-B 持有者，含 1×1 哑元贴图兜底与 `SetOrientation`）· GroundContact（鞋底接触点反解离地量）
+│   │   │                     #   RigSlot（语义槽位枚举）/ RigNaming（命名族的抽象基类，内置 Mixamo·Biped·UE）/ RigProfile（用选中的族解析槽位 + 量出的 side/up/forward）· Pose（`PoseRotation`/`RotateBone`，只取旋转 3×3）· RiggedModel（Stage-B 持有者，含 1×1 哑元贴图兜底与 `SetOrientation`）· GroundContact（鞋底接触点反解离地量）
 │   │   ├── render/           #   Renderer / RenderPass / RenderFrame / 后期链 / SpriteBatch / TextRenderer / ParticleBatch / Voxel 两 pass
 │   │   ├── text/ assets/ debug/     # 字体（双后端：FreeType 光栅 + stb_truetype fallback，一个 atlas、同一份度量字段）· Hud/HudPass（引擎侧仪表面板：行列表 + 角上定位 + 面板自 sizing，demo 只交字符串）· 异步资源（ModelLoader：`Load` 静态网格 / `LoadSkinned` 带骨架资产，后者在工作线程解码文件内嵌贴图）· DebugDraw/Profiler/Picking/Frustum
 │   │   ├── ...               #   引擎各 .cpp 均为 `module gldx;` 实现单元
