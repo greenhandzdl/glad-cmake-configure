@@ -34,6 +34,19 @@ int Skeleton::Find(std::string_view name) const {
 
 glm::mat4 Skeleton::RestWorld(int index) const {
     glm::mat4 world(1.0f);
+    // An out-of-range index used to walk straight off the end of bones_ and read
+    // whatever heap followed it. The usual way to arrive here is a *stale*
+    // RigProfile: bone indices are classified against one Skeleton, and if that
+    // skeleton is later moved from or replaced after a re-load, the indices still
+    // look plausible while naming nothing. Returning identity keeps the frame
+    // drawable, and the warning is what makes the real bug findable instead of
+    // presenting as a mystery crash inside glm.
+    if (index < 0 || index >= static_cast<int>(bones_.size())) {
+        std::fprintf(stderr, "[Skeleton] RestWorld(%d): out of range for a %zu-bone rig; "
+                             "returning identity (stale bone index?)\n",
+                     index, bones_.size());
+        return world;
+    }
     // Walk to the root and unwrap on the way back; a rig is a handful of bones,
     // so the recursive form costs nothing and keeps this independent of the
     // per-frame scratch space.

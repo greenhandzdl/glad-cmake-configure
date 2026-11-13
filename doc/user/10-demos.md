@@ -79,7 +79,7 @@
 - **间隙靠外展拿，不靠更往前屈肘**。裙摆在髋高处有 0.2 m 宽，垂下来的腕会被它吞掉，所以除去屈肘（`elbowBase` 0.55，两个摆动相都保持）之外还要 0.05 rad 的前臂**外展**（`armOut`）；继续把肘往前屈只会让前臂更靠近裙面，方向正好相反。
 - 于是手不再是“两连杆钟摆的末端、朝向永远不变”那个死样子，而有三处远端旋转：±0.045 rad 的**锁骨前伸**（`clavicleRoll`，肩膀跟着手臂走一点）、**腕屈**（`wristBase` 0.14 起步、`wristSwing` 0.16 让手掌滞后于前臂）、**腕偏**（`wristDeviate` ±0.07，掌心随摆动内外转）。腕一转，手网格那个扇形跟着张开收拢——手指不是骨骼驱动的，但它们也不是刚性的。
 
-**这三处一度全是死代码——查句柄比调参数更值钱**：`ClassifyRig()` 只填了 `armUp`/`legUp`/`foot`/`toe` 这些链条，`rig.hand[2]` 与 `rig.clavicle[2]` 停在初始化值 `-1`；而所有腕/肩的调用都写成 `rotate(rig.hand[s], …)` / `rotate(rig.clavicle[s], …)`，`rotate()` 见 `bone < 0` 直接返回。于是**此前每一个渲染帧、每一张截图里腕屈、腕偏、锁骨前伸都是空操作**，而那套参数一直看起来“已经调好了”——手仍然是僵的，原因不在角度而在句柄。修法是把 `LeftHand`/`RightHand`/`LeftShoulder`/`RightShoulder` 和手臂链一起按名字查出来（这套资产里 `hand = {22, 14}`、`clavicle = {16, 11}`），而不是再加一个旋转：**先让已有的旋转真的落在骨头上，手的动作是捡回来的，不是新写的**。这也是本页处处坚持“量出来再写进正文”的原因——参数表本身不会告诉你它有没有接上。**这个 bug 现在是可复现的一行断言**：`--on report` 除了步态表还打一行 `[anim-rigid] rig: 20/20 slots bound`，任何一个槽位没解析出来都会被点名（坏构建上是 `; unbound: hand.L hand.R clavicle.L clavicle.R`）。把它写进文档的理由不是“多了个功能”，而是这条教训：**静默降级比崩溃更难查，所以给降级路径补一条出声的断言**——`rotate(-1)` 那种“参数越界就当没发生”的写法，会让一个真实缺陷以“手感差”的形态活过好几轮；换一套骨骼命名不同的资产，今后是当场报出未绑定的槽位，而不是再画一只僵硬的手。
+**这三处一度全是死代码——查句柄比调参数更值钱**：`RigProfile::Classify()`（当初是这个 demo 里的 `ClassifyRig()`）只填了 `armUp`/`legUp`/`foot`/`toe` 这些链条，`rig.hand[2]` 与 `rig.clavicle[2]` 停在初始化值 `-1`；而所有腕/肩的调用都写成 `rotate(rig.hand[s], …)` / `rotate(rig.clavicle[s], …)`，`rotate()` 见 `bone < 0` 直接返回。于是**此前每一个渲染帧、每一张截图里腕屈、腕偏、锁骨前伸都是空操作**，而那套参数一直看起来“已经调好了”——手仍然是僵的，原因不在角度而在句柄。修法是把 `LeftHand`/`RightHand`/`LeftShoulder`/`RightShoulder` 和手臂链一起按名字查出来（这套资产里 `hand = {22, 14}`、`clavicle = {16, 11}`），而不是再加一个旋转：**先让已有的旋转真的落在骨头上，手的动作是捡回来的，不是新写的**。这也是本页处处坚持“量出来再写进正文”的原因——参数表本身不会告诉你它有没有接上。**这个 bug 现在是可复现的一行断言**：`--on report` 除了步态表还打一行 `[anim-rigid] rig: 20/20 slots bound`，任何一个槽位没解析出来都会被点名（坏构建上是 `; unbound: hand.L hand.R clavicle.L clavicle.R`）。把它写进文档的理由不是“多了个功能”，而是这条教训：**静默降级比崩溃更难查，所以给降级路径补一条出声的断言**——`rotate(-1)` 那种“参数越界就当没发生”的写法，会让一个真实缺陷以“手感差”的形态活过好几轮；换一套骨骼命名不同的资产，今后是当场报出未绑定的槽位，而不是再画一只僵硬的手。
 
 **骨盆的上下不是手写的 bob**：每只脚取脚跟与脚掌两个接触点（从 bind pose 一次取好，之后由 foot/toe 骨骼带着走），摆完姿势后找到最低的那个鞋底点，再把整个 `palette` 平移同样的量。于是“一个周期沉两次、双支撑最深”是解出来的而不是调出来的。这条求解在 HUD 上可以当场读出来：默认 `ground: pelvis  +9.4 mm | lowest sole  +0.0 mm`，而**关掉求解**（`--off ground`）同一帧变成 `lowest sole -13.0 mm`——脚陷进地板 13 mm，因为刚性骨骼链在 `p=0.000`（脚跟着地那一刻）根本无法让两只脚同时贴地（报告里 `soleL +0.0307 / soleR -0.0278`），求解器只能把前脚脚跟抬起来约 6 cm。这是没有 foot IK 的**诚实残差**，不是 bug：真实答案要么是脚 IK，要么是烘焙好的步态。
 
@@ -87,7 +87,9 @@
 
 **原地走（treadmill）与 `--speed`**：地面网格按 `speed*time` 往后滚，屏幕取景因此固定，变的只有走路本身。一个周期的行程由腿长与髋摆幅推出来（`4 * legLength * sin(hipSwing)`；参考资产腿长 0.90 m、周期 1.17 m），地面行程与步频共用这一个数——所以 `--speed` 改的是**步频与地面滚动**，不是步幅；两者一旦脱钩，脚就在地上打滑。
 
-**渲染**是两个 GLSL 410 程序，都直渲默认帧缓冲（不走 `PostProcessChain`，所以着色器自己 ACES + `pow(1/2.2)` 收尾）：一个单太阳的蒙皮 PBR（GGX + 高度相关 Smith + Schlick，albedo/metallic/roughness 贴图与材质标量相乘，法线贴图用 cotangent frame，半球天光补光），一个地面（程序化网格线 + 椭圆接触阴影 + 向天空的远处淡出）。程序里的四个 sampler **每次 draw 都绑一张完整贴图**：文件缺哪一种图就绑 1×1 的哑元（白 albedo、平法线 `(128,128,255)`、白色标量），因为 Apple 驱动上 active sampler 指向不完整贴图会直接丢掉整个 draw，看起来像“模型不见了”。
+**这个故事里哪部分现在归引擎**：骨架解析、姿态数学、GPU 持有与地面反解都已经搬进 `src/gldx/anim/`，这个 demo 只剩"走路"这一件属于它自己的事。四件东西各有明确归属——`RigProfile`（骨名→21 个语义槽位，并从髋→头和左右大腿**量出**三轴，所以换一套骨骼命名的资产是"报出未绑定的槽位"而不是"手变僵了"）、`Pose`（`RotateBone` 把世界轴角度折进骨骼局部系）、`RiggedModel`（Stage-B 持有者，含 1×1 哑元贴图的兜底）、`GroundContact`（四个鞋底接触点反解骨盆离地量）。**刻意没搬的是步态本身**：`GaitTuning`、髋/膝/踝曲线、treadmill 都是这个 demo 的主张，不是通用能力——把它塞进引擎只会让下一个使用者被迫接受一套走路风格。这条界线的判据是"换一个 demo 会不会原样再用一次"：`RigProfile` 会，步态不会。用法见 [🟡 ③ 资产加载 §5](4-assets-loading.md)。
+
+**渲染**是两个 GLSL 410 程序，都直渲默认帧缓冲（不走 `PostProcessChain`，所以着色器自己 ACES + `pow(1/2.2)` 收尾）：一个单太阳的蒙皮 PBR（GGX + 高度相关 Smith + Schlick，albedo/metallic/roughness 贴图与材质标量相乘，法线贴图用 cotangent frame，半球天光补光），一个地面（程序化网格线 + 椭圆接触阴影 + 向天空的远处淡出）。程序里的四个 sampler **每次 draw 都绑一张完整贴图**：文件缺哪一种图就绑 1×1 的哑元（白 albedo、平法线 `(128,128,255)`、白色标量），因为 Apple 驱动上 active sampler 指向不完整贴图会直接丢掉整个 draw，看起来像“模型不见了”。这条兜底现在由 `RiggedModel::AlbedoOrFallback()` 家族负责，demo 侧没有 null 分支可写。
 
 **draw 数只数在 HUD 那一行上，而这一行本身就是那台天平**：默认 `palette 23/64 bones | bind check 4.8e-07 | 18 draws`，也就是 **17 次 skinned mesh 提交 + 1 次地面网格**；`--off ground` 变成 **17 draws**——正好少掉地面那一次，说明地面求解只占一个 draw、没有别的东西寄生在它上面；而 `--off walk` / `--off maps` / `--off normalmap` 都还是 **18 draws**。两句合起来才是这个 demo 的诚实说法：**走路是免费的**（同一个 18，关掉走路一次 draw 都不省），动画不是播放出来的 clip，而是几十行三角函数；能省下 draw 的只有地面。`--on report` 只往 stderr 打步态表，不打画面里的数字。
 
@@ -121,13 +123,15 @@ GLDX_SNAPSHOT=/tmp/a.bmp GLDX_SNAPSHOT_AT=3.0 ./output/anim-rigid --off hud --fr
 GLDX_SNAPSHOT=/tmp/b.bmp GLDX_SNAPSHOT_AT=3.0 ./output/anim-rigid --off hud --off walk --freeze-at 2 --quit-after 6
 
 # 对照组二：关掉贴图，退回材质标量（证明那四张图确实来自 FBX 内嵌字节）
-GLDX_SNAPSHOT=/tmp/c.bmp GLDX_SNAPSHOT_AT=3.0 ./output/anim-rigid --off hud --off maps --freeze-at 2 --quit-after 6
+# 注意要连 normalmap 一起关：--off maps 只停 albedo/metallic/roughness，法线图仍生效，
+# 单独关它反而差 46.36%（测到的是「有法线无底色」，不是「无贴图」）
+GLDX_SNAPSHOT=/tmp/c.bmp GLDX_SNAPSHOT_AT=3.0 ./output/anim-rigid --off hud --off maps,normalmap --freeze-at 2 --quit-after 6
 
 # 对照组三：线框，看 17531 个三角形真的都在
 GLDX_SNAPSHOT=/tmp/d.bmp GLDX_SNAPSHOT_AT=3.0 ./output/anim-rigid --off hud --on wireframe --freeze-at 2 --quit-after 6
 ```
 
-参考资产在 2560×1520 上、对最终二进制 `e171a9020a734afc` 实测：`--off walk` 差 **3.20%** 的像素（阈值 >8/255，最大通道差 **228**）、`--off maps` 差 **3.44%**（最大 **231**）、`--on wireframe` 差 **62.72%**（最大 **237**）。`walk` 这一项在腕/锁骨修复**之前**是 3.21%，修复只搬动了阈值边缘约 250 个像素（手在画面里很小，这本身是个有用的尺度感）；三个数字在修复后重测、且最终二进制的基线帧与修复构建逐字节相同（`md5 bbf2e477d46e5695f107164135c618d8`），所以复现时应当看到 3.20%。参考资产同一帧的 stderr 与 HUD 是同一组数：`23 bones, 17 meshes, 36443 verts (17531 tris), height 1.64 m, palette 23/64, bind check 4.8e-07`、`textures: albedo yes, normal yes, metallic yes, roughness yes (up to 4096x4096 px); 0 unreferenced map path(s)`、`hierarchy: 1 root bone(s), depth 8, foot chain 4 -> 5 -> 6`；HUD 另报 `leg 0.90 m | cycle 1.17 m` 与 `18 draws`。
+参考资产在 2560×1520 上、对最终二进制 `e171a9020a734afc` 实测：`--off walk` 差 **3.20%** 的像素（阈值 >8/255，最大通道差 **228**）、`--off maps,normalmap` 差 **3.44%**（最大 **231**）、`--on wireframe` 差 **62.72%**（最大 **237**）。`walk` 这一项在腕/锁骨修复**之前**是 3.21%，修复只搬动了阈值边缘约 250 个像素（手在画面里很小，这本身是个有用的尺度感）；三个数字在修复后重测、且最终二进制的基线帧与修复构建逐字节相同（`md5 bbf2e477d46e5695f107164135c618d8`），所以复现时应当看到 3.20%。参考资产同一帧的 stderr 与 HUD 是同一组数：`23 bones, 17 meshes, 36443 verts (17531 tris), height 1.64 m, palette 23/64, bind check 4.8e-07`、`textures: albedo yes, normal yes, metallic yes, roughness yes (up to 4096x4096 px); 0 unreferenced map path(s)`、`hierarchy: 1 root bone(s), depth 8, foot chain 4 -> 5 -> 6`；HUD 另报 `leg 0.90 m | cycle 1.17 m` 与 `18 draws`。
 
 **还有一处诚实的粗糙**：`--on wireframe` 会把角色与地面一起画成线框，所以 62.72% 这个数字是“整幅画面的三角形都被改画了”，不是“角色轮廓变了”的度量；要单独量角色就用 `--off ground`（此时 17 draws、27.4% 的画面仍是天空）。
 

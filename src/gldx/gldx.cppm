@@ -59,10 +59,23 @@ export {
 // --- animation -------------------------------------------------------------
 // Skinning is split like every other asset: the CPU side (Skeleton, the
 // SkinnedVertex layout, ModelLoader::LoadSkinned) builds on a worker thread and
-// the GPU side (SkinnedMesh) is uploaded on the render thread.
+// the GPU side (SkinnedMesh, RiggedModel) is uploaded on the render thread.
+//
+// On top of that split sit the four pieces a *user* of a rig needs, so a demo
+// only has to author motion instead of re-discovering the plumbing:
+//   - RigProfile     which bone is the hip, and which way is up (measured from
+//                    the rig, never assumed - names differ per exporter)
+//   - Pose           "rotate this bone about a world axis", plus rest == bind
+//   - GroundContact  solve the pelvis height from where the soles actually are
+//   - RiggedModel    upload + own one rig, including the 1x1 stand-in maps that
+//                    keep every sampler backed (Apple drops a draw otherwise)
 #include "gldx/anim/Skeleton.h"
 #include "gldx/anim/SkinnedVertex.h"
 #include "gldx/anim/SkinnedMesh.h"
+#include "gldx/anim/RigProfile.h"
+#include "gldx/anim/Pose.h"
+#include "gldx/anim/GroundContact.h"
+#include "gldx/anim/RiggedModel.h"
 
 // --- geometry --------------------------------------------------------------
 #include "gldx/geometry/Vertex.h"

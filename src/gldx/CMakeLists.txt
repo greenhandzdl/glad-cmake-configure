@@ -22,6 +22,10 @@ set(GLDX_SOURCES
     shader/ShaderProgram.cpp
     anim/Skeleton.cpp
     anim/SkinnedMesh.cpp
+    anim/RigProfile.cpp
+    anim/Pose.cpp
+    anim/RiggedModel.cpp
+    anim/GroundContact.cpp
     geometry/Mesh.cpp
     geometry/GeometryFactory.cpp
     geometry/InstancedMesh.cpp

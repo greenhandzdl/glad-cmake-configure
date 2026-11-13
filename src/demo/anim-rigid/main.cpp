@@ -2,20 +2,34 @@
  * @file main.cpp
  * @brief anim-rigid - a rigged FBX, skinned on the GPU, walking forever.
  *
- * The interesting part of this demo is that the asset has a skeleton and skin
- * weights but **no animation clips at all** (the FBX carries 17 skinned meshes,
- * 23 bones per mesh, and zero `AnimationStack`s). So the walking is authored
- * here, procedurally, from the rig's own rest pose: nothing is played back, the
- * pose is a pure function of the clock. That is also why `--freeze-at` frames
- * are reproducible - the gait reads `min(time, freezeAt)` instead of
+ * What is left in this file after the engine grew its animation surface: the
+ * *gait*. Import, the semantic rig classification, the world-axis pose algebra,
+ * the ground solve and the Stage-B upload all live in gldx now (RigProfile, Pose,
+ * GroundContact, RiggedModel), because none of them are specific to walking -
+ * every rigged demo needs the same four things and would otherwise re-derive
+ * them, including the three that fail silently (see RiggedModel.h).
+ *
+ * What is genuinely a demo, and therefore stays here:
+ *   - the tuning constants (GaitTuning) and the stance/swing curves (LegAt),
+ *   - how a walk cycle is composed from those curves (BuildWalkPose),
+ *   - the treadmill, so the character walks in place and the only thing moving
+ *     is the gait,
+ *   - the shaders (single sun, no IBL/shadow: the small material this scene can
+ *     actually back - see Shaders.h).
+ *
+ * The asset has a skeleton and skin weights but **no animation clips at all**
+ * (17 skinned meshes, 23 bones, zero `AnimationStack`s). So the walking is
+ * authored here, procedurally, from the rig's own rest pose: nothing is played
+ * back, the pose is a pure function of the clock. That is also why `--freeze-at`
+ * frames are reproducible - the gait reads `min(time, freezeAt)` instead of
  * accumulating a dt, so two runs with the same switches draw the same pixels.
  *
  * Three pieces make the skinning work, and each of them is a place this can go
  * silently wrong, so they are worth naming before the code:
  *
  *  1. Space. Assimp hands back the FBX's vertices in each mesh node's local
- *     space, but the cluster bind matrices in bind/scene space. The FBX here
- *     is authored Z-up with the Y-up conversion parked on the mesh nodes, so
+ *     space, but the cluster bind matrices in bind/scene space. The FBX here is
+ *     authored Z-up with the Y-up conversion parked on the mesh nodes, so
  *     `ModelLoader::LoadSkinned` bakes that node transform into the vertices.
  *     Without it the skeleton stands at 90 degrees to its own skin.
  *  2. Rest pose. The skeleton's rest locals are derived from the inverse-bind
@@ -26,7 +40,7 @@
  *     thigh about the lateral axis). Each bone's own axes come from the rig, so
  *     `PoseRotation()` converts the world axis into that bone's local frame with
  *     its rest world matrix. Nothing about "which axis is lateral" is hardcoded:
- *     it is measured from the rig's bone positions at load time.
+ *     it is measured from the rig's bone positions at load time (RigProfile).
  *
  * The character walks in place on a scrolling floor (a treadmill). A treadmill
  * instead of a moving character keeps the framing fixed and makes the walk
@@ -72,7 +86,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <future>
-#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
@@ -97,124 +110,11 @@ static_assert(gldx::kMaxBonePalette == 64, "uBones[N] in Shaders.h must match gl
 constexpr const char* kDefaultModel = "src/demo/anim-rigid/demo_should_be_ignored.fbx";
 
 // ---------------------------------------------------------------------------
-// Rig classification: which bone is the hip, which is the left thigh, and which
-// way is up. Names are matched against the conventions the common exporters use
-// (Blender's FBX/glTF namer, Mixamo's prefixed rigs, 3ds Max's Biped), so the demo
-// is not welded to this one asset.
+// The gait. This is the part that is actually this demo's - everything it reads
+// comes from the engine's RigProfile (which bone, which axis) and writes into an
+// engine Pose. Keeping the numbers together is what makes the walk tunable
+// without touching the plumbing around it.
 // ---------------------------------------------------------------------------
-struct Rig {
-    int hips   = -1;
-    int spine  = -1;
-    int spine1 = -1;
-    int chest  = -1;
-    int head   = -1;
-    // 0 = left, 1 = right.
-    int legUp[2]  = {-1, -1};
-    int legLow[2] = {-1, -1};
-    int foot[2]   = {-1, -1};
-    int toe[2]    = {-1, -1};
-    int armUp[2]  = {-1, -1};
-    int armLow[2] = {-1, -1};
-    int hand[2]   = {-1, -1};    // wrist: the bone the hand mesh is weighted to
-    int clavicle[2] = {-1, -1};  // shoulder: only ever rotated a few degrees
-
-    glm::vec3 side{1.0f, 0.0f, 0.0f};     // toward the character's left
-    glm::vec3 up{0.0f, 1.0f, 0.0f};
-    glm::vec3 forward{0.0f, 0.0f, 1.0f};  // the direction it walks
-    bool walkable = false;                // hips + at least one usable leg chain
-};
-
-int FindBone(const gldx::Skeleton& sk, std::initializer_list<const char*> names) {
-    for (const char* name : names) {
-        const int index = sk.Find(name);
-        if (index >= 0) return index;
-    }
-    return -1;
-}
-
-glm::vec3 BonePosition(const gldx::Skeleton& sk, int bone) {
-    return bone < 0 ? glm::vec3(0.0f) : glm::vec3(sk.RestWorld(bone)[3]);
-}
-
-Rig ClassifyRig(const gldx::Skeleton& sk) {
-    Rig rig;
-    rig.hips  = FindBone(sk, {"Hips", "hips", "Pelvis", "pelvis", "Bip01 Pelvis"});
-    rig.spine = FindBone(sk, {"Spine", "spine", "Spine1", "Bip01 Spine"});
-    rig.chest = FindBone(sk, {"Spine2", "Chest", "chest", "spine.003", "Bip01 Spine2"});
-    rig.head  = FindBone(sk, {"Head", "head", "Bip01 Head"});
-    // Mid-torso, only used to anchor the skirt's waistline for the clearance probe.
-    rig.spine1 = FindBone(sk, {"Spine1", "Spine2", "Chest", "mixamorig:Spine1", "Bip01 Spine1"});
-
-    rig.legUp[0]  = FindBone(sk, {"LeftUpLeg", "LeftUpperLeg", "LeftThigh", "UpperLeg.L",
-                                  "Thigh.L", "mixamorig:LeftUpLeg", "Bip01 L Thigh"});
-    rig.legLow[0] = FindBone(sk, {"LeftLeg", "LeftLowerLeg", "LowerLeg.L", "Calf.L",
-                                  "Shin.L", "mixamorig:LeftLeg", "Bip01 L Calf"});
-    rig.foot[0]   = FindBone(sk, {"LeftFoot", "Foot.L", "mixamorig:LeftFoot", "Bip01 L Foot"});
-    rig.toe[0]    = FindBone(sk, {"LeftToeBase", "LeftToe", "Toe.L", "mixamorig:LeftToeBase",
-                                  "Bip01 L Toe0"});
-    rig.legUp[1]  = FindBone(sk, {"RightUpLeg", "RightUpperLeg", "RightThigh", "UpperLeg.R",
-                                  "Thigh.R", "mixamorig:RightUpLeg", "Bip01 R Thigh"});
-    rig.legLow[1] = FindBone(sk, {"RightLeg", "RightLowerLeg", "LowerLeg.R", "Calf.R",
-                                  "Shin.R", "mixamorig:RightLeg", "Bip01 R Calf"});
-    rig.foot[1]   = FindBone(sk, {"RightFoot", "Foot.R", "mixamorig:RightFoot", "Bip01 R Foot"});
-    rig.toe[1]    = FindBone(sk, {"RightToeBase", "RightToe", "Toe.R", "mixamorig:RightToeBase",
-                                  "Bip01 R Toe0"});
-
-    rig.armUp[0]  = FindBone(sk, {"LeftArm", "LeftUpperArm", "UpperArm.L", "Arm.L",
-                                  "mixamorig:LeftArm", "Bip01 L UpperArm"});
-    rig.armLow[0] = FindBone(sk, {"LeftForeArm", "LeftLowerArm", "LowerArm.L", "ForeArm.L",
-                                  "mixamorig:LeftForeArm", "Bip01 L Forearm"});
-    rig.armUp[1]  = FindBone(sk, {"RightArm", "RightUpperArm", "UpperArm.R", "Arm.R",
-                                  "mixamorig:RightArm", "Bip01 R UpperArm"});
-    rig.armLow[1] = FindBone(sk, {"RightForeArm", "RightLowerArm", "LowerArm.R", "ForeArm.R",
-                                  "mixamorig:RightForeArm", "Bip01 R Forearm"});
-    rig.hand[0]   = FindBone(sk, {"LeftHand", "Hand.L", "mixamorig:LeftHand", "Bip01 L Hand"});
-    rig.hand[1]   = FindBone(sk, {"RightHand", "Hand.R", "mixamorig:RightHand", "Bip01 R Hand"});
-    rig.clavicle[0] = FindBone(sk, {"LeftShoulder", "LeftClavicle", "Shoulder.L", "Clavicle.L",
-                                    "mixamorig:LeftShoulder", "Bip01 L Clavicle"});
-    rig.clavicle[1] = FindBone(sk, {"RightShoulder", "RightClavicle", "Shoulder.R", "Clavicle.R",
-                                    "mixamorig:RightShoulder", "Bip01 R Clavicle"});
-
-    // Axes are measured, never assumed. Up is the hip-to-head direction, the
-    // lateral axis joins the two thighs, and forward completes the right-handed
-    // triple (side, up, forward) - which is exactly what the display matrix below
-    // needs, and what the gait's rotation axes are expressed in.
-    const glm::vec3 hipPos  = BonePosition(sk, rig.hips);
-    const glm::vec3 headPos = BonePosition(sk, rig.head);
-    if (rig.hips >= 0 && rig.head >= 0) {
-        const glm::vec3 d = headPos - hipPos;
-        if (glm::length(d) > 1e-4f) rig.up = glm::normalize(d);
-    }
-    if (rig.legUp[0] >= 0 && rig.legUp[1] >= 0) {
-        const glm::vec3 d = BonePosition(sk, rig.legUp[0]) - BonePosition(sk, rig.legUp[1]);
-        if (glm::length(d) > 1e-4f) rig.side = glm::normalize(d);
-    } else if (rig.hips >= 0) {
-        // No legs to measure from: pick any lateral axis perpendicular to up.
-        const glm::vec3 seed = std::abs(rig.up.y) > 0.9f ? glm::vec3(1, 0, 0) : glm::vec3(0, 1, 0);
-        rig.side = glm::normalize(glm::cross(rig.up, seed));
-    }
-    rig.forward = glm::normalize(glm::cross(rig.side, rig.up));
-    rig.walkable = rig.hips >= 0 && rig.legUp[0] >= 0 && rig.legUp[1] >= 0;
-    return rig;
-}
-
-// ---------------------------------------------------------------------------
-// The pose. Everything here is a rotation about one of the rig axes above,
-// converted into the bone's local frame by its *rest world* matrix:
-//
-//   world(bone) = restWorld(bone) * local, so asking for "an extra rotation Rw
-//   about world axis w" gives local = restWorld^-1 * Rw * restWorld, whose axis
-//   is restWorld^-1 * w. Rotating in the bone's own frame therefore pivots about
-//   the bone's own origin, which is the joint - that is the whole trick.
-// ---------------------------------------------------------------------------
-glm::mat4 PoseRotation(const glm::mat4& restWorldBone, const glm::vec3& worldAxis, float radians) {
-    const glm::mat3 basis = glm::mat3(restWorldBone);
-    const glm::vec3 axis = glm::transpose(basis) * worldAxis;
-    const float len = glm::length(axis);
-    if (!(len > 1e-6f)) return glm::mat4(1.0f);   // degenerate bind matrix: no-op
-    return glm::rotate(glm::mat4(1.0f), radians, axis / len);
-}
-
 struct GaitTuning {
     // Stance is the fraction of a leg's cycle where the foot carries the body.
     // 0.6 for walking (a real gait spends ~60% in stance, and the two legs
@@ -230,7 +130,7 @@ struct GaitTuning {
     float toeOffBend      = 0.34f;  // rad, toe joint dorsiflexion while the heel is up
 
     // T-pose -> A-pose. Plumb is 1.57 and almost everything is wrong about it
-    // for this character: this skirt is a flared cone around both thighs, so a
+    // for this character: its skirt is a flared cone around both thighs, so a
     // plumb humerus hangs the forearm *through* the fabric. The value was found
     // by rendering a close-up and stepping (1.45 -> 1.16 -> 1.05), not by
     // trigonometry: at 1.45 (83 deg, the first attempt) the wrist was visibly
@@ -330,19 +230,19 @@ LegAngles LegAt(const GaitTuning& tune, float p) {
 // Fills `outPose` (one local matrix per bone) for the given phase in radians.
 // `phase` advances by 2*pi per full two-step cycle; the right side runs half a
 // cycle behind the left. The pelvis *translation* is not part of the pose: it is
-// solved afterwards from ground contact (see GroundOffset), because a bob
+// solved afterwards from ground contact (see GroundContact), because a bob
 // authored by hand fights every other change to the legs.
-void BuildWalkPose(const gldx::Skeleton& sk, const Rig& rig,
+//
+// The rest of the machinery this needs - "start from rest", "rotate about a
+// world axis, folded into this bone's frame" - is gldx::ResetToRest and
+// gldx::RotateBone. What is written here is only the *content* of the walk.
+void BuildWalkPose(const gldx::Skeleton& sk, const gldx::RigProfile& rig,
                    const std::vector<glm::mat4>& restWorld, const GaitTuning& tune,
                    float phase, std::vector<glm::mat4>& outPose) {
-    outPose.resize(sk.size());
-    for (std::size_t i = 0; i < sk.size(); ++i) outPose[i] = sk.bones()[i].restLocal;
+    gldx::ResetToRest(sk, outPose);
 
     auto rotate = [&](int bone, const glm::vec3& worldAxis, float radians) {
-        if (bone < 0 || radians == 0.0f) return;
-        outPose[static_cast<std::size_t>(bone)] =
-            outPose[static_cast<std::size_t>(bone)] *
-            PoseRotation(restWorld[static_cast<std::size_t>(bone)], worldAxis, radians);
+        gldx::RotateBone(outPose, restWorld, bone, worldAxis, radians);
     };
 
     const float cycle = phase / (2.0f * kPi);          // whole cycles, any value
@@ -366,8 +266,8 @@ void BuildWalkPose(const gldx::Skeleton& sk, const Rig& rig,
     // would vanish into the silhouette and read as "the arms never moved". A
     // hand-authored clip keeps the shoulder a little out from the ribs for
     // exactly this reason.
-    rotate(rig.armUp[0], rig.forward, -tune.armDown);
-    rotate(rig.armUp[1], rig.forward, +tune.armDown);
+    rotate(rig.armUp[gldx::kRigLeft], rig.forward, -tune.armDown);
+    rotate(rig.armUp[gldx::kRigRight], rig.forward, +tune.armDown);
 
     // Pelvis and shoulders counter-rotate about the vertical axis, and the head
     // cancels most of it so the character keeps looking where it walks.
@@ -376,7 +276,7 @@ void BuildWalkPose(const gldx::Skeleton& sk, const Rig& rig,
     rotate(rig.chest, rig.up, -tune.chestYaw * yawDriver);
     rotate(rig.head, rig.up, tune.headYaw * yawDriver);
 
-    for (int s = 0; s < 2; ++s) {
+    for (int s = 0; s < gldx::kRigSides; ++s) {
         const LegAngles& leg = (s == 0) ? left : right;
         rotate(rig.legUp[s], rig.side, leg.hip);
         rotate(rig.legLow[s], rig.side, leg.knee);
@@ -421,58 +321,30 @@ void BuildWalkPose(const gldx::Skeleton& sk, const Rig& rig,
     }
 }
 
+} // namespace
+
+namespace {
+
 // ---------------------------------------------------------------------------
-// One loaded character: the CPU skeleton, the GPU meshes, and the scratch the
-// per-frame palette is computed into.
+// The demo's own state around one character: everything that is NOT the rig
+// itself. The rig (skeleton, meshes, maps, unit scale, rest worlds) is
+// gldx::RiggedModel; the ground solve is gldx::GroundContact; the semantic bone
+// lookup is gldx::RigProfile. What stays here is the scratch they write into
+// and the walk-specific numbers derived from them.
 // ---------------------------------------------------------------------------
 struct Character {
-    gldx::Skeleton skeleton;
-    std::vector<gldx::SkinnedMesh> meshes;
-    std::vector<glm::mat4> restWorld;
-    std::vector<glm::mat4> pose;
-    std::vector<glm::mat4> palette;
-    std::vector<std::string> paletteNames;   // "uBones[i]", built once
-    Rig rig;
+    gldx::RiggedModel model;
+    gldx::RigProfile  rig;
+    gldx::GroundContact ground;
+
+    std::vector<glm::mat4> pose;      // one local matrix per bone, rebuilt per frame
+    std::vector<glm::mat4> palette;   // what the vertex shader reads as uBones[]
     GaitTuning tune;
 
-    // The FBX embeds four PBR maps, so they are uploaded for real. `textures` is
-    // indexed the way the loader numbered them; the fallbacks are 1x1 dummies
-    // that keep every sampler in the program backed by a complete texture even
-    // when a map is missing (an active sampler pointing at nothing makes Apple's
-    // driver drop the draw call, which looks like "the model disappeared").
-    std::vector<gldx::Texture2D> textures;
-    gldx::SkinnedMaterial material;
-    std::vector<int> meshMaterial;
-    gldx::Texture2D fallbackAlbedo;
-    gldx::Texture2D fallbackNormal;
-    gldx::Texture2D fallbackScalar;
-    bool hasAlbedo = false;
-    bool hasNormal = false;
-    bool hasMetallic = false;
-    bool hasRoughness = false;
-    int textureWidth = 0;
-    int textureHeight = 0;
-
-    // Four rig-space contact points (a heel and a ball per foot), taken once from
-    // the bind pose. They are carried by the foot and toe bones, so the pelvis
-    // height in any frame can be solved from where the *lowest* one actually is
-    // instead of from a hand-authored bob curve.
-    glm::vec3 contactRig[4]{};
-    int       contactBone[4] = {-1, -1, -1, -1};
-    int       contactCount = 0;
-
-    glm::mat3 orientation{1.0f};   // rig axes -> world (X right, Y up, Z forward)
-    float unitScale = 0.01f;       // rig units -> metres
-    float heightMetres = 1.7f;
-    float legLengthMetres = 0.9f;
-    float cycleMetres = 1.0f;      // floor travel per full two-step cycle
-    float bindDeviation = 0.0f;    // |rest palette - root transform|max, measured at load
-    int vertexCount = 0;
-    int triangleCount = 0;
-    std::string sourcePath;
+    float cycleMetres = 1.0f;         // floor travel per full two-step cycle
     std::string error;
 
-    [[nodiscard]] bool ready() const { return !meshes.empty(); }
+    [[nodiscard]] bool ready() const { return model.ready(); }
     [[nodiscard]] float phaseFor(float speed, float seconds) const {
         // Distance walked / distance travelled by one cycle, so the feet stay
         // planted: faster walking is a faster cadence, not a longer stride.
@@ -480,13 +352,7 @@ struct Character {
     }
 };
 
-} // namespace
-
-namespace {
-
-// ---------------------------------------------------------------------------
 // Camera + the runtime state the pass, the HUD and the input callbacks share.
-// ---------------------------------------------------------------------------
 struct View {
     float yaw      = 0.62f;   // radians around the character, 0 = straight ahead (+Z)
     float pitch    = 0.17f;
@@ -605,7 +471,8 @@ public:
             ++draws;
         }
 
-        if (skin_ && character_.ready() && !character_.palette.empty()) {
+        const gldx::RiggedModel& model = character_.model;
+        if (skin_ && model.ready() && !character_.palette.empty()) {
             skin_->Use();
             skin_->Set("uViewProj", f.viewProj);
             skin_->Set("uCamPos", eye);
@@ -614,30 +481,24 @@ public:
             skin_->Set("uSunIntensity", kSunIntensity);
             skin_->Set("uSkyColor", kSkyColor);
             skin_->Set("uBounceColor", kBounceColor);
-            for (std::size_t i = 0; i < character_.palette.size(); ++i) {
-                skin_->Set(character_.paletteNames[i].c_str(), character_.palette[i]);
-            }
+            // The palette convention ("uBones[i]", one entry per bone) belongs to
+            // the engine; a caller that spelled these names by hand would get a
+            // uniform that silently never gets set.
+            model.BindPalette(*skin_, character_.palette);
 
-            // Units are fixed by the program's declarations (0 albedo, 1 normal,
-            // 2 metallic, 3 roughness) and every one of them is bound to a
-            // complete texture on every draw, dummy or not - see the note on the
-            // fallbacks in Character.
-            const gldx::Texture2D& albedo =
-                (view_.maps && character_.hasAlbedo)
-                    ? character_.textures[character_.material.albedoTexture]
-                    : character_.fallbackAlbedo;
-            const gldx::Texture2D& normal =
-                (view_.maps && character_.hasNormal)
-                    ? character_.textures[character_.material.normalTexture]
-                    : character_.fallbackNormal;
+            // Every sampler must point at a complete texture on every draw, dummy
+            // or not: an active sampler with nothing behind it makes Apple's driver
+            // drop the whole call (the failure looks like "the model vanished").
+            // AlbedoOrFallback() and friends are that guarantee, so this loop has
+            // no null case to handle.
+            const bool useMaps = view_.maps;
+            const bool hasNormal = useMaps && view_.normalMap && model.hasNormal();
+            const gldx::Texture2D& albedo = useMaps ? model.AlbedoOrFallback() : model.fallbackAlbedo();
+            const gldx::Texture2D& normal = hasNormal ? model.NormalOrFallback() : model.fallbackNormal();
             const gldx::Texture2D& metallic =
-                (view_.maps && character_.hasMetallic)
-                    ? character_.textures[character_.material.metallicTexture]
-                    : character_.fallbackScalar;
+                useMaps ? model.MetallicOrFallback() : model.fallbackScalar();
             const gldx::Texture2D& roughness =
-                (view_.maps && character_.hasRoughness)
-                    ? character_.textures[character_.material.roughnessTexture]
-                    : character_.fallbackScalar;
+                useMaps ? model.RoughnessOrFallback() : model.fallbackScalar();
             albedo.Bind(0);
             normal.Bind(1);
             metallic.Bind(2);
@@ -646,17 +507,21 @@ public:
             skin_->Set("uNormal", 1);
             skin_->Set("uMetallic", 2);
             skin_->Set("uRoughness", 3);
-            const bool useMaps = view_.maps;
-            skin_->Set("uHasAlbedo", (useMaps && character_.hasAlbedo) ? 1 : 0);
-            skin_->Set("uHasNormal", (useMaps && view_.normalMap && character_.hasNormal) ? 1 : 0);
-            skin_->Set("uHasMetallic", (useMaps && character_.hasMetallic) ? 1 : 0);
-            skin_->Set("uHasRoughness", (useMaps && character_.hasRoughness) ? 1 : 0);
-            skin_->Set("uBaseColor", character_.material.baseColor);
-            skin_->Set("uMetallicFactor", character_.material.metallic);
-            skin_->Set("uRoughnessFactor", character_.material.roughness);
+            // A sampler bound to a fallback is still a sampler *sampled*; the flag
+            // says whether the value it returns means anything, which is what the
+            // shader branches on.
+            skin_->Set("uHasAlbedo", (useMaps && model.hasAlbedo()) ? 1 : 0);
+            skin_->Set("uHasNormal", hasNormal ? 1 : 0);
+            skin_->Set("uHasMetallic", (useMaps && model.hasMetallic()) ? 1 : 0);
+            skin_->Set("uHasRoughness", (useMaps && model.hasRoughness()) ? 1 : 0);
 
-            for (std::size_t i = 0; i < character_.meshes.size(); ++i) {
-                character_.meshes[i].Draw();
+            const gldx::SkinnedMaterial material = model.PrimaryMaterial();
+            skin_->Set("uBaseColor", material.baseColor);
+            skin_->Set("uMetallicFactor", material.metallic);
+            skin_->Set("uRoughnessFactor", material.roughness);
+
+            for (const gldx::SkinnedMesh& mesh : model.meshes()) {
+                mesh.Draw();
                 ++draws;
             }
         }
@@ -689,14 +554,16 @@ public:
 
         hud.BeginSection(gldx::Hud::Anchor::TopLeft, 17.0f);
         hud.AddLine("anim-rigid - skinned FBX, procedural walk", gldx::Hud::kFg);
-        if (!character_.ready()) {
+        const gldx::RiggedModel& model = character_.model;
+        if (!model.ready()) {
             hud.AddLine(character_.error.empty() ? "loading rig (worker thread)..." : character_.error.c_str(),
                         character_.error.empty() ? gldx::Hud::kDim : gldx::Hud::kWarn);
         } else {
             std::snprintf(line, sizeof(line), "%d bones, %d meshes, %d verts, %d tris",
-                          static_cast<int>(character_.skeleton.size()),
-                          static_cast<int>(character_.meshes.size()),
-                          character_.vertexCount, character_.triangleCount);
+                          static_cast<int>(model.skeleton().size()),
+                          static_cast<int>(model.meshes().size()),
+                          static_cast<int>(model.vertexCount()),
+                          static_cast<int>(model.triangleCount()));
             hud.AddLine(line, gldx::Hud::kDim);
             // The phase the *gait* is using, folded into 0..1 - the value the
             // pose is actually built from. (An earlier version printed
@@ -710,14 +577,14 @@ public:
                           static_cast<double>(view_.speed));
             hud.AddLine(line, gldx::Hud::kFg);
             std::snprintf(line, sizeof(line), "height %.2f m (rig unit x%.3g) | leg %.2f m | cycle %.2f m",
-                          static_cast<double>(character_.heightMetres),
-                          static_cast<double>(character_.unitScale),
-                          static_cast<double>(character_.legLengthMetres),
+                          static_cast<double>(model.heightMetres()),
+                          static_cast<double>(model.unitScale()),
+                          static_cast<double>(model.legLengthMetres()),
                           static_cast<double>(character_.cycleMetres));
             hud.AddLine(line, gldx::Hud::kDim);
             std::snprintf(line, sizeof(line), "palette %d/%d bones | bind check %.1e | %d draws",
                           static_cast<int>(character_.palette.size()), gldx::kMaxBonePalette,
-                          static_cast<double>(character_.bindDeviation), view_.drawCalls);
+                          static_cast<double>(model.bindDeviation()), view_.drawCalls);
             hud.AddLine(line, gldx::Hud::kDim);
             std::snprintf(line, sizeof(line), "ground: pelvis %+6.1f mm | lowest sole %+6.1f mm",
                           static_cast<double>(view_.groundLift * 1000.0f),
@@ -726,9 +593,9 @@ public:
             // The maps come out of the FBX itself, so this line is the claim
             // "textured", not "a texture file was found next to the model".
             std::snprintf(line, sizeof(line), "maps: albedo %s normal %s metal %s rough %s (%dx%d max)",
-                          character_.hasAlbedo ? "y" : "n", character_.hasNormal ? "y" : "n",
-                          character_.hasMetallic ? "y" : "n", character_.hasRoughness ? "y" : "n",
-                          character_.textureWidth, character_.textureHeight);
+                          model.hasAlbedo() ? "y" : "n", model.hasNormal() ? "y" : "n",
+                          model.hasMetallic() ? "y" : "n", model.hasRoughness() ? "y" : "n",
+                          model.textureWidth(), model.textureHeight());
             hud.AddLine(line, gldx::Hud::kDim);
         }
         std::snprintf(line, sizeof(line), "t %.2f s%s | %.0f fps", view_.clock,
@@ -761,143 +628,87 @@ gldx::Texture2DDesc MakeSolidDesc(std::uint8_t r = 255, std::uint8_t g = 255,
 
 // Stage B for the character: everything here needs the GL context, which is why
 // it runs on the render thread inside the frame callback once the worker's
-// future is ready.
+// future is ready. The upload itself is one call now - RiggedModel derives the
+// unit scale, the orientation, the rest-world cache and the palette names, and
+// owns the 1x1 stand-in maps. What is left is this demo's own bookkeeping.
 void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                      bool reportGait) {
-    character.skeleton  = std::move(data.skeleton);
-    character.sourcePath = data.sourcePath;
-    character.rig = ClassifyRig(character.skeleton);
+    // Classification has to happen BEFORE the upload, and it is the reason this
+    // function is shaped the way it is. RiggedModel refuses to own the exporter
+    // name table (two tables that disagree bind a rig halfway - see its file
+    // comment), so the model cannot derive orientation or the sole plane itself;
+    // both need RigProfile, which needs the Skeleton, which arrives inside `data`.
+    //
+    // So: classify the skeleton in place, measure the two numbers that depend on
+    // the *measured* up axis, hand those to the model, and only then move the data.
+    character.rig = gldx::RigProfile::Classify(data.skeleton);
 
-    // Extent along the measured up axis, from the bind-pose vertices themselves
-    // (a bone span would miss the head and the soles).
-    float minUp = 0.0f;
-    float maxUp = 0.0f;
-    bool first = true;
+    // Where the sole plane is: the lowest bind-pose vertex projected on the rig's
+    // up axis. It has to come from the VERTICES, not from the bones - the ankle
+    // joint sits several centimetres above the sole, so projecting a contact from
+    // the joint instead of the sole would float the whole character by that offset
+    // and nothing would report it.
+    //
+    // Measured BEFORE the model takes ownership of `data`: after the move, all of
+    // this is gone. (Getting that order wrong does not fail to compile - it leaves
+    // a reference to a moved-from Skeleton, whose bone list is empty while the
+    // RigProfile still holds valid-*looking* indices, so the very next RestWorld()
+    // reads off the end. That is the crash this comment exists to prevent.)
+    float bindLowestOnUp = 0.0f;
+    bool firstVertex = true;
     for (const gldx::SkinnedMeshData& mesh : data.meshes) {
         for (const gldx::SkinnedVertex& v : mesh.vertices) {
             const float d = glm::dot(v.position, character.rig.up);
-            if (first) {
-                minUp = maxUp = d;
-                first = false;
-            }
-            minUp = std::min(minUp, d);
-            maxUp = std::max(maxUp, d);
+            bindLowestOnUp = firstVertex ? d : std::min(bindLowestOnUp, d);
+            firstVertex = false;
         }
-        character.vertexCount += static_cast<int>(mesh.vertices.size());
-        character.triangleCount += static_cast<int>(mesh.indices.size() / 3);
-    }
-    const float rigHeight = first ? 1.0f : (maxUp - minUp);
-    // Units are a property of the file, not a knob: a 163-unit character is in
-    // centimetres, a 1.63-unit one is already in metres. Guessing wrong makes the
-    // camera sit inside the model and reads as "nothing loaded".
-    character.unitScale = (rigHeight > 20.0f) ? 0.01f : 1.0f;
-    character.heightMetres = std::max(rigHeight * character.unitScale, 0.2f);
-
-    // Display basis: the rig's own (side, up, forward) triple, so the character
-    // stands up in world space whatever axis its author used.
-    character.orientation = glm::mat3(character.rig.side, character.rig.up, character.rig.forward);
-
-    character.restWorld.resize(character.skeleton.size());
-    for (std::size_t i = 0; i < character.skeleton.size(); ++i) {
-        character.restWorld[i] = character.skeleton.RestWorld(static_cast<int>(i));
-    }
-    character.paletteNames.reserve(character.skeleton.size());
-    for (std::size_t i = 0; i < character.skeleton.size(); ++i) {
-        character.paletteNames.push_back("uBones[" + std::to_string(i) + "]");
     }
 
-    // --- contact points -------------------------------------------------
-    // The sole plane is the lowest bind-pose vertex; a heel sits under the ankle
-    // joint and a ball under the toe joint. Both are stored in rig space and
-    // later carried by the bone they belong to (see the frame loop), which is
-    // what lets a rotated foot keep its real contact height.
-    {
-        const glm::vec3 up = character.rig.up;
-        auto addContact = [&](int bone) {
-            if (bone < 0 || character.contactCount >= 4) return;
-            const glm::vec3 p = BonePosition(character.skeleton, bone);
-            character.contactRig[character.contactCount] = p - up * (glm::dot(p, up) - minUp);
-            character.contactBone[character.contactCount] = bone;
-            ++character.contactCount;
-        };
-        addContact(character.rig.foot[0]);
-        addContact(character.rig.toe[0]);
-        addContact(character.rig.foot[1]);
-        addContact(character.rig.toe[1]);
+    character.model.Upload(std::move(data));
+    const gldx::RiggedModel& model = character.model;
+    if (!model.ready()) {
+        character.error = "the file carried no skinned mesh";
+        return;
     }
+    // The skeleton the rig indices were classified against, now owned by the model.
+    const gldx::Skeleton& skeleton = model.skeleton();
+    // Rig axes -> world basis, so the character stands up whatever axis its author
+    // used. Set after Upload because Upload is what the GL calls belong to; the
+    // orientation is pure value math and could be set any time before the first
+    // draw, but this is the one place that has a RigProfile to give it.
+    character.model.SetOrientation(character.rig.side, character.rig.up, character.rig.forward);
 
-    // --- embedded textures (Stage B: GL objects, render thread) ----------
-    character.textures.resize(data.textures.size());
-    for (std::size_t i = 0; i < data.textures.size(); ++i) {
-        const gldx::Texture2DDesc& desc = data.textures[i].desc;
-        if (desc.width <= 0 || desc.height <= 0 || desc.pixels.empty()) continue;
-        character.textures[i].Upload(desc);
-        character.textureWidth = std::max(character.textureWidth, desc.width);
-        character.textureHeight = std::max(character.textureHeight, desc.height);
-    }
-    if (!data.materials.empty()) character.material = data.materials.front();
-    character.meshMaterial = data.meshMaterial;
-    auto usable = [&](int index) {
-        return index >= 0 && static_cast<std::size_t>(index) < character.textures.size();
-    };
-    character.hasAlbedo = usable(character.material.albedoTexture);
-    character.hasNormal = usable(character.material.normalTexture);
-    character.hasMetallic = usable(character.material.metallicTexture);
-    character.hasRoughness = usable(character.material.roughnessTexture);
+    character.ground = gldx::GroundContact(
+        skeleton, character.rig.up,
+        {character.rig.foot[gldx::kRigLeft], character.rig.foot[gldx::kRigRight]},
+        {character.rig.toe[gldx::kRigLeft], character.rig.toe[gldx::kRigRight]},
+        bindLowestOnUp);
 
-    if (character.rig.walkable) {
-        character.legLengthMetres =
-            glm::length(BonePosition(character.skeleton, character.rig.hips) -
-                        BonePosition(character.skeleton, character.rig.foot[0])) * character.unitScale;
-    }
-    if (character.legLengthMetres < 1e-3f) character.legLengthMetres = character.heightMetres * 0.52f;
     // One cycle = two steps, and one step lays down the horizontal distance the
     // foot covers between its extremes: 2 * legLength * sin(hipSwing). The floor
     // scroll and the cadence both come from this, which is what keeps the feet
     // from skating.
     character.cycleMetres =
-        std::max(4.0f * character.legLengthMetres * std::sin(character.tune.hipSwing), 0.1f);
-
-    for (gldx::SkinnedMeshData& mesh : data.meshes) {
-        character.meshes.emplace_back();
-        character.meshes.back().Upload(std::move(mesh));
-    }
-
-    // Bind check: with an empty pose every skinning matrix must be exactly the
-    // root transform. It is structural rather than empirical (the rest pose is
-    // derived from these same inverse-bind matrices), but it is the property the
-    // whole demo rests on, so it is measured and reported instead of assumed.
-    {
-        std::vector<glm::mat4> check;
-        const glm::mat4 root = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f)) *
-                               glm::mat4(character.orientation) *
-                               glm::scale(glm::mat4(1.0f), glm::vec3(character.unitScale));
-        character.skeleton.ComputeSkinning(std::vector<glm::mat4>{}, root, check);
-        float deviation = 0.0f;
-        for (const glm::mat4& m : check) {
-            for (int c = 0; c < 4; ++c) {
-                for (int r = 0; r < 4; ++r) {
-                    deviation = std::max(deviation, std::abs(m[c][r] - root[c][r]));
-                }
-            }
-        }
-        character.bindDeviation = deviation;
-    }
+        std::max(4.0f * model.legLengthMetres() * std::sin(character.tune.hipSwing), 0.1f);
 
     std::fprintf(stderr,
-                 "[anim-rigid] %s: %zu bones, %zu meshes, %d verts (%d tris), height %.2f m, "
+                 "[anim-rigid] %s: %zu bones, %zu meshes, %zu verts (%zu tris), height %.2f m, "
                  "palette %zu/%d, bind check %.3e\n",
-                 character.sourcePath.c_str(), character.skeleton.size(), character.meshes.size(),
-                 character.vertexCount, character.triangleCount,
-                 static_cast<double>(character.heightMetres), character.skeleton.size(),
-                 gldx::kMaxBonePalette, static_cast<double>(character.bindDeviation));
+                 model.sourcePath().c_str(), skeleton.size(), model.meshes().size(),
+                 model.vertexCount(), model.triangleCount(),
+                 static_cast<double>(model.heightMetres()), skeleton.size(),
+                 gldx::kMaxBonePalette, static_cast<double>(model.bindDeviation()));
+    // The loader keeps unreferenced map paths for diagnostics; RiggedModel folds
+    // the four role flags into the same four booleans the HUD reads, so this line
+    // and the panel cannot disagree about what the file carried.
     std::fprintf(stderr,
                  "[anim-rigid] textures: albedo %s, normal %s, metallic %s, roughness %s "
                  "(up to %dx%d px); %zu unreferenced map path(s)\n",
-                 character.hasAlbedo ? "yes" : "no", character.hasNormal ? "yes" : "no",
-                 character.hasMetallic ? "yes" : "no", character.hasRoughness ? "yes" : "no",
-                 character.textureWidth, character.textureHeight,
-                 data.missingTexturePaths.size());
+                 model.hasAlbedo() ? "yes" : "no", model.hasNormal() ? "yes" : "no",
+                 model.hasMetallic() ? "yes" : "no", model.hasRoughness() ? "yes" : "no",
+                 model.textureWidth(), model.textureHeight(),
+                 model.missingTexturePaths().size());
+
     if (reportGait) {
         // Numbers, not vibes: the two things a hand-authored walk gets wrong are
         // (a) the swing foot not clearing the floor and (b) the planted foot
@@ -908,21 +719,19 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         constexpr int kSamples = 16;
         for (int i = 0; i < kSamples; ++i) {
             const float phase = 2.0f * kPi * static_cast<float>(i) / static_cast<float>(kSamples);
-            BuildWalkPose(character.skeleton, character.rig, character.restWorld, character.tune,
+            BuildWalkPose(skeleton, character.rig, model.restWorld(), character.tune,
                           phase, pose);
-            const glm::mat4 root = glm::mat4(character.orientation) *
-                                   glm::scale(glm::mat4(1.0f), glm::vec3(character.unitScale));
-            character.skeleton.ComputeSkinning(pose, root, palette);
+            skeleton.ComputeSkinning(pose, model.Mat4(), palette);
             float sole[2] = {0.0f, 0.0f};
             for (int side = 0; side < 2; ++side) {
                 float lowest = 1.0e9f;
-                for (int c = 0; c < character.contactCount; ++c) {
-                    if (character.contactBone[c] != character.rig.foot[side] &&
-                        character.contactBone[c] != character.rig.toe[side]) {
+                for (int c = 0; c < character.ground.contactCount(); ++c) {
+                    const int bone = character.ground.contactBone(c);
+                    if (bone != character.rig.foot[side] && bone != character.rig.toe[side]) {
                         continue;
                     }
-                    const glm::vec4 p = palette[static_cast<std::size_t>(character.contactBone[c])] *
-                                        glm::vec4(character.contactRig[c], 1.0f);
+                    const glm::vec4 p = palette[static_cast<std::size_t>(bone)] *
+                                        glm::vec4(character.ground.contactPoint(c), 1.0f);
                     lowest = std::min(lowest, p.y);
                 }
                 sole[side] = lowest;
@@ -942,53 +751,27 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     {
         int roots = 0;
         int deepest = 0;
-        for (std::size_t i = 0; i < character.skeleton.size(); ++i) {
-            const gldx::Bone* bone = character.skeleton.bone(static_cast<int>(i));
+        for (std::size_t i = 0; i < skeleton.size(); ++i) {
+            const gldx::Bone* bone = skeleton.bone(static_cast<int>(i));
             if (!bone) continue;
             if (bone->parent < 0) ++roots;
             int depth = 0;
-            for (int b = bone->parent; b >= 0; b = character.skeleton.bone(b)->parent) ++depth;
+            for (int b = bone->parent; b >= 0; b = skeleton.bone(b)->parent) ++depth;
             deepest = std::max(deepest, depth);
         }
         std::fprintf(stderr, "[anim-rigid] hierarchy: %d root bone(s), depth %d, "
                              "foot chain %d -> %d -> %d\n",
-                     roots, deepest, character.rig.legUp[0], character.rig.legLow[0],
-                     character.rig.foot[0]);
-
-        // Which rig slots failed to bind. This line exists because of a bug that
-        // survived several rounds of review: ClassifyRig filled the arm chains but not
-        // `hand`/`clavicle`, both stayed -1, and every wrist and shoulder rotation was
-        // dropped by rotate()'s `bone < 0` guard. Nothing printed, nothing failed, and
-        // the only symptom was "the hands look stiff" - i.e. a claim that the code
-        // contradicts silently. A missing slot is now named, once, under --on report.
-        struct Slot { const char* name; int index; };
-        const Slot slots[] = {
-            {"hips", character.rig.hips},         {"spine", character.rig.spine},
-            {"chest", character.rig.chest},       {"head", character.rig.head},
-            {"legUp.L", character.rig.legUp[0]},  {"legUp.R", character.rig.legUp[1]},
-            {"legLow.L", character.rig.legLow[0]}, {"legLow.R", character.rig.legLow[1]},
-            {"foot.L", character.rig.foot[0]},    {"foot.R", character.rig.foot[1]},
-            {"toe.L", character.rig.toe[0]},      {"toe.R", character.rig.toe[1]},
-            {"armUp.L", character.rig.armUp[0]},  {"armUp.R", character.rig.armUp[1]},
-            {"armLow.L", character.rig.armLow[0]}, {"armLow.R", character.rig.armLow[1]},
-            {"hand.L", character.rig.hand[0]},    {"hand.R", character.rig.hand[1]},
-            {"clavicle.L", character.rig.clavicle[0]},
-            {"clavicle.R", character.rig.clavicle[1]},
-        };
-        int bound = 0;
-        std::string missing;
-        for (const Slot& slot : slots) {
-            if (slot.index >= 0) {
-                ++bound;
-            } else {
-                missing += ' ';
-                missing += slot.name;
-            }
-        }
-        std::fprintf(stderr, "[anim-rigid] rig: %d/%zu slots bound%s%s\n", bound,
-                     sizeof(slots) / sizeof(slots[0]),
-                     missing.empty() ? "" : "; unbound:", missing.c_str());
+                     roots, deepest, character.rig.legUp[gldx::kRigLeft],
+                     character.rig.legLow[gldx::kRigLeft], character.rig.foot[gldx::kRigLeft]);
     }
+
+    // Which rig slots failed to bind, and the one assertion this demo takes most
+    // seriously: RigProfile keeps a missing bone as -1 and every rotation against
+    // it is quietly a no-op, so a slot that failed to bind is invisible in the
+    // picture (the limb just looks stiff) until this line names it. It used to be
+    // hand-written here and lived through several review rounds with hand and
+    // clavicle silently unbound.
+    std::fprintf(stderr, "[anim-rigid] rig: %s\n", character.rig.BindingReport().c_str());
 }
 
 } // namespace
@@ -1060,13 +843,9 @@ int main(int argc, char** argv) {
     gldx::Texture2D white;
     white.Upload(MakeSolidDesc());
 
-    // The three dummies the character draws with when the file has no such map:
-    // white albedo (so the material's base colour shows), a flat +Z normal (so
-    // the cotangent frame is a no-op), and white for both scalar maps (so the
-    // metallic/roughness factors pass through unchanged).
-    character.fallbackAlbedo.Upload(MakeSolidDesc(255, 255, 255, 255, true));
-    character.fallbackNormal.Upload(MakeSolidDesc(128, 128, 255));
-    character.fallbackScalar.Upload(MakeSolidDesc());
+    // The three dummies the character draws with when the file has no such map now
+    // live inside RiggedModel (fallbackAlbedo/Normal/Scalar). They are the reason
+    // a shader with an unbacked sampler cannot silently drop this draw on Apple.
 
     // Input goes through the gldxwin surface only (GLFW's user pointer belongs to
     // that library). A drag orbits, the wheel scales the distance.
@@ -1137,19 +916,15 @@ int main(int argc, char** argv) {
         view.scroll = view.speed * animSeconds;
 
         if (character.ready()) {
+            const gldx::RiggedModel& model = character.model;
             const float phase = character.phaseFor(view.speed, animSeconds);
             if (view.walk && character.rig.walkable) {
-                BuildWalkPose(character.skeleton, character.rig, character.restWorld, character.tune,
+                BuildWalkPose(model.skeleton(), character.rig, model.restWorld(), character.tune,
                               phase, character.pose);
             } else {
-                character.pose.resize(character.skeleton.size());
-                for (std::size_t i = 0; i < character.skeleton.size(); ++i) {
-                    character.pose[i] = character.skeleton.bones()[i].restLocal;
-                }
+                gldx::ResetToRest(model.skeleton(), character.pose);
             }
-            const glm::mat4 root = glm::mat4(character.orientation) *
-                                   glm::scale(glm::mat4(1.0f), glm::vec3(character.unitScale));
-            character.skeleton.ComputeSkinning(character.pose, root, character.palette);
+            model.skeleton().ComputeSkinning(character.pose, model.Mat4(), character.palette);
 
             // Ground contact, solved forward from the pose instead of authored by
             // hand: find the lowest of the four sole points *after* posing, then
@@ -1158,43 +933,15 @@ int main(int argc, char** argv) {
             // support) and it cannot drift out of sync with the legs - which is
             // exactly the failure mode of the first version, where the legs
             // scissored and the feet stayed flat on the floor.
-            //
-            // The shift is applied to the palette rather than to the root matrix
-            // because a translation prepended to a skinning matrix is the same
-            // operation done once per bone: palette' = T * palette.
-            float lowest = 0.0f;
-            bool haveContact = false;
-            for (int c = 0; c < character.contactCount; ++c) {
-                const int bone = character.contactBone[c];
-                if (bone < 0) continue;
-                const glm::vec4 p = character.palette[static_cast<std::size_t>(bone)] *
-                                    glm::vec4(character.contactRig[c], 1.0f);
-                lowest = haveContact ? std::min(lowest, p.y) : p.y;
-                haveContact = true;
-            }
-            view.groundLift = haveContact ? -lowest : 0.0f;
-            if (haveContact && view.walk) {
-                const float lift = -lowest;
-                // A millimetre of tolerance stops the solver from chasing the
-                // last digit of the trig and visibly jittering on a frozen frame.
-                if (std::abs(lift) > 1e-4f) {
-                    for (glm::mat4& m : character.palette) m[3].y += lift;
-                }
+            const gldx::GroundContact::Solution solved = character.ground.Solve(character.palette);
+            view.groundLift = solved.lift;
+            if (solved.valid() && view.walk) {
+                gldx::GroundContact::ApplyLift(character.palette, solved.lift);
             }
             // What the solve achieved, measured the same way it was solved: the
             // lowest sole point after the shift. Printed in millimetres because
             // "0.000 m" in a panel is indistinguishable from "not measured".
-            if (haveContact) {
-                float after = 1.0e9f;
-                for (int c = 0; c < character.contactCount; ++c) {
-                    const int bone = character.contactBone[c];
-                    if (bone < 0) continue;
-                    const glm::vec4 p = character.palette[static_cast<std::size_t>(bone)] *
-                                        glm::vec4(character.contactRig[c], 1.0f);
-                    after = std::min(after, p.y);
-                }
-                view.soleHeight = after;
-            }
+            view.soleHeight = solved.valid() ? solved.lowestAfter : 0.0f;
         }
 
         const float aspect = info.fbHeight > 0
