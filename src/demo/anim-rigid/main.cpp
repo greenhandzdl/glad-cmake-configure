@@ -10,8 +10,8 @@
  * them, including the three that fail silently (see RiggedModel.h).
  *
  * What is genuinely a demo, and therefore stays here:
- *   - the tuning constants (GaitTuning) and the stance/swing curves (LegAt),
- *   - how a walk cycle is composed from those curves (BuildWalkPose),
+ *   - the tuning values handed to the engine's walk source (GaitTuning is now an
+ *     alias of gldx::WalkTuning), and the LegAt table `report` prints,
  *   - the treadmill, so the character walks in place and the only thing moving
  *     is the gait,
  *   - the shaders (single sun, no IBL/shadow: the small material this scene can
@@ -115,46 +115,13 @@ constexpr const char* kDefaultModel = "src/demo/anim-rigid/demo_should_be_ignore
 // engine Pose. Keeping the numbers together is what makes the walk tunable
 // without touching the plumbing around it.
 // ---------------------------------------------------------------------------
-struct GaitTuning {
-    // Stance is the fraction of a leg's cycle where the foot carries the body.
-    // 0.6 for walking (a real gait spends ~60% in stance, and the two legs
-    // overlap by 20% - that overlap is the double-support phase that makes a
-    // walk look like a walk rather than a run).
-    float stanceEnd = 0.60f;
+// The demo used to keep its own copy of every one of these numbers. They now live
+// in the engine (WalkTuning), because the curve SHAPE is general humanoid knowledge
+// even though these particular VALUES were tuned on this asset. Aliasing rather
+// than copying is the point: two structs with the same fields would drift the day
+// someone adds one to the engine.
+using GaitTuning = gldx::WalkTuning;
 
-    float hipSwing       = 0.33f;   // rad, thigh from forward-most to backward-most
-    float kneeStanceFlex = 0.14f;   // rad, the small dip just after heel strike
-    float kneeSwingFlex  = 0.72f;   // rad, peak flexion used for foot clearance
-    float ankleHeelStrike = -0.18f; // rad, dorsiflexed at contact (toe up)
-    float ankleToeOff     = 0.34f;  // rad, plantarflexed at push-off (toe down)
-    float toeOffBend      = 0.34f;  // rad, toe joint dorsiflexion while the heel is up
-
-    // T-pose -> A-pose. Plumb is 1.57 and almost everything is wrong about it
-    // for this character: its skirt is a flared cone around both thighs, so a
-    // plumb humerus hangs the forearm *through* the fabric. The value was found
-    // by rendering a close-up and stepping (1.45 -> 1.16 -> 1.05), not by
-    // trigonometry: at 1.45 (83 deg, the first attempt) the wrist was visibly
-    // sunk in the skirt; at 1.05 (60 deg) the sleeve cuff, the palm and all four
-    // fingers read clear of the hem in every phase, at roughly 0.1 m of margin.
-    // Going lower is the mirror image of leaving the arms in the T-pose: the
-    // silhouette looks calm while the mesh interpenetrates.
-    float armDown  = 1.05f;         // rad
-    float armSwing = 0.38f;         // rad
-    float elbowBase = 0.55f;        // rad, flexion kept in BOTH swing phases
-    float elbowSwing = 0.22f;       // rad, extra flexion as the arm comes forward
-    float armOut   = 0.05f;         // rad, forearm abduction: keeps the hand clear
-                                    // of the flared skirt, which is 0.2 m wide at hip
-                                    // height and swallows a plumb-hanging wrist
-    float wristBase = 0.14f;        // rad, relaxed hand, slightly palmar
-    float wristSwing = 0.16f;       // rad, the hand trails the forearm
-    float wristDeviate = 0.07f;     // rad, palm turns in/out with the swing
-    float clavicleRoll = 0.045f;    // rad, the shoulder follows the arm a little
-
-    float hipYaw   = 0.10f;         // rad, pelvis rotates toward the stepping leg
-    float chestYaw = 0.15f;         // rad, shoulders counter the pelvis
-    float lean     = 0.06f;         // rad, constant forward lean
-    float headYaw  = 0.05f;         // rad, the head stays roughly world-facing
-};
 
 // A clamp, an ease and a segment ramp - the three primitives the curves below
 // are built from. Naming them keeps the gait readable as a gait instead of as
@@ -227,99 +194,6 @@ LegAngles LegAt(const GaitTuning& tune, float p) {
     return out;
 }
 
-// Fills `outPose` (one local matrix per bone) for the given phase in radians.
-// `phase` advances by 2*pi per full two-step cycle; the right side runs half a
-// cycle behind the left. The pelvis *translation* is not part of the pose: it is
-// solved afterwards from ground contact (see GroundContact), because a bob
-// authored by hand fights every other change to the legs.
-//
-// The rest of the machinery this needs - "start from rest", "rotate about a
-// world axis, folded into this bone's frame" - is gldx::ResetToRest and
-// gldx::RotateBone. What is written here is only the *content* of the walk.
-void BuildWalkPose(const gldx::Skeleton& sk, const gldx::RigProfile& rig,
-                   const std::vector<glm::mat4>& restWorld, const GaitTuning& tune,
-                   float phase, std::vector<glm::mat4>& outPose) {
-    gldx::ResetToRest(sk, outPose);
-
-    auto rotate = [&](int bone, const glm::vec3& worldAxis, float radians) {
-        gldx::RotateBone(outPose, restWorld, bone, worldAxis, radians);
-    };
-
-    const float cycle = phase / (2.0f * kPi);          // whole cycles, any value
-    const float p = cycle - std::floor(cycle);         // 0..1 for the left leg
-    const LegAngles left = LegAt(tune, p);
-    const LegAngles right = LegAt(tune, p < 0.5f ? p + 0.5f : p - 0.5f);
-
-    // The torso leans into the walk even when the legs are still: at a distance
-    // the torso is what reads as "walking", the feet are a few pixels.
-    rotate(rig.spine, rig.side, tune.lean);
-    rotate(rig.chest, rig.side, tune.lean * 0.5f);
-
-    // The rig's bind pose is a T-pose: the arms point straight out along the
-    // lateral axis, so swinging them about that axis would rotate each arm about
-    // its own length - invisible. Lowering them into an A-pose is part of the
-    // clip (this rig has no A-pose to inherit) and only then does a rotation
-    // about the lateral axis become a forward/backward swing.
-    //
-    // 1.45 rad is not a taste value: at 90 degrees the humerus is exactly plumb
-    // and a cylinder turning about its own long axis shows nothing, so the swing
-    // would vanish into the silhouette and read as "the arms never moved". A
-    // hand-authored clip keeps the shoulder a little out from the ribs for
-    // exactly this reason.
-    rotate(rig.armUp[gldx::kRigLeft], rig.forward, -tune.armDown);
-    rotate(rig.armUp[gldx::kRigRight], rig.forward, +tune.armDown);
-
-    // Pelvis and shoulders counter-rotate about the vertical axis, and the head
-    // cancels most of it so the character keeps looking where it walks.
-    const float yawDriver = left.hip / std::max(tune.hipSwing, 1e-4f);   // -1 = left leg forward
-    rotate(rig.hips, rig.up, tune.hipYaw * yawDriver);
-    rotate(rig.chest, rig.up, -tune.chestYaw * yawDriver);
-    rotate(rig.head, rig.up, tune.headYaw * yawDriver);
-
-    for (int s = 0; s < gldx::kRigSides; ++s) {
-        const LegAngles& leg = (s == 0) ? left : right;
-        rotate(rig.legUp[s], rig.side, leg.hip);
-        rotate(rig.legLow[s], rig.side, leg.knee);
-        rotate(rig.foot[s], rig.side, leg.ankle);
-        rotate(rig.toe[s], rig.side, leg.toe);
-
-        // Contralateral arm swing: the arm goes forward exactly when the leg on
-        // the same side goes back.
-        const float arm = -tune.armSwing * (leg.hip / std::max(tune.hipSwing, 1e-4f));
-        // Negative about the lateral axis is "forward", so the elbow flexion
-        // (which bends the forearm forward) is negative too, and it deepens as
-        // the arm swings forward - a straight arm on the back swing, a bent one
-        // in front, which is what makes a walk read as relaxed.
-        const float swingN = arm / std::max(tune.armSwing, 1e-4f);   // +1 back, -1 forward
-        const float elbow = -(tune.elbowBase + tune.elbowSwing * (0.5f - 0.5f * swingN));
-        rotate(rig.armUp[s], rig.side, arm);
-        // The shoulder blade is not a rigid bracket: it protracts/retracts with
-        // the arm. Three degrees is enough for the silhouette to stop reading as
-        // "a hinged stick on a block".
-        rotate(rig.clavicle[s], rig.up, -tune.clavicleRoll * swingN);
-        rotate(rig.armLow[s], rig.side, elbow);
-        // ...plus a constant outward deviation at the elbow. This is the part that
-        // keeps the hand out of the skirt: the humerus cannot hang far enough out
-        // to clear a 0.3 m hem without the pose going stiff and A-shaped, so the
-        // clearance is bought at the forearm instead.
-        rotate(rig.armLow[s], rig.up, tune.armOut * (s == 0 ? 1.0f : -1.0f));
-        // ...and the wrist, which is the part the eye actually tracks at the end
-        // of the limb. Without it the whole arm is a rigid pendulum: the shoulder
-        // and elbow move, the hand's orientation never changes, and the result
-        // reads as "the hands are frozen" even though the arm is swinging.
-        //
-        // This rig has no finger bones, but it does have an animated fan: the
-        // hand mesh is skinned to Hips/Spine/Head as well as to the wrist chain,
-        // so once the wrist turns, the fan splays and gathers through the cycle
-        // for free. That is why a wrist rotation is enough to make the hands read
-        // as alive here, and why the same code would look stiff on a hand that is
-        // 100% weighted to its own bone.
-        const float wrist = -(tune.wristBase + tune.wristSwing * (0.5f - 0.5f * swingN));
-        rotate(rig.hand[s], rig.side, wrist);
-        const float deviate = tune.wristDeviate * swingN * (s == 0 ? 1.0f : -1.0f);
-        rotate(rig.hand[s], rig.up, deviate);
-    }
-}
 
 } // namespace
 
@@ -341,6 +215,17 @@ struct Character {
     std::vector<glm::mat4> palette;   // what the vertex shader reads as uBones[]
     GaitTuning tune;
 
+    // The action layer. `walk` is the only source this demo holds, and the machine
+    // owns neither it nor the rig - both live right above, so destroying the
+    // character in the wrong order is the only way to dangle (see AnimStateMachine.h).
+    //
+    // Held through unique_ptrs because a ProceduralWalk takes references at
+    // construction (restWorld, rig, skeleton), and those only exist after the
+    // model has uploaded - so it cannot be a plain member built in step with
+    // this struct.
+    std::unique_ptr<gldx::ProceduralWalk> walkSource;
+    gldx::AnimStateMachine               machine;
+
     float cycleMetres = 1.0f;         // floor travel per full two-step cycle
     std::string error;
 
@@ -349,6 +234,33 @@ struct Character {
         // Distance walked / distance travelled by one cycle, so the feet stay
         // planted: faster walking is a faster cadence, not a longer stride.
         return cycleMetres > 1e-3f ? 2.0f * kPi * (speed * seconds / cycleMetres) : 0.0f;
+    }
+
+    // The same cadence expressed in the action layer's unit: one cycle is one
+    // Duration(). Kept next to phaseFor (rather than folding one into the other)
+    // because `report` prints the cycle in radians and the machine samples in
+    // seconds - deriving both from cycleMetres is what keeps them in agreement.
+    [[nodiscard]] float cycleSeconds(float speed) const {
+        return (cycleMetres > 1e-3f && speed > 1e-6f) ? cycleMetres / speed : 1.0f;
+    }
+
+    // Seconds into the walk that correspond to `phaseRadians`. This is exactly the
+    // inverse of phaseFor, so sampling the source at this time reproduces the old
+    // BuildWalkPose(phase) pose bit for bit.
+    // Seconds to feed the source for a given phase, *in the source's own duration
+    // units*. The source is built with cycleSeconds(1.0f) and never rebuilt, so this
+    // must not involve the runtime speed: the phase already encodes it. Passing a
+    // speed here looks harmless and costs 30% of the cycle - the source then wraps at
+    // a different period than the phase was measured on.
+    [[nodiscard]] float walkTimeFor(float phaseRadians) const {
+        // Algebraically this is just `speed * seconds / cycleMetres` inverted, but it
+        // is written through the same two quantities phaseFor uses so that sampling
+        // at t = walkTimeFor(phaseFor(t)) round-trips within a float ULP. Doing the
+        // fold any other way (e.g. normalising by a Duration set from a *different*
+        // speed) shifts every phase slightly, which shows up as a whole-character
+        // silhouette change rather than as an obvious error.
+        const float cycles = phaseRadians / (2.0f * kPi);
+        return cycles * cycleSeconds(1.0f);
     }
 };
 
@@ -693,6 +605,25 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     character.cycleMetres =
         std::max(4.0f * model.legLengthMetres() * std::sin(character.tune.hipSwing), 0.1f);
 
+    // The action source needs the skeleton and the rest-world cache, so it can only
+    // be built here - after Upload has taken ownership of `data` and the model is
+    // the one holding both. Duration is left at one cycle at 1 m/s; the machine is
+    // driven by explicit times below, and a caller that steps the machine instead
+    // would want cycleSeconds(speed) here.
+    // Duration is the cycle at the demo's *current* speed, and both the construction
+    // and every sample go through cycleSeconds(view.speed). Building it at a
+    // different speed than the one used to convert phases is a silent 30% error in
+    // the fold: the source would wrap at the wrong period and every frame would land
+    // on a slightly different phase than the phase it was asked for.
+    //
+    // (Rebuilding the source on a speed change would be the alternative, but speed is
+    // a view parameter and the source only needs its Duration to agree; passing the
+    // matching time is enough, as below.)
+    character.walkSource = std::make_unique<gldx::ProceduralWalk>(
+        skeleton, character.rig, model.restWorld(), character.tune,
+        character.cycleSeconds(1.0f));
+    character.machine.Set(character.walkSource.get());
+
     std::fprintf(stderr,
                  "[anim-rigid] %s: %zu bones, %zu meshes, %zu verts (%zu tris), height %.2f m, "
                  "palette %zu/%d, bind check %.3e\n",
@@ -721,8 +652,14 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         constexpr int kSamples = 16;
         for (int i = 0; i < kSamples; ++i) {
             const float phase = 2.0f * kPi * static_cast<float>(i) / static_cast<float>(kSamples);
-            BuildWalkPose(skeleton, character.rig, model.restWorld(), character.tune,
-                          phase, pose);
+            // Sample the engine's walk source, not a local copy of the curve: the
+            // table is a regression check on what actually ships.
+            if (character.walkSource) {
+                character.walkSource->Sample(
+                    character.walkTimeFor(phase), pose);
+            } else {
+                gldx::ResetToRest(skeleton, pose);
+            }
             skeleton.ComputeSkinning(pose, model.Mat4(), palette);
             float sole[2] = {0.0f, 0.0f};
             for (int side = 0; side < 2; ++side) {
@@ -920,9 +857,9 @@ int main(int argc, char** argv) {
         if (character.ready()) {
             const gldx::RiggedModel& model = character.model;
             const float phase = character.phaseFor(view.speed, animSeconds);
-            if (view.walk && character.rig.walkable) {
-                BuildWalkPose(model.skeleton(), character.rig, model.restWorld(), character.tune,
-                              phase, character.pose);
+            if (view.walk && character.rig.walkable && character.walkSource) {
+                character.walkSource->Sample(
+                    character.walkTimeFor(phase), character.pose);
             } else {
                 gldx::ResetToRest(model.skeleton(), character.pose);
             }

@@ -27,6 +27,9 @@ set(GLDX_SOURCES
     anim/Pose.cpp
     anim/RiggedModel.cpp
     anim/GroundContact.cpp
+    anim/ProceduralWalk.cpp
+    anim/ProceduralJump.cpp
+    anim/AnimStateMachine.cpp
     geometry/Mesh.cpp
     geometry/GeometryFactory.cpp
     geometry/InstancedMesh.cpp

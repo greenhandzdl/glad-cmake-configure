@@ -73,6 +73,13 @@ export {
 //   - GroundContact  solve the pelvis height from where the soles actually are
 //   - RiggedModel    upload + own one rig, including the 1x1 stand-in maps that
 //                    keep every sampler backed (Apple drops a draw otherwise)
+//   - AnimPoseSource the interface every action implements ("what does this rig
+//                    look like at time t"). ProceduralWalk / ProceduralJump are
+//                    the two built-in answers; a keyframe clip loader would be a
+//                    third, and nothing above this line would have to change.
+//   - AnimStateMachine  which action is playing, and how to get from one to the
+//                    other without a pop. Owns no action - it only references
+//                    them, so a caller's tuning stays the caller's.
 #include "gldx/anim/Skeleton.h"
 #include "gldx/anim/SkinnedVertex.h"
 #include "gldx/anim/SkinnedMesh.h"
@@ -80,6 +87,10 @@ export {
 #include "gldx/anim/RigNaming.h"
 #include "gldx/anim/RigProfile.h"
 #include "gldx/anim/Pose.h"
+#include "gldx/anim/AnimPoseSource.h"
+#include "gldx/anim/ProceduralWalk.h"
+#include "gldx/anim/ProceduralJump.h"
+#include "gldx/anim/AnimStateMachine.h"
 #include "gldx/anim/GroundContact.h"
 #include "gldx/anim/RiggedModel.h"
 

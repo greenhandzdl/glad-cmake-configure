@@ -109,3 +109,55 @@ const gldx::RigProfile rig = gldx::RigProfile::Classify(skeleton, &myHunyuan);
 
 - 加载好的贴图怎么"亮起来"（接 PBR 材质、光照） → [🟡 ④ 光照与 UBO 绑定](5-lighting-ubo.md)
 - 想直接手写 `Texture2D` 上传（不经 AssetManager） → `Texture2D::Upload(desc)` 同样受上面的长度/尺寸先验约束，契约见 `src/gldx/texture/Texture2D.h`
+
+
+## 6. 动作：`AnimPoseSource` 与 `AnimStateMachine`
+
+引擎不规定动作"存在哪"，只规定它**怎么被问**。一段动作是一个 `gldx::AnimPoseSource`：
+
+```cpp
+class AnimPoseSource {
+    virtual const char* name() const noexcept = 0;
+    virtual float Duration() const noexcept = 0;
+    virtual bool  Looping()  const noexcept = 0;
+    virtual void  Sample(float t, std::vector<glm::mat4>& outPose) const = 0;
+    virtual float ContactPhase() const noexcept;   // 默认 -1 = 没有落脚瞬间
+};
+```
+
+内置两个实现：
+
+- `gldx::ProceduralWalk`（+ `WalkTuning`）—— 程序化步态。曲线的**形状**是通用人形知识（支撑相 60%、摆动早期抬膝、蹬离后踝解旋），所以住在引擎；**数值**是调出来的（`armDown = 1.05` 只因为那具角色穿裙子），所以由调用方通过 `WalkTuning` 给，默认值就是参考资产的调好值。`WalkTuning::crouch` 让"蹲下行走"成为行走的一个参数，而不是第二套步态曲线——两套曲线迟早会不一致。
+- `gldx::ProceduralJump`（+ `JumpTuning`）—— 起跳/腾空/落地三段。除了 `Sample`，它还多给两个数：`GroundedAt(t)` 与 `AirborneRiseAt(t)`。
+
+关键帧动画是第三种实现：写一个 `AnimPoseSource` 子类包住采样结果即可，**上层一行都不用改**。这也是这一层存在的理由。
+
+### 跳跃必须关掉地面解算
+
+`GroundContact::Solve` 每帧把骨盆抬到鞋底刚好贴地——走路时对，跳跃时错：腾空期间脚本来就不该在地上，继续解算会把角色拽回地面附近，看起来像被一根看不见的绳子吊着。
+
+```cpp
+if (character.jump.GroundedAt(t)) {
+    const auto s = ground.Solve(palette);
+    GroundContact::ApplyLift(palette, s.lift);
+}
+```
+
+这就是 `GroundedAt` 在接口上而不是让调用方自己划区间的原因：只有实现知道哪几段是腾空。
+
+### 切换动作
+
+```cpp
+gldx::AnimStateMachine machine;
+machine.Set(&walk);                                  // 起始状态，必须调一次
+
+machine.Request(&jump, gldx::AnimTransition{0.18f, /*atContact=*/false});
+machine.Update(dt);                                  // 转移在这里才真正开始
+machine.Evaluate(pose);                              // 拿到混合结果
+```
+
+顺序不能颠倒：`Update` 在 `Evaluate` 之前，否则拿到的是转移前那一刻的姿态（表现为"按了键要等下一帧才动"）。
+
+`AnimTransition::atContact = true` 会让请求**挂起等待当前动作的落脚相位**再切，期间继续播旧动作、请求不会丢（有 `contactTimeout` 兜底）。走路中途起跳切在双支撑相才不像踉跄——状态机不认识步态曲线，只认识 `ContactPhase()`。
+
+一个已知的取舍：混合用逐元素矩阵 lerp，对现有这些由 `RotateBone` 叠出来的小角度旋转是够的；若将来接入手工关键帧（可能出现大角度差），过渡途中会把肢体压扁，届时换成四元数 slerp——混合只关在 `AnimStateMachine` 里，那次替换是局部的。
