@@ -52,7 +52,10 @@ void ProceduralCrouch::Sample(float t, std::vector<glm::mat4>& outPose) const {
     // in a rigid rig is a translation of the hips. The amount is tied to how far the
     // knees went forward, since that is what the feet have to stay under: roughly
     // sin(hipBend) * thigh, damped because the spine lean already contributes.
-    if (d > 0.0f && tune.forwardShift > 0.0f) {
+    // Gate on EITHER parameter: they are independent, and the first version gated both
+    // on forwardShift, so setting forwardShift to 0 silently disabled hipDrop as well
+    // (measured: head stayed at 1.326 m, i.e. no crouch at all).
+    if (d > 0.0f && (tune.forwardShift > 0.0f || tune.hipDrop > 0.0f)) {
         const std::size_t hips = static_cast<std::size_t>(rig_.hips);
         // The shift is expressed in WORLD forward, so convert it into the hips' parent
         // space before adding it to the local translation. `outPose` is a LOCAL matrix:

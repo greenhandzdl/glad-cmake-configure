@@ -580,6 +580,7 @@ public:
 
         hud.BeginSection(gldx::Hud::Anchor::BottomLeft, 14.0f);
         hud.AddLines({
+            "0 idle  1 walk  2 run  3 crouch  4 crouchwalk  5 attack  6 jump",
             "W walk on/off   G floor   F wireframe   H hud",
             "drag orbit   wheel zoom   Esc quit",
         }, gldx::Hud::kDim);
@@ -1008,8 +1009,9 @@ int main(int argc, char** argv) {
             case gldx::win::Key::Num1: view.requestAction = Action::Walk; break;
             case gldx::win::Key::Num2: view.requestAction = Action::Run; break;
             case gldx::win::Key::Num3: view.requestAction = Action::Crouch; break;
-            case gldx::win::Key::Num4: view.requestAction = Action::Attack; break;
-            case gldx::win::Key::Num5: view.requestAction = Action::Jump; break;
+            case gldx::win::Key::Num4: view.requestAction = Action::CrouchWalk; break;
+            case gldx::win::Key::Num5: view.requestAction = Action::Attack; break;
+            case gldx::win::Key::Num6: view.requestAction = Action::Jump; break;
             case gldx::win::Key::H:
                 view.showHud = !view.showHud;
                 hudRaw->hud.SetVisible(view.showHud);

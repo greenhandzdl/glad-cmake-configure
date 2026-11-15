@@ -38,8 +38,8 @@ struct CrouchTuning {
     // 它是**姿态**的深度，不是骨盆高度——后者由地面解算给出。
     float depth = 1.0f;
 
-    float kneeBend = 0.85f;   // rad，与 hipBend 相等 => 小腿垂直、膝盖在脚正上方（参考蹲姿）
-    float hipBend  = 0.85f;   // rad，髋前屈（与 kneeBend 相等时小腿垂直）
+    float kneeBend = 0.62f;   // rad，与 hipBend 相等 => 小腿垂直、膝盖在脚正上方（参考蹲姿）
+    float hipBend  = 0.62f;   // rad，髋前屈（与 kneeBend 相等时小腿垂直）
     float ankleBend = 0.00f;  // rad，小腿垂直时脚掌本来就是平的
 
     // 骨盆向前移动多少（骨骼空间单位）。**这是唯一能移动重心的东西**：本函数其余
@@ -47,7 +47,7 @@ struct CrouchTuning {
     // 的关节转上半身，脊柱倾角加到 48° 头依然落在脚跟后面（截图就是这样：脚踩实了，
     // 整个人往后倒）。真人蹲下是先把臀往后送、再把上身挪回脚上方，在刚性骨架里就是
     // 骨盆的平移。
-    float forwardShift = 4.0f;
+    float forwardShift = 0.0f;
 
     // 骨盆下沉多少（骨骼空间单位）。**屈膝本身不会让身体变矮**——它只是把腿折起来，
     // 而地面解算随后把最低点重新钉回地板，于是身体高度不变、小腿向两边甩出去。实测：
@@ -55,7 +55,7 @@ struct CrouchTuning {
     float hipDrop = 25.0f;
 
     // 上身：蹲伏时躯干前倾，头抬起来看向前方（蹲着盯地面不自然）。
-    float spineLean = 0.42f;  // rad
+    float spineLean = 0.78f;  // rad，蹲下时躯干要明显前倾，否则读起来像往后坐
     float headLift  = 0.30f;  // rad，头反向仰起
 
     // 手臂：蹲伏时手臂自然垂在身前或抱住膝盖。这里选了"垂在身侧略向前"——
