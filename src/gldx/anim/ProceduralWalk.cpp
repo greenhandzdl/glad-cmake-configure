@@ -95,8 +95,17 @@ void ProceduralWalk::Sample(float t, std::vector<glm::mat4>& outPose) const {
 
     // 蹲行：把"弯多少"折进关节角，而不是另写一条曲线。膝盖常态屈曲 + 髋部前屈，
     // 骨盆高度交给调用方的地面接触去解（手写一个下沉量会跟腿部改动打架）。
-    const float crouchKnee = tune.crouch * 0.9f;    // rad
-    const float crouchHip = tune.crouch * 0.5f;     // rad, 髋前屈，躯干才会跟着低下去
+    // Knee folds BACK (negative), hip flexes FORWARD (positive) - the same opposite-sign
+    // rule as ProceduralCrouch. They used to be both positive here, which bends the
+    // whole leg one way: the shin swings forward past the thigh, the foot ends up in
+    // front of the body and the ground solve chases it. Measured on crouchwalk: the
+    // pelvis sat 0.613 m ahead of the feet, against 0.117 m for the stationary crouch.
+    // Equal magnitudes so the shin stays vertical and the knee ends up over the foot -
+    // the same pairing ProceduralCrouch uses. They were 0.5 / 0.9, which is not the
+    // "knee above foot" ratio and made the crouch-walk read as an ordinary walk with
+    // slightly bent legs.
+    const float crouchKnee = -tune.crouch * 0.85f;  // rad
+    const float crouchHip  = tune.crouch * 0.85f;   // rad, 髋前屈
     const float swingScale = 1.0f - 0.45f * tune.crouch;   // 蹲着走步幅自然变小
 
     // t 折进 0..1。Looping() 为 true，所以这里做取模而不是钳制。
@@ -116,6 +125,21 @@ void ProceduralWalk::Sample(float t, std::vector<glm::mat4>& outPose) const {
     rotate(rig_.spine, rig_.side, tune.lean + crouchHip * 0.5f);
     rotate(rig_.chest, rig_.side, tune.lean * 0.5f + crouchHip * 0.25f);
 
+    // Lower the pelvis. Same reason as ProceduralCrouch: folding the knee does not make
+    // the character shorter, it swings the shin out; the ground solve then re-pins the
+    // lowest point and the body stays at standing height. Measured before this: the
+    // crouch-walk head sat at 1.335 m against 1.354 m for idle, i.e. it did not crouch.
+    if (tune.crouch > 0.0f) {
+        const std::size_t hips = static_cast<std::size_t>(rig_.hips);
+        const glm::mat4 parentWorld = (skeleton_.bone(static_cast<int>(hips))
+                                       && skeleton_.bone(static_cast<int>(hips))->parent >= 0)
+            ? skeleton_.RestWorld(skeleton_.bone(static_cast<int>(hips))->parent)
+            : glm::mat4(1.0f);
+        const glm::mat3 parentInv = glm::mat3(glm::inverse(parentWorld));
+        outPose[hips][3] += glm::vec4(
+            parentInv * (-rig_.up * tune.crouchDrop * tune.crouch), 0.0f);
+    }
+
     // 这具骨架的 bind pose 是 T-pose：手臂沿侧向轴笔直伸出，所以绕那根轴转等于
     // 让整条手臂绕自身长轴自转——看不见。先把手臂放成 A-pose 是这个动作的一部分
     // （这具骨架没有可继承的 A-pose），之后绕侧向轴的旋转才是前后摆。
@@ -132,10 +156,11 @@ void ProceduralWalk::Sample(float t, std::vector<glm::mat4>& outPose) const {
         const LegAngles& leg = (s == 0) ? left : right;
         rotate(rig_.legUp[s], rig_.side, leg.hip * swingScale + crouchHip);
         rotate(rig_.legLow[s], rig_.side, leg.knee + crouchKnee);
-        rotate(rig_.foot[s], rig_.side, leg.ankle - crouchKnee * 0.55f);
+        // Unwind the shin: the foot has to rotate against (hip + knee) to stay flat.
+        rotate(rig_.foot[s], rig_.side, leg.ankle - (crouchHip + crouchKnee) * 0.55f);
         // 蹲下时趾关节要反过来背屈一点，否则脚尖戳进地面：脚掌被踝关节带平了，
         // 但趾骨的静止姿态仍是平的。
-        rotate(rig_.toe[s], rig_.side, leg.toe + crouchKnee * 0.30f);
+        rotate(rig_.toe[s], rig_.side, leg.toe - crouchKnee * 0.30f);
 
         // 对侧摆臂：同侧腿往后时手臂往前，正好相反。
         const float arm = -tune.armSwing * (leg.hip / std::max(tune.hipSwing, 1e-4f));

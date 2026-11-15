@@ -796,6 +796,76 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                              "foot chain %d -> %d -> %d\n",
                      roots, deepest, character.rig.legUp[gldx::kRigLeft],
                      character.rig.legLow[gldx::kRigLeft], character.rig.foot[gldx::kRigLeft]);
+
+        // Per-action pose check. Numbers, not pictures: this is what lets a caller (or
+        // an agent that cannot look at a screenshot) verify that an action is
+        // anatomically plausible. The three columns that matter:
+        //   pelvis  - how far the body sits above the floor. A crouch must be clearly
+        //             LOWER than idle; a value near -1000 mm means the legs folded the
+        //             wrong way and the ground solve dragged the body underground.
+        //   sole    - lowest sole after the solve. Must be ~0; anything else means the
+        //             character is hovering or sunk.
+        //   height  - head height, i.e. how tall the character reads on screen. A
+        //             crouch must be visibly shorter than idle, a jump taller.
+        struct Probe { const char* name; const gldx::AnimPoseSource* src; };
+        const Probe probes[] = {
+            {"idle", character.idleSource.get()}, {"walk", character.walkSource.get()},
+            {"run", character.runSource.get()},   {"crouch", character.crouchSource.get()},
+            {"crouchwalk", character.crouchWalkSource.get()},
+            {"attack", character.attackSource.get()}, {"jump", character.jumpSource.get()},
+        };
+        std::fprintf(stderr, "[anim-rigid] pose check: %-11s %9s %9s %9s %9s\n",
+                     "action", "pelvis", "sole", "head", "lift");
+        for (const Probe& pr : probes) {
+            if (pr.src == nullptr) continue;
+            float pelvis = 0.0f, sole = 0.0f, head = 0.0f, lift = 0.0f;
+            float pelvisLo = 1e9f, pelvisHi = -1e9f;
+            const int kSamples = 8;
+            for (int i = 0; i < kSamples; ++i) {
+                const float t = pr.src->Duration() * static_cast<float>(i)
+                                / static_cast<float>(kSamples);
+                std::vector<glm::mat4> pose;
+                pr.src->Sample(t, pose);
+                std::vector<glm::mat4> palette;
+                skeleton.ComputeSkinning(pose, model.Mat4(), palette);
+                const auto solved = character.ground.Solve(palette);
+                if (solved.valid()) {
+                    gldx::GroundContact::ApplyLift(palette, solved.lift);
+                    lift = solved.lift;
+                    sole = solved.lowestAfter;
+                }
+                std::vector<glm::mat4> world;
+                skeleton.ComputeWorld(pose, model.Mat4(), world);
+                const float p = world[character.rig.hips][3].y;
+                pelvisLo = std::min(pelvisLo, p);
+                pelvisHi = std::max(pelvisHi, p);
+                // Head BONE, not "highest bone": when the character crouches the
+                // raised arms or the hair can out-top the skull, and taking the max
+                // over all bones then reports a crouch that barely got shorter.
+                const int hb = character.rig.head;
+                const float topmost = (hb >= 0)
+                    ? world[(std::size_t)hb][3].y
+                    : world[character.rig.hips][3].y;
+                head = std::max(head, topmost);
+            }
+            pelvis = 0.5f * (pelvisLo + pelvisHi);
+            // Forward offset of the pelvis from where the feet are: the quantity that
+            // decides whether the character reads as crouching or as falling over.
+            std::vector<glm::mat4> pose0, pal0, world0;
+            pr.src->Sample(0.0f, pose0);
+            skeleton.ComputeWorld(pose0, model.Mat4(), world0);
+            const float footZ = 0.5f * (world0[(std::size_t)character.rig.foot[0]][3].z
+                                      + world0[(std::size_t)character.rig.foot[1]][3].z);
+            const float hipY = world0[(std::size_t)character.rig.hips][3].y;
+            const float headY = world0[(std::size_t)character.rig.head][3].y;
+            const float pelvisZ = world0[(std::size_t)character.rig.hips][3].z;
+            std::fprintf(stderr,
+                         "[anim-rigid] pose check: %-11s %8.3f m %8.4f m %8.3f m %8.1f mm  fwd %+7.3f m\n",
+                         pr.name, (double)pelvis, (double)sole, (double)head,
+                         (double)(lift * 1000.0f), (double)(pelvisZ - footZ));
+            std::fprintf(stderr, "[anim-rigid]   drop: hip %.3f m, headBone %.3f m (hip-to-head %.3f m)\n",
+                         (double)hipY, (double)headY, (double)(headY - hipY));
+        }
     }
 
     // Which rig slots failed to bind, and the one assertion this demo takes most
