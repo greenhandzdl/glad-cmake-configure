@@ -128,53 +128,74 @@ class AnimPoseSource {
 内置两个实现：
 
 - `gldx::ProceduralWalk`（+ `WalkTuning`）—— 程序化步态。曲线的**形状**是通用人形知识（支撑相 60%、摆动早期抬膝、蹬离后踝解旋），所以住在引擎；**数值**是调出来的（`armDown = 1.05` 只因为那具角色穿裙子），所以由调用方通过 `WalkTuning` 给，默认值就是参考资产的调好值。`WalkTuning::crouch` 让"蹲下行走"成为行走的一个参数，而不是第二套步态曲线——两套曲线迟早会不一致。
-- `gldx::ProceduralJump`（+ `JumpTuning`）—— 起跳/腾空/落地三段。除了 `Sample`，它还多给两个数：`GroundedAt(t)` 与 `AirborneRiseAt(t)`。
-- `gldx::ProceduralRun`（+ `RunTuning`）—— 跑步。**不是"更快的走路"**：支撑相从 0.6 降到 0.35，两条腿的支撑区间不再相接，中间留出腾空，所以它是独立类型而不是一个参数。`AirborneWeightAt(t)` 给 0..1 的连续腾空权重。
-- `gldx::ProceduralCrouch`（+ `CrouchTuning`）—— 原地蹲伏 + 呼吸。"蹲着走"不在这一类，那是 `WalkTuning::crouch = 1`（**同一条步态曲线**，只是步幅收窄、膝盖常态屈曲；做成两套曲线之后必然有一天会不一致，demo 里 `--action crouchwalk` 就是它）。`ContactPhase()` 返回 -1：蹲着时没有落脚瞬间。
+- `gldx::ProceduralJump`（+ `JumpTuning`）—— 起跳/腾空/落地三段（蓄力段内部是“蹲下再蹬直”，蹬直那一刻正好离地）。除了 `Sample`，它还多给两个数：`GroundedAt(t)`（这一刻要不要跑地面解算）与 `AirborneRiseAt(t)`（米，抛物线）。**两个都要用**：只关解算不加上升，角色会在空中保持站立高度、只把腿收起来。
+- `gldx::ProceduralRun`（+ `RunTuning`）—— 跑步。**不是“更快的走路”**：支撑相从 0.6 降到 0.35，两条腿的支撑区间不再相接，中间留出腾空，所以它是独立类型而不是一个参数。`AirborneWeightAt(t)` 给 0..1 的连续腾空权重（`sin²`，两端值与斜率都是 0），`airborneRiseAt(t)` 给出要加到角色上的米数——用法与跳跃完全相同。
+- `gldx::ProceduralCrouch`（+ `CrouchTuning`）—— 原地蹲伏 + 呼吸。**它就是蹲走的某一帧**：内部持有一个 `WalkTuning{crouch = 1}` 的 `ProceduralWalk`，把相位钉在 `CrouchTuning::posePhase`（0.25，双支撑相中点），再叠一层只动上身的呼吸。所以"蹲下"没有第二套腿的常量，切换动作时姿态不跳——`anim-rigid --on report` 打的那行 `crouch == crouchwalk@phase 0.25: t=0 delta 0.000e+00` 就是在验这件事。`ContactPhase()` 返回 -1：蹲着时没有落脚瞬间。
+- `gldx::ProceduralSit`（+ `SitTuning`）—— 席地而坐（盘腿），循环呼吸。**坐姿的承重点是臀部而不是鞋底**，所以调用方要把地面解算关掉，改为直接给一个"坐高"（米）；姿态里不要写骨盆平移——`outPose` 是骨骼单位（厘米级资产 x0.01），写 0.87"米"只剩 8.7 mm。
+- `gldx::ProceduralSwim`（+ `SwimTuning`）—— 游泳：身体水平、一臂前伸一臂划到体侧、腿在身后小幅打腿。**俯卧旋转由调用方做**（姿态层没有世界），`waterRise()` 给出水面高度（米）。不转的话画出来就是"站着划手的人"。
 - `gldx::ProceduralAttack`（+ `AttackTuning`）—— 挥砍：蓄力 → 挥出 → 收势。三段的同步压成一个 `drive` 标量。`HitReachedAt(t)` 问命中时刻。**末帧不等于 rest pose**（手臂下放是常驻的）。
 
 关键帧动画是第三种实现：写一个 `AnimPoseSource` 子类包住采样结果即可，**上层一行都不用改**。这也是这一层存在的理由。
 
 ### demo 里怎么按动作决定要不要解算
 
-`anim-rigid` 的写法可以直接照搬——跳跃用布尔，跑步用权重：
+`anim-rigid` 的写法可以直接照搬（`VerticalShiftFor`）——跳跃用布尔权重，跑步用连续权重，两者都走同一个公式：
 
 ```cpp
-float groundWeight = 1.0f;
-switch (action) {
-    case Jump: if (!jump.GroundedAt(t)) groundWeight = 0.0f; break;
-    case Run:  groundWeight = 1.0f - run.AirborneWeightAt(t); break;
-    default:   break;   // walk / idle / crouch / attack 始终着地
-}
-const auto s = ground.Solve(palette);
-if (s.valid() && groundWeight > 0.0f)
-    GroundContact::ApplyLift(palette, s.lift * groundWeight);
+// weight = 1 完全着地, 0 完全腾空；rise 是这一刻的弧线高度（米，只有 jump/run 非 0）
+const float weight = /* 见上表 */;
+const float solved = ground.Solve(palette).lift;
+const float standing = character.restLift;              // 直腿站姿的鞋底高度，加载时量一次
+GroundContact::ApplyLift(palette, weight * solved + (1.0f - weight) * (standing + rise));
 ```
 
-### 跑步的腾空相也要衰减地面解算
+注意这里不是“把解算结果乘个系数”就完事：那片 `(1 - weight) * (standing + rise)` 才是腾空
+时角色真正的高度。少了它，角色的脚会被解算钉在地板上、人却收着腿——这正是“被一根看不见的
+绳子吊着”的样子。`standing` 用 `GroundContact::Solve()` 在**直腿站姿**上量一次即可（不是 0，
+这具骨架是 +13 mm）；跳跃的起飞与触地两帧姿态本来就是直腿，所以两支在此严丝合缝。
 
-跑步和跳跃不同：跳跃是一整段明确的腾空，跑步每个周期有两段很短的（`0.35→0.5` 与 `0.85→1.0`，各约 15%）。这里不用布尔，用连续权重：
+### 跑步的腾空也是同一个公式
+
+跑步和跳跃不同：跳跃是一整段明确的腾空，跑步每个周期有两段很短的（`0.35→0.5` 与 `0.85→1.0`，各约 15%）。所以跑步用连续权重而不是布尔——布尔会在边界那一帧让骨盆高度突变（看起来"跳一下"）：
 
 ```cpp
-const float air = character.run.AirborneWeightAt(t);
-const auto s = ground.Solve(palette);
-GroundContact::ApplyLift(palette, s.lift * (1.0f - air));
+const float weight = 1.0f - character.run.AirborneWeightAt(t);
+const float rise   = character.run.airborneRiseAt(t);     // 米
+GroundContact::ApplyLift(palette, weight * ground.Solve(palette).lift
+                                          + (1.0f - weight) * (standing + rise));
 ```
 
-布尔量会在腾空边界那一帧让骨盆高度突变（看起来"跳一下"）；权重衰减是一条连续过渡。
+权重的形状也有讲究：实现里用的是 `sin²(πu/2)`，**值和斜率**在腾空边界都是 0。换成 `sin(πu)` 值同样从 0 起，但斜率最大，而它乘的是解算抬升量——实测跑步起跳那一帧骨盆被硬拽 5.9 cm。
 
-### 跳跃必须关掉地面解算
+### 跳跃：关解算只是第一步
 
-`GroundContact::Solve` 每帧把骨盆抬到鞋底刚好贴地——走路时对，跳跃时错：腾空期间脚本来就不该在地上，继续解算会把角色拽回地面附近，看起来像被一根看不见的绳子吊着。
+`GroundContact::Solve` 每帧把角色抬到鞋底刚好贴地——走路时对，跳跃时错：腾空期间脚本来就不该在地上，继续解算会把角色拽回地面附近。
+
+但**只关解算还不够**，那是这里踩过的坑：
 
 ```cpp
-if (character.jump.GroundedAt(t)) {
-    const auto s = ground.Solve(palette);
-    GroundContact::ApplyLift(palette, s.lift);
-}
+// ❌ 关了解算，但没人给上升：角色在空中保持站立高度，只把腿收起来。
+if (character.jump.GroundedAt(t))
+    GroundContact::ApplyLift(palette, ground.Solve(palette).lift);
+
+// ✅ 腾空时用弧线接管高度
+const float weight = character.jump.GroundedAt(t) ? 1.0f : 0.0f;
+const float rise   = character.jump.AirborneRiseAt(t);
+GroundContact::ApplyLift(palette, weight * ground.Solve(palette).lift
+                                + (1.0f - weight) * (standing + rise));
 ```
 
-这就是 `GroundedAt` 在接口上而不是让调用方自己划区间的原因：只有实现知道哪几段是腾空。
+`AirborneRiseAt` 是接口的一部分，和 `GroundedAt` 成对使用：前者回答"多高"，后者回答"要不要解算"。只实现后者时，跳起来的画面是"双腿收着、人在原地不动"，读起来像被一根看不见的绳子吊着。
+
+### 自己摆一个蹲姿时最容易错的三处
+
+`ProceduralCrouch` / `ProceduralWalk::crouch` 的取值方式是量出来的，不是调出来的：
+
+1. **髋前屈为负、膝屈为正**（绕侧向轴的正向让朝下的骨头往**后**摆）。同号会把腿折成一侧：膝盖跑到髋后面、脚跑到身体前面。
+2. **`kneeBend = 2 * hipBend`**（大腿与小腿等长时）。这条比例让踝关节落在髋正下方，骨盆因此蹲在脚上方；`0.85 / 0.85` 会让骨盆停在脚**后**方 0.37 m，上身再前折去补，整具角色就成了"探着身子"。
+3. **踝要抵消小腿的世界倾角** `-(knee - hip)`。漏掉时只有鞋跟着地，地面解算尽职地把踮起的角色抬起来——实测 0.24 m，"怎么调都不蹲"。
+
+反过来说，**不要**试图用"把骨盆平移下去"来造蹲姿：整具角色挂在 hips 下，地面解算会把最低鞋底重新钉回地板，平移被原样抵消（两个这样的参数实测扫了满量程，髋高一位小数没变）。
 
 ### 切换动作
 

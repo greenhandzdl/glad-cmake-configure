@@ -102,6 +102,16 @@ public:
      */
     void Request(const AnimPoseSource* source, const AnimTransition& transition = {});
 
+    /**
+     * 强制重新开始 `source`，即使它**正**是当前动作。
+     *
+     * `Request` 对"同一个 source"是 no-op（那是为了循环动作：调用方每帧请求一次
+     * 走路，不该把相位反复清零）。但一次性动作的语义相反——连按两次跳跃应当
+     * **再跳一次**，而不是把第二次吞掉、停在半途。这个区别只有调用方知道，
+     * 所以单独给一个入口而不是改 `Request` 的判断。
+     */
+    void Restart(const AnimPoseSource* source, const AnimTransition& transition = {});
+
     /** 推进 dt 秒：累加旧/新动作各自的时间，执行挂起的转移。 */
     void Update(float dt);
 
@@ -120,6 +130,25 @@ public:
     [[nodiscard]] const AnimPoseSource* Current() const noexcept { return current_; }
     /** 正在过渡进来的动作；不在过渡中则为 nullptr。 */
     [[nodiscard]] const AnimPoseSource* Pending() const noexcept { return pending_; }
+    /**
+     * 把当前动作的时钟**直接设成** `t`（秒）。
+     *
+     * 存在的理由：相位驱动的步态（走路、蹲行）的时钟归调用方所有——它要跟地面
+     * 滚动同步，否则脚会滑。`Update(dt)` 只能累加，而累加出来的相位一旦和地面
+     * 的滚动量有一点偏差就再也不会自己纠正回来（float 的累加误差在几分钟里能
+     * 到几个相位百分点，表现为脚逐渐打滑）。
+     *
+     * 传进来的 `t` 会按 source 的循环性折进有效区间（见 Fold）。
+     */
+    void SetCurrentTime(float t) {
+        if (current_ != nullptr) currentTime_ = Fold(*current_, t);
+    }
+
+    /** 同上，给正在过渡进来的那一段。不在过渡中时是 no-op。 */
+    void SetPendingTime(float t) {
+        if (pending_ != nullptr) pendingTime_ = Fold(*pending_, t);
+    }
+
     /** 当前动作内部的时刻（秒），可直接喂给 `Current()->Sample()`。 */
     [[nodiscard]] float CurrentTime() const noexcept { return currentTime_; }
     /** 过渡进度 0..1；不在过渡中则为 1（表示"已经是新动作"）。 */

@@ -97,7 +97,35 @@
 
 **自备一个模型**：仓内**不放** FBX（`*.fbx` 是整树 gitignore：仓库从不提交模型），默认路径 `src/demo/anim-rigid/demo_should_be_ignored.fbx` 只是一个投放位置——把自己的“带骨架 + 带蒙皮权重”的 FBX 丢到那里，或者用 `--model PATH` 指向别处；没有骨骼的文件 `LoadSkinned` 返回 `std::unexpected`（HUD 打红字），而不是画一具静态模型假装成功。加载结果与贴图情况会打在 stderr 上，不用凭猜。
 
-**操作**：`W` 走路开/关（关掉即 bind pose，可作为蒙皮的 A/B 对照组）、`G` 地面、`F` 线框、`H` HUD；拖拽轨道旋转、滚轮缩放；`Esc` 退出。CLI features `hud,walk,ground,wireframe,maps,normalmap,report` + options `model,speed,fov,yaw,pitch,distance,freeze-at,target-y`（`--target-y` 抬轨道中心，默认 0.92 m 在胸口附近）。这些开关**只认 `--on`/`--off`**（`--off ground`、`--on wireframe`），写 `--walk`/`--ground` 会被 `Flags` 报 unknown argument。
+**九种动作**：`0` 待机、`1` 走、`2` 跑、`3` 蹲、`4` 蹲走、`5` 挥砍、`6` 跳、`7` 坐、`8` 游泳；也可以 `--action idle|walk|run|crouch|crouchwalk|attack|jump|sit|swim` 脚本化选中（键位与 `--action` 走同一条路径，HUD 的第一行会报当前是哪一个——冻结帧里"一个人站在那儿"分不出是 idle、crouch 还是 run，这一行是唯一的凭证）。
+
+**"蹲下"是"蹲走"的一帧**，不是第二套曲线：`ProceduralCrouch` 内部持有 `crouch = 1` 的 `ProceduralWalk`，相位钉在 0.00（双支撑相），只叠一层只动上身的呼吸。所以按 `3`↔`4` 切换时脚不会跳，`--on report` 里那一行 `crouch == crouchwalk@phase 0.00: t=0 pose 0.000000e+00, drawn palette 0.000000e+00` 是逐矩阵比对的结果（"蹲下"和"蹲走的这一帧"必须**逐位**相同）。
+
+**动作切换带过渡**：所有动作都经 `AnimStateMachine`（0.18 s 交叉淡化），数字键和 `--action` 走同一条 `View::Request` → `machine.Request` 路径；两个步态的相位由 demo 的地面滚动灌进状态机（`SetCurrentTime`），游泳的根骨俯卧旋转在混合之后按 `BlendWeight()` 缩放施加，所以 walk→swim 是逐渐躺下而不是瞬间翻转。冻结帧不受影响：`--action walk --freeze-at 2` 仍与接入前的基线逐字节相同。
+
+**跳跃的腾空是垂直原地跳**（蓄力 0.30 s、蹲到髋 0.95/膝 1.90；腾空**双腿对称并拢**、脚背绷直、身体后仰、两臂绕 `forward` 张开——曾经做成左右劈叉，那是跨栏不是垂直跳；判据是两条腿的姿态是否相同）：前腿向前平举、后腿向后蹬、两臂向两侧张开、身体略后仰；起飞与触地两帧都是**直腿站姿**，所以"站立高度 + 抛物线"与地面解算的两支在边界严丝合缝（只关解算不给上升，会得到"收着腿悬在空中"的假跳）。蓄力段是"蹲下再蹬直"，蹬直那一下正好是离地那一刻。
+
+**坐**是**鸭子坐**（W-sitting：大腿外展 `legOut 0.78`，两只脚分别落在髋的两侧——纯并脚的跪坐在这具骨架上两只鞋会完全重合）、**游泳**是**面朝下**的自由泳（身体水平、一臂前伸一臂划到体侧、腿在身后打腿）——俯卧旋转的正负号就是自由泳与仰泳的区别，`-1.55` 是仰泳（脸朝天），`+1.55` 才是自由泳。这两个动作都有同一个陷阱：它们的承重件不是鞋底——坐是臀部、游泳是水——所以 demo 关掉了它们的地面解算，改用一条以米为单位的"高度"（`Character::seatedHip` / `SwimTuning::waterRise`），走的是与跳跃弧线完全相同的通道（`VerticalShiftFor` 的 `rise` 项）。
+
+**操作**：`W` 走路开/关（关掉即 bind pose，可作为蒙皮的 A/B 对照组）、`G` 地面、`F` 线框、`H` HUD；拖拽轨道旋转、滚轮缩放；`Esc` 退出。CLI features `hud,walk,ground,wireframe,maps,normalmap,report,trace` + options `model,speed,fov,yaw,pitch,distance,freeze-at,target-y,action`（`--target-y` 抬轨道中心，默认 0.92 m 在胸口附近）。这些开关**只认 `--on`/`--off`**（`--off ground`、`--on wireframe`），写 `--walk`/`--ground` 会被 `Flags` 报 unknown argument。
+
+**怎么判断一个动作"对不对"**（这一栏是踩出来的）：`--on report` 会在 stderr 打一张**九行**体检表，**每一列都量在地面解算之后的最终姿态上**——
+
+```
+ action           hip     sole     head     fly      fwd     foot   stride
+ idle          0.993m   0.000m   1.351m   0.00m  -0.035m   0.077m   0.000m
+ walk          0.996m   0.000m   1.369m   0.00m  +0.063m   0.833m   0.583m
+ run           0.960m   0.059m   1.361m   0.00m  +0.338m   1.363m   0.000m
+ crouch        0.769m   0.000m   1.114m   0.00m  +0.020m   0.342m   0.000m
+ crouchwalk    0.752m   0.000m   1.112m   0.00m  +0.063m   0.449m   0.292m
+ attack        0.972m   0.000m   1.330m   0.00m  +0.065m   0.610m   0.000m
+ jump          1.223m   0.550m   2.194m   0.85m  +0.201m   0.076m   0.000m
+ sit           0.492m  -0.000m   0.860m   0.00m  +0.367m  -0.029m   0.000m
+ swim          0.575m  -0.452m   0.966m   0.00m  +0.029m   0.264m   0.000m
+
+读法：`hip`/`head` 说"矮了多少"（crouch 比 idle 矮 25 cm、头矮 25 cm）；`sole` 说"这一刻有没有离地"（jump 的 0.35 m 是腾空段的采样，其余动作必须是 0）；`fly` 说"腾空高度有没有真的落到画面上"（它非 0 而 `sole` 为 0，就是"弧线没被消费"）；`fwd` 说骨盆相对双脚偏前还是偏后；`stride` 是被走路曲线隐含的步幅（`cycleMetres/2`，蹲行再乘 `strideScale()`），而 `foot` 是**实测**的左右脚踝跨度——两者差太多就是脚在滑，报告的同一行会打 `<- SKATES`。
+
+`--on trace` 再打 16 行**时间轴**（`air/shift/sole/head/hipH/ankleH/kneeFwd/hipFwd/headFwd`）：八点采样看不到的一帧突变只有它看得见。这套东西是必要的，因为上一轮的三张"蹲姿"报告全都在**解算之前**量，报 0.999 m 而画面里站着 1.208 m——照着它调了三轮，每一轮都在改一个像素上不存在的姿态。
 
 **`--on report` 的步态表**（16 行采样，这里摘 7 行；相位是周期比例，关节角是 rad，鞋底是**求解前**离地高度，单位 m。同一路径还会打一行绑定断言 `[anim-rigid] rig: 20/20 slots bound`，见下面「手臂」一节）：
 

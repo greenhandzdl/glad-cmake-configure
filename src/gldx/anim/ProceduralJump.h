@@ -42,31 +42,80 @@ namespace gldx {
  * 时长(秒)而不是比例：跳一次多久是"这具角色怎么跳"，不该被别的动作的长度影响。
  */
 struct JumpTuning {
-    float crouchSeconds = 0.22f;   // 下蹲蓄力
+    float crouchSeconds = 0.3f;   // 下蹲蓄力 + 蹬伸（同一段：先蹲后蹬）
     float airSeconds    = 0.55f;   // 离地到再次触地
     float landSeconds   = 0.26f;   // 落地屈膝缓冲
 
-    float apexHeight    = 0.55f;   // 米，腾空最高点相对起跳姿态
+    // 腾空最高点，**米**。这是唯一一个世界单位（不是骨骼单位）的调参：它由调用方
+    // 加进调色板（palette 的平移就是世界米），所以放在这里是为了"跳多高"只有一处。
+    // 姿态本身（`Sample`）永远不写这个数——见下面那段"为什么弧线不在姿态里"。
+    //
+    // 0.55 m 其实已经是"立定跳"的量级，但**看起来只升了一点**：腾空段同时把腿收起来
+    // （脚离地 0.73 m），而人眼量的是"脚离地多远"和"头顶到哪"，两者都被折腿吃掉
+    // 一截。参考图（起跳悬空、双臂张开）里人的整体位移明显大于一个身高的一半，所以
+    // 抬到 0.85 m；配合 `airArch` 的后仰与张开的双臂，可读性才够。
+    float apexHeight    = 0.85f;
 
-    // 蓄力段：髋膝踝一起屈，骨盆下沉多少由调用方的地面解算给出（这里只负责弯腿）。
-    float crouchKnee    = 0.85f;   // rad
-    float crouchHip     = 0.45f;   // rad
-    float crouchAnkle   = -0.35f;  // rad，背屈（脚尖翘起）
+    // ---- 屈腿的符号，和 ProceduralCrouch 同一套 ----
+    // 绕 side 的正向让朝下的骨头往后摆，所以**髋前屈是负、膝屈是正**。
+    // `knee = 2 * hip` 这条比例把踝关节放在髋正下方（大腿小腿等长时两项相消），
+    // 于是蹲下去时骨盆落在脚上方而不是脚后方 0.3 m——否则即使没跳，只是蹲一下，
+    // 也会看起来像整个人朝前扑。
+    float crouchHip  = 0.95f;   // rad，蓄力最深时的髋前屈
+    float crouchKnee = 1.9f;   // rad，蓄力最深时的膝屈
+    float landHip    = 0.70f;   // rad，落地最深时的髋前屈（比蓄力深一点）
+    float landKnee   = 1.40f;   // rad，落地最深时的膝屈
 
-    // 腾空段：离地瞬间腿是蹬直的、手臂往上甩；过顶点后开始收腿准备落地。
-    float airArmRaise   = 0.9f;    // rad，手臂上举
-    float airTuckKnee   = 0.75f;   // rad，过顶点后收膝
-    float airTuckHip    = -0.35f;  // rad，大腿前抬
+    // ---- 腾空：双腿**向后折叠**、身体前倾 ----
+    //
+    // 参考图（空中那一帧）读下来是：人跳起来、**小腿向后折起**（脚跟朝臀部，大腿
+    // 大致竖直略向后），上身略前倾、双臂向两侧张开。也就是说腿是"收起"的，不是
+    // 笔直下垂、也不是向前平举。
+    //
+    // 这里已经翻过两次：
+    //   第一次做成左右劈叉（一条前踢一条后踢）——那是跨栏；
+    //   第二次做成"垂直起跳、双腿并拢伸直"——太素，读不出"跳起来"的感觉。
+    // 判据是**两腿是否对称**（对称）+ **小腿是否离地收起**（收起）。
+    //
+    // 角度：髋略伸展（大腿在身体正下方偏后），膝深屈把小腿折起来，脚背绷直。
+    float airHip     = 0.22f;  // rad，髋略伸（负 = 大腿在身体平面偏后）
+    float airKnee    = 1.35f;   // rad，膝深屈：小腿向后折起（腾空的关键轮廓）
+    float airAnkle   = 0.3f;   // rad，脚背绷直
+    // 两腿略微分开，正侧面才不会两条腿叠成一条线；超过 ~0.1 就不再是"并拢"。
+    // 绕 forward 的对称外展。`stanceSplit` 管蓄力/落地（两腿分到肩宽，重心才稳），
+    // `airLegSplit` 管腾空（再张一点，轮廓更清楚）。
+    float stanceSplit  = 0.16f;  // rad
+    float airLegSplit  = 0.10f;  // rad
 
-    // 落地段：比蓄力更深一点，然后回到站直。冲击感来自这一段的总时长够短。
-    float landKnee      = 1.05f;   // rad
-    float landHip       = 0.55f;   // rad
-    float landAnkle     = -0.30f;  // rad
+    // 两臂向两侧上方张开。**张开 = 绕 forward 轴转**（这具骨架的 T-pose 里上臂就
+    // 指向 +side，所以"A-pose 基准"本身已经是斜下张开的，往回抬才是张开到斜上）。
+    float airArmSpread = 1.3f;  // rad，相对 A-pose 回收的量
+    float airArmRaise  = 0.75f;  // rad，额外上举（绕竖直轴）
+    float airElbow     = 0.25f;  // rad，空中手臂几乎伸直
+    // 躯干略后仰（参考图是挺胸的），头看前方。
+    float airArch      = 0.1f;  // rad
+
+    // 手臂：蓄力时向后摆、腾空时上举、落地时前伸缓冲。跳跃的手臂是"甩"出来的，
+    // 它读起来比腿还重要——腿的幅度被裙子挡掉一半。
+    float armBack = 0.50f;      // rad，蓄力后摆
+    float armLand = 0.40f;      // rad，落地前伸
+    float elbowBend = 0.45f;    // rad，常驻屈肘（两根直棍不像人）
 };
 
 /**
  * 一次跳跃。**不循环**：`Looping()` 为 false，所以 t 超过总时长后钳在最后一帧
  * （站直），而不是回绕到蓄力——回绕会让角色无限连跳，那不是"一次跳跃"。
+ */
+/**
+ * ---- 为什么腾空弧线不在姿态里 ----
+ *
+ * `Sample()` 输出的是**骨骼局部矩阵**，它的平移量在骨骼空间（这具资产 x0.01），
+ * 而"跳多高"是世界米。两者之间隔着 `RiggedModel::Mat4()` 的 unitScale，姿态层拿不到
+ * 也不该拿到那个数。更要紧的是：地面解算（`GroundContact`）已经把骨盆高度交给了
+ * 解算器——姿态层再写一个"上升多少"，就会和解算打架，而打架的结果是脚陷进地面或
+ * 悬空，并且没有任何报错。
+ *
+ * 所以分工是：姿态只管关节（腿怎么折），高度归调用方（`AirborneRiseAt` + 站立高度）。
  */
 class ProceduralJump final : public AnimPoseSource {
 public:
@@ -85,10 +134,22 @@ public:
     /**
      * 时刻 t 是否"脚踩在地上"。调用方据此决定要不要跑 `GroundContact::Solve`：
      * 为 false 时必须跳过着地解算，否则角色会被拽回地面（见文件头）。
+     *
+     * ⚠️ **它只回答"要不要解算"，不回答"人在多高"**。腾空期间真正的抬升是这个类
+     * 的另一半 `AirborneRiseAt(t)`，两半都要消费：只关解算而不加弧线，角色会在空中
+     * 保留站立高度、双腿收着——"被一根看不见的绳子吊着"正是那个样子，而这套接口
+     * 之前**没有任何调用方**读过 `AirborneRiseAt`（全仓搜索为零），所以跳跃在空中
+     * 既不上升也不下降。
      */
     [[nodiscard]] bool GroundedAt(float t) const noexcept;
 
-    /** 时刻 t 骨盆相对起跳姿态的额外抬升（米）。腾空段是抛物线，其余段是 0。 */
+    /**
+     * 时刻 t 相对"站立高度"的抬升（米）。腾空段是抛物线，蓄力/落地段是 0。
+     *
+     * 调用方的用法是把 `站立高度 + rise` 当作这一刻的整具角色高度：站立高度是
+     * 直腿站姿的鞋底高度（demo 用 `GroundContact::Solve(rest)` 量一次），而本动作
+     * 在起飞与触地两帧的姿态恰好就是直腿站姿，所以两支接得上、没有台阶。
+     */
     [[nodiscard]] float AirborneRiseAt(float t) const noexcept;
 
     [[nodiscard]] const JumpTuning& tuning() const noexcept { return tuning_; }

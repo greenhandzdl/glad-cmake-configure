@@ -58,6 +58,20 @@ void AnimStateMachine::Request(const AnimPoseSource* source, const AnimTransitio
     blendDuration_ = std::max(transition.seconds, 0.0f);
 }
 
+void AnimStateMachine::Restart(const AnimPoseSource* source, const AnimTransition& transition) {
+    if (source == nullptr) return;
+    // Hard reset of both clocks: the point of a restart is that the action plays from
+    // its first frame, with no cross-fade from the stale pose of the previous run.
+    current_ = source;
+    currentTime_ = 0.0f;
+    pending_ = nullptr;
+    pendingTime_ = 0.0f;
+    requested_ = nullptr;
+    requestedWait_ = 0.0f;
+    blendWeight_ = 1.0f;
+    blendDuration_ = std::max(transition.seconds, 0.0f);
+}
+
 void AnimStateMachine::Update(float dt) {
     // dt 为负（时钟回拨、或调用方算错）时钳到 0：让时间倒退会让 fmod 的结果跳变，
     // 表现为姿态瞬移。宁可这一帧不动。

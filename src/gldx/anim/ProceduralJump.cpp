@@ -71,82 +71,136 @@ void ProceduralJump::Sample(float t, std::vector<glm::mat4>& outPose) const {
     const JumpTuning& tune = tuning_;
     const float c = std::max(tune.crouchSeconds, 1e-3f);
     const float a = std::max(tune.airSeconds, 1e-3f);
-    const float l = std::max(tune.landSeconds, 1e-3f);
+    const float anim_transit_a_c = c + 0.01 * a; // 第一段动画僵直修改，这个对动画有断裂的效果，不是很好（比较rude)
     // 钳住而不是回绕：不循环的动作在 t 超过时长后停在最后一帧（站直）。
     const float tt = std::clamp(t, 0.0f, duration_);
 
-    // 三段各自的进度，只有所在的那一段是 0..1，其余段钳在 0 或 1。
-    const float crouchU = Segment01(tt, 0.0f, c);
+    // 三段各自的进度（只有所在段是 0..1，其余钳在 0/1）。`crouchU == 1` 同时也
+    // 标出"脚刚离地"这一刻，`landU == 0` 标出"脚刚触地"。
+    const float crouchU = Segment01(tt, 0.0f, anim_transit_a_c);
     const float airU    = Segment01(tt, c, c + a);
     const float landU   = Segment01(tt, c + a, duration_);
 
-    // ---- 腿部 ----
-    // 蓄力：从站直弯到最深（crouchU 的缓入），但落地段结束后要回到站直，所以
-    // 用一个"深度"标量而不是直接乘角度：越到后面越浅。
+    // ---- 折腿量：四段之间**连续** ----
     //
-    // 关键细节：蓄力段结束与腾空段开始必须**连续**。蓄力末 knee = crouchKnee，
-    // 腾空初立刻收腿到 airTuckKnee——若两个值差得远，离地那一帧膝盖会瞬移。
-    // 所以腾空的起始姿态取蓄力末值，再往收腿姿态过渡。
-    float kneeDepth = 0.0f;
-    float hipDepth  = 0.0f;
-    float ankle     = 0.0f;
-    float armRaise  = 0.0f;
+    // 蓄力段不是"弯到最深就结束"，而是**蹲下再蹬出去**：先蹲（由 crouchHip/Knee 给，
+    // knee = 2*hip 让踝关节落在髋正下方），再蹬回 0。蹬直的瞬间正好是离地那一刻——
+    // 也正好是 `GroundedAt()` 由 true 变 false 的那一帧。所以离地姿态是**直腿**，
+    // 与调用方用来当基准的"站立高度"完全一致，接缝处没有台阶。
+    //
+    // 腾空段用"两端为 0 的驼峰"，所以离地与触地两帧也都是直腿；中段才是劈叉。
+    float hip = 0.0f;       // 大小（屈多少），符号在下面按前/后腿分别给
+    float knee = 0.0f;
+    float frontBlend = 0.0f;  // 0 = 双腿对称（蹲/落地），1 = 完全劈叉（腾空峰值）
+    float armSpread = 0.0f;   // rad，正 = 向两侧上方张开
+    float armBack = 0.0f;     // rad，正 = 后摆
+    float arch = 0.0f;        // rad，躯干后仰
+    float crouchBlend = 0.0f; // 0..1，当前有多"蹲着"（决定两腿张开的量）
 
-    if (tt < c) {
-        // 蓄力：缓入到最深。
-        const float k = Ease01(crouchU);
-        kneeDepth = tune.crouchKnee * k;
-        hipDepth  = tune.crouchHip * k;
-        ankle     = tune.crouchAnkle * k;
-        // 蓄力时手臂向后下方摆（为起跳蓄势），用负的 armRaise 表示后摆。
-        armRaise  = -0.35f * k;
-    } else if (tt < c + a) {
-        // 腾空：前 35% 把腿蹬直（离地那一下是伸直的），之后收膝准备落地。
-        const float extend = 1.0f - Ease01(Segment01(airU, 0.0f, 0.35f));
-        const float tuck   = Ease01(Segment01(airU, 0.30f, 0.75f));
-        // 收腿是叠在"蹬直"之上的：extend 把它拉回伸直，tuck 把膝收到身前。
-        kneeDepth = tune.crouchKnee * extend + tune.airTuckKnee * tuck;
-        hipDepth  = tune.crouchHip * extend + tune.airTuckHip * tuck;
-        ankle     = tune.crouchAnkle * extend;
-        // 手臂上举然后自然下落。
-        armRaise = tune.airArmRaise * (1.0f - Ease01(Segment01(airU, 0.45f, 1.0f)));
+    // 蹬伸的缓动曲线：前 62% 蹲到底，之后蹬出去。smoothstep 两端导数为 0，所以
+    // 起跳前有一小段"蹲到最深停一拍"的蓄力感，而不是匀速地上去下来。
+    // 蓄力曲线：蹲下，再用**最后一段**蹬直。
+    //
+    // 这里有一个读作「站立卡顿」的坑：`getUp` 在 `crouchU = 1` 才归零，而
+    // `crouchU = 1` 正是**离地那一刻**，所以蹬直与离地之间没有重叠——姿态先站直，
+    // 上升才开始。实测 t=0.28→0.30 这几帧角色是完全静止的直立姿势，看起来像
+    // 卡了一下。把蹬伸的终点提前到 0.88，让「腿伸直」与「开始上升」重叠 12%，
+    // 起跳才有连贯的推地感。
+    const float squatDown = Ease01(Segment01(crouchU, 0.20f, 0.55f));
+    const float driveUp   = Ease01(Segment01(crouchU, 0.55f, 1.00f)); // 不对，应该调低末尾动画曲线
+    const float getUp     = squatDown * (1.0f - driveUp);   // 0 -> 最深 -> 0
+
+    if (tt < anim_transit_a_c) {
+        hip  = tune.crouchHip * getUp;
+        knee = tune.crouchKnee * getUp;
+        armBack = tune.armBack * getUp;
+        // 蓄力时手臂向后下方摆（甩臂的第一半）。
+        armSpread = -0.25f * getUp;
+        crouchBlend = getUp;
+    } else
+        if (tt < c + a) {
+        // 腾空：中段劈叉 + 展臂。`split` 是两端为 0 的驼峰，两端都取 0 才能与
+        // 蓄力末帧（直腿）和落地首帧（直腿）无缝接上。
+        const float split = Ease01(Segment01(airU, 0.08f, 0.45f)) *
+                            (1.0f - Ease01(Segment01(airU, 0.72f, 0.95f)));
+        frontBlend = split;
+        hip  = 0.0f;   // 由 frontBlend 分给两条腿（见下面的腿循环）
+        knee = 0.0f;
+        armSpread = tune.airArmSpread * split;
+        arch = tune.airArch * split;
     } else {
-        // 落地：从"腿还收着"的触地姿态迅速弯到最深，再站起来。
-        // 这条曲线两段拼：先加深（承受冲击），再归零（站直）。
-        const float deepen = Ease01(Segment01(landU, 0.0f, 0.28f));
-        const float recover = Ease01(Segment01(landU, 0.30f, 1.0f));
-        const float depth = deepen * (1.0f - recover);
-        kneeDepth = tune.landKnee * depth;
-        hipDepth  = tune.landHip * depth;
-        ankle     = tune.landAnkle * depth;
-        armRaise  = -0.25f * depth;   // 落地时手臂略微后撑
+        // 落地：触地时直腿 -> 深屈吸收冲击 -> 站起。两端为 0 的驼峰，所以触地那一帧
+        // 和动作结束那一帧都是直腿。
+        const float absorb = Ease01(Segment01(landU, 0.0f, 0.30f)) *
+                             (1.0f - Ease01(Segment01(landU, 0.45f, 1.0f)));
+        hip  = tune.landHip * absorb;
+        knee = tune.landKnee * absorb;
+        crouchBlend = absorb;
+        // 落地时手臂前伸一点接住身体。
+        armSpread = -tune.armLand * absorb;
     }
 
-    // 躯干跟着髋前屈，头保持看向前方（跳的时候没人埋头）。
-    rotate(rig_.spine, rig_.side, hipDepth * 0.35f);
-    rotate(rig_.chest, rig_.side, hipDepth * 0.20f);
-    rotate(rig_.head, rig_.side, -hipDepth * 0.30f);
+    // ---- 躯干 ----
+    // 屈髋会让上身整体前倾，头再反向抬回来（跳的时候没人埋头）；腾空时挺胸。
+    rotate(rig_.spine, rig_.side, hip * 0.30f - arch);
+    rotate(rig_.chest, rig_.side, hip * 0.15f - arch * 0.6f);
+    rotate(rig_.head, rig_.side, -hip * 0.40f + arch * 0.5f);
 
-    // 手臂：先放成 A-pose（这具骨架是 T-pose，见 ProceduralWalk 的同一段说明），
-    // 再绕侧向轴做上举/后摆。
+    // ---- 手臂 ----
+    // 这具骨架是 T-pose，先把手臂放成 A-pose（1.05 rad）——**注意这就是"双臂向侧面
+    // 展开"的基准**：A-pose 里手臂本来就朝斜下方，腾空要的是把它抬到斜上方，所以
+    // 只要往回收一点降幅，而不是从"垂下"再举起来。
     const float armDown = 1.05f;
     rotate(rig_.armUp[kRigLeft], rig_.forward, -armDown);
     rotate(rig_.armUp[kRigRight], rig_.forward, +armDown);
-    // 上举：绕侧向轴的**负向**是朝前，再往前就是朝上。两侧对称。
-    rotate(rig_.armUp[kRigLeft], rig_.side, -armRaise);
-    rotate(rig_.armUp[kRigRight], rig_.side, -armRaise);
-    // 屈肘让手臂不是两根直棍。
-    const float elbow = -(0.45f + 0.35f * std::max(armRaise, 0.0f));
-    rotate(rig_.armLow[kRigLeft], rig_.side, elbow);
-    rotate(rig_.armLow[kRigRight], rig_.side, elbow);
-
-    // 腿：左右对称（双脚同时起跳，不是单腿跳）。
     for (int s = 0; s < kRigSides; ++s) {
-        rotate(rig_.legUp[s], rig_.side, hipDepth);
-        rotate(rig_.legLow[s], rig_.side, kneeDepth);
-        rotate(rig_.foot[s], rig_.side, ankle - kneeDepth * 0.45f);
-        // 踝被膝盖带平之后，趾骨要补一点背屈，否则脚尖戳进地面。
-        rotate(rig_.toe[s], rig_.side, kneeDepth * 0.25f);
+        // 这一步画"双臂张开"。
+        //
+        // `armSpread` **本身就是张开量**（腾空段 = airArmSpread * split），不是
+        // "相对 A-pose 回收多少"——写成后者会变成 1.05²≈1.1 rad 的二次方，看着像
+        // 张开、实际每次都被削掉一半，实测腾空帧的手臂和站立时几乎一样。
+        //
+        // 轴的选择同样踩过：T-pose 里上臂指向 +side，绕 **side** 转是绕手臂自身长轴
+        // 自旋（看不见），绕 **forward** 才是把它从"侧平举"抬到"斜上举"。两侧镜像。
+        const float spread = std::max(armSpread, 0.0f);
+        rotate(rig_.armUp[s], rig_.forward, spread * (s == 0 ? -1.0f : 1.0f));
+        // 再绕竖直轴加一点上举，手臂才不会只是横向一条线。
+        rotate(rig_.armUp[s], rig_.up,
+               -tune.airArmRaise * std::min(spread / std::max(tune.airArmSpread, 1e-3f), 1.0f) *
+                   (s == 0 ? 1.0f : -1.0f));
+        // 蓄力段的后摆（负的 armSpread）仍然走 side 轴。
+        rotate(rig_.armUp[s], rig_.side, -armBack);
+        const float elbow = -(0.35f + tune.airElbow * std::max(armSpread, 0.0f));
+        rotate(rig_.armLow[s], rig_.side, elbow);
+    }
+
+    // ---- 腿 ----
+    // 腾空是**对称**的垂直跳：两条腿同一个姿态（略屈膝、脚背绷直），不再分红左
+    // 右前后来劈叉。落地/蓄力两段 airBlend = 0，退回"双腿对称的屈膝"。
+    for (int s = 0; s < kRigSides; ++s) {
+        // 两条腿用同一组角；只有"略微外展"按侧别镜像，让正面看得出是两条腿。
+        const float h = hip + tune.airHip * frontBlend;
+        const float k = knee + tune.airKnee * frontBlend;
+        rotate(rig_.legUp[s], rig_.side, -h);
+        rotate(rig_.legLow[s], rig_.side, k);
+        // 两腿**打开**：蓄力/蹬伸段用 `stanceSplit`，腾空段再加 `airLegSplit`。
+        //
+        // 之前只在腾空时张开，于是起跳准备看起来像"并腿直立"——人准备起跳时是把两腿
+        // 分到肩宽、重心压在两脚之间的。张开同时也是**重心稳定**的来源：支撑多边形
+        // 从一条线变成一个面，地面求解出的骨盆高度才不会左右晃。
+        const float split = tune.stanceSplit * crouchBlend + tune.airLegSplit * frontBlend;
+        if (split > 0.0f) {
+            rotate(rig_.legUp[s], rig_.forward, split * (s == 0 ? 1.0f : -1.0f));
+        }
+        // 踝：**一次**旋转，抵消小腿的世界倾角（脚掌才平），腾空段再叠加绷直量。
+        //
+        // 这里曾经写成两次独立的 rotate：先 `(h-k)*0.55 + airAnkle*air`，再
+        // `(h-k)*0.55`。两次都作用在同一根脚骨上，所以脚掌被多转了整整一遍——
+        // 后果不是"脚看起来怪"，而是**起跳/落地时只有脚跟或脚尖着地**，地面解算
+        // 据此算出的骨盆高度每帧都在跳，读起来就是"重心不稳"。
+        rotate(rig_.foot[s], rig_.side, (h - k) * 0.55f + tune.airAnkle * frontBlend);
+        // 折得深时鞋底前掌会压进地面，趾骨补一点背屈。
+        rotate(rig_.toe[s], rig_.side, k * 0.10f);
     }
 }
 

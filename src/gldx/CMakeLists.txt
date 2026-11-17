@@ -33,6 +33,8 @@ set(GLDX_SOURCES
     anim/ProceduralRun.cpp
     anim/ProceduralCrouch.cpp
     anim/ProceduralAttack.cpp
+    anim/ProceduralSit.cpp
+    anim/ProceduralSwim.cpp
     anim/AnimStateMachine.cpp
     geometry/Mesh.cpp
     geometry/GeometryFactory.cpp

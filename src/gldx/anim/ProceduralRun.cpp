@@ -97,6 +97,15 @@ float ProceduralRun::AirborneWeightAt(float t) const noexcept {
     const bool grounded = inStance(p) || inStance(pr);
     if (grounded) return 0.0f;
 
+    // 边界处的过渡窗。`
+    // 上面那个"要不要腾空"的判据是布尔的，而它输出的是一个**连续权重**：布尔判据
+    // 在 p = stanceEnd 处从 0 直接跳到"钟形曲线走过的那一段"，而走了多远由局部相位
+    // 决定。上一版就是这么写的，实测（demo 的 `--on trace --action run`）在相位
+    // 0.375、0.4375、0.5 三行的 sole 是 0.027 / 0.208 / 0.000——脚在一帧之内从地上
+    // 弹到 20 cm 再砸回地面，中间还被 `GroundContact` 的钳制截断。
+    // 现在用 `sin²(pi*u/2)` 把整段腾空做成一条从 0 起、到 0 止、两端斜率为 0 的钟形，
+    // 相位连续、骨盆不会跳。
+
     // 腾空段的形状：用"离最近一次触地有多远"做钟形，峰值在腾空正中。
     //
     // 归一化的分母必须是**腾空段自身的一半长度**，不是 1-stanceEnd：腾空段是
@@ -121,7 +130,11 @@ float ProceduralRun::AirborneWeightAt(float t) const noexcept {
     const float flightLen = std::max(0.5f - tuning_.stanceEnd, 1e-3f);
     const float u = Clamp01((local - tuning_.stanceEnd) / flightLen);   // 0 = 刚离地, 1 = 即将触地
     // 两端平滑的钟形：刚离地时慢慢升起来，快落地时慢慢压回去。
-    return std::sin(u * kPi);
+    // sin²(pi*u/2)：u=0 与 u=1 处值与斜率都是 0，峰值 1 在 u 略过中点处。
+    // 换成 sin(pi*u) 值也是 0/0，但**斜率为最大**，而它乘的是地面抬升量，
+    // 于是腾空开始那一帧骨盆被硬拽几厘米——实测跑步起跳帧骨盆突变 5.9 cm。
+    const float bell = std::sin(u * 0.5f * kPi);
+    return bell * bell;
 }
 
 void ProceduralRun::Sample(float t, std::vector<glm::mat4>& outPose) const {

@@ -44,7 +44,14 @@ import gldxcli;
 namespace {
 
 struct View {
-    float yaw = 0.7f, pitch = 0.3f, radius = 4.0f;
+    // Orbit state + input conversion come from the engine now.
+    gldx::OrbitCamera orbit;
+    View() {
+        orbit.settings().yaw = 0.7f;
+        orbit.settings().pitch = 0.3f;
+        orbit.settings().distance = 4.0f;
+        orbit.settings().target = glm::vec3(0.0f, 0.5f, 0.0f);
+    }
     double lastX = 0.0, lastY = 0.0;
     bool dragging = false;
 };
@@ -108,15 +115,15 @@ int main(int argc, char** argv) {
     renderer.Init();
 
     View view;
-    view.yaw = flags.real("yaw", view.yaw);
-    view.pitch = flags.real("pitch", view.pitch);
-    view.radius = flags.real("radius", view.radius, 0.5f, 200.0f);
+    view.orbit.settings().yaw = flags.real("yaw", view.orbit.settings().yaw);
+    view.orbit.settings().pitch = flags.real("pitch", view.orbit.settings().pitch);
+    view.orbit.settings().distance = flags.real("radius", view.orbit.settings().distance, 0.5f, 200.0f);
     // Drag-to-orbit lives on the gldxwin input surface now: no GLFW
     // callbacks, no user-pointer, no GLFW constants in demo code.
     window.OnCursor([&view](gldx::win::Window&, gldx::win::Vec2d pos) {
         if (!view.dragging) return;
-        view.yaw   -= static_cast<float>(pos.x - view.lastX) * 0.006f;
-        view.pitch  = std::min(std::max(view.pitch + static_cast<float>(pos.y - view.lastY) * 0.006f, -1.45f), 1.45f);
+        view.orbit.Drag(glm::vec2(static_cast<float>(pos.x - view.lastX),
+                                  static_cast<float>(pos.y - view.lastY)));
         view.lastX = pos.x; view.lastY = pos.y;
     });
     window.OnMouseButton([&view](gldx::win::Window& w, gldx::win::MouseButton button,
@@ -185,13 +192,11 @@ int main(int argc, char** argv) {
             }
         }
 
-        const glm::vec3 target(0.0f, 0.5f, 0.0f);
-        const float cp = std::cos(view.pitch);
-        const glm::vec3 eye(target.x + view.radius * cp * std::sin(view.yaw),
-                            target.y + view.radius * std::sin(view.pitch),
-                            target.z + view.radius * cp * std::cos(view.yaw));
-        camera.SetViewportAspect(info.fbHeight > 0 ? static_cast<float>(info.fbWidth) / info.fbHeight : 1.0f);
-        camera.LookAt(eye, target, glm::vec3(0, 1, 0));
+        const float aspect = info.fbHeight > 0
+                                 ? static_cast<float>(info.fbWidth) / static_cast<float>(info.fbHeight)
+                                 : 1.0f;
+        view.orbit.Apply(45.0f, aspect, 0.1f, 500.0f);
+        camera = view.orbit.camera();
 
         gldx::LightSetup setup;
         setup.sun.direction = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));

@@ -74,6 +74,32 @@ LegAngles LegAt(const WalkTuning& tune, float p) {
     return out;
 }
 
+/**
+ * 一条腿在蹲姿底座下的四个角（不带动画 → 这就是"静止蹲姿"="蹲走动画的一帧"）。
+ *
+ * 这个函数存在的唯一理由：`ProceduralCrouch` 与 `ProceduralWalk::crouch` 必须是
+ * **同一条曲线**。曾经它们各写一份常量，修好一边另一边照样错——蹲下与蹲走之间的
+ * 切换于是有 2.5 cm 的脚部跳变，看起来像在台阶上打滑。
+ *
+ * 角度都是"相对步态零位"的偏移：髋前屈（负）、膝屈（正）、踝抵消（负）。
+ * `knee = 2 * hip` 这条比例把踝关节放到髋正下方——大腿与小腿等长时两项相消，
+ * 于是骨盆蹲在脚上方而不是脚后方（推导见 ProceduralCrouch.cpp 的注释）。
+ */
+struct CrouchBase {
+    float hip = 0.0f;
+    float knee = 0.0f;
+    float ankle = 0.0f;
+};
+
+CrouchBase CrouchBaseFor(const WalkTuning& tune, float amount) {
+    CrouchBase base;
+    const float a = std::clamp(amount, 0.0f, 1.0f);
+    base.hip   = -a * tune.crouchHip;    // rad, 前屈（负）
+    base.knee  =  a * tune.crouchKnee;   // rad, = 2 * |hip|
+    base.ankle = -(base.knee + base.hip);   // 抵消小腿的世界倾角，脚掌才会平
+    return base;
+}
+
 } // namespace
 
 ProceduralWalk::ProceduralWalk(const Skeleton& skeleton, const RigProfile& rig,
@@ -82,7 +108,7 @@ ProceduralWalk::ProceduralWalk(const Skeleton& skeleton, const RigProfile& rig,
     : skeleton_(skeleton), rig_(rig), restWorld_(restWorld), tuning_(tuning),
       duration_(std::max(cycleSeconds, 1e-3f)) {}
 
-void ProceduralWalk::Sample(float t, std::vector<glm::mat4>& outPose) const {
+void ProceduralWalk::SampleAtPhase(float phase, std::vector<glm::mat4>& outPose) const {
     // 先整组填回 rest local。Pose 是不会累积的：每次重摆都从静止开始叠，否则误差
     // 会累成"越走越歪"，且 --freeze-at 不再可复现。
     ResetToRest(skeleton_, outPose);
@@ -93,52 +119,27 @@ void ProceduralWalk::Sample(float t, std::vector<glm::mat4>& outPose) const {
 
     const WalkTuning& tune = tuning_;
 
-    // 蹲行：把"弯多少"折进关节角，而不是另写一条曲线。膝盖常态屈曲 + 髋部前屈，
-    // 骨盆高度交给调用方的地面接触去解（手写一个下沉量会跟腿部改动打架）。
-    // Knee folds BACK (negative), hip flexes FORWARD (positive) - the same opposite-sign
-    // rule as ProceduralCrouch. They used to be both positive here, which bends the
-    // whole leg one way: the shin swings forward past the thigh, the foot ends up in
-    // front of the body and the ground solve chases it. Measured on crouchwalk: the
-    // pelvis sat 0.613 m ahead of the feet, against 0.117 m for the stationary crouch.
-    // Equal magnitudes so the shin stays vertical and the knee ends up over the foot -
-    // the same pairing ProceduralCrouch uses. They were 0.5 / 0.9, which is not the
-    // "knee above foot" ratio and made the crouch-walk read as an ordinary walk with
-    // slightly bent legs.
-    const float crouchKnee = -tune.crouch * 0.85f;  // rad
-    const float crouchHip  = tune.crouch * 0.85f;   // rad, 髋前屈
-    const float swingScale = 1.0f - 0.45f * tune.crouch;   // 蹲着走步幅自然变小
-
-    // t 折进 0..1。Looping() 为 true，所以这里做取模而不是钳制。
+    // ---- 蹲行 = 蹲姿底座 + 步态 ----
     //
-    // 先在**时间域**取模、再除以 duration，而不是先除再 floor：两者在数学上等价，
-    // 但在浮点里不等价——`(t+dur)/dur - floor(...)` 与 `t/dur - floor(...)` 会因为
-    // 中间某一步的舍入差出一个 ULP，于是"t 与 t+Duration 给出同一姿态"这条循环语义
-    // 在个别 t 上不成立。这个等式是状态机做相位比较与回归取证时的前提，不能是近似的。
-    float folded = (duration_ > 0.0f) ? std::fmod(t, duration_) : 0.0f;
-    if (folded < 0.0f) folded += duration_;         // t 可能为负
-    float phase = (duration_ > 0.0f) ? (folded / duration_) : 0.0f;
+    // 底座是一条**纯函数**（CrouchBaseFor），调用方可以把相位固定在 0.25 用它画
+    // "静止蹲姿"——`ProceduralCrouch` 就是这么做的。两者共用同一条曲线是刻意的：
+    // 蹲下与蹲走之间切换时不该有半帧的跳变。
+    const CrouchBase crouch = CrouchBaseFor(tune, tune.crouch);
+    // 步态幅度随蹲深收窄：蹲着迈不了大步。`StrideScale()` 把同一个比例报给调用方，
+    // 让它同步缩地面滚动，否则脚会滑。
+    const float gait = 1.0f - 0.45f * tune.crouch;
 
     const LegAngles left = LegAt(tune, phase);
     const LegAngles right = LegAt(tune, phase < 0.5f ? phase + 0.5f : phase - 0.5f);
+    // 后半周期抬得更高：脚要越过另一条腿，而蹲姿下踝关节在髋正下方，间隙只剩那点。
+    const float swingLift[2] = {1.0f, 1.0f + 0.55f * tune.crouch};
 
-    // 躯干即使腿不动也稍微前倾：远看时"在走路"读到的是躯干，脚只有几个像素。
-    rotate(rig_.spine, rig_.side, tune.lean + crouchHip * 0.5f);
-    rotate(rig_.chest, rig_.side, tune.lean * 0.5f + crouchHip * 0.25f);
-
-    // Lower the pelvis. Same reason as ProceduralCrouch: folding the knee does not make
-    // the character shorter, it swings the shin out; the ground solve then re-pins the
-    // lowest point and the body stays at standing height. Measured before this: the
-    // crouch-walk head sat at 1.335 m against 1.354 m for idle, i.e. it did not crouch.
-    if (tune.crouch > 0.0f) {
-        const std::size_t hips = static_cast<std::size_t>(rig_.hips);
-        const glm::mat4 parentWorld = (skeleton_.bone(static_cast<int>(hips))
-                                       && skeleton_.bone(static_cast<int>(hips))->parent >= 0)
-            ? skeleton_.RestWorld(skeleton_.bone(static_cast<int>(hips))->parent)
-            : glm::mat4(1.0f);
-        const glm::mat3 parentInv = glm::mat3(glm::inverse(parentWorld));
-        outPose[hips][3] += glm::vec4(
-            parentInv * (-rig_.up * tune.crouchDrop * tune.crouch), 0.0f);
-    }
+    // 躯干前倾。绕 side 的**正**向是往前（与腿相反：腿朝下，躯干朝上）。蹲得越深
+    // 上身前倾越多，头再反向抬回来，眼睛才看着前方而不是看着地面。
+    const float leanIn = -crouch.hip;    // 0..0.72 的正量
+    rotate(rig_.spine, rig_.side, tune.lean + leanIn * 0.45f);
+    rotate(rig_.chest, rig_.side, tune.lean * 0.5f + leanIn * 0.22f);
+    rotate(rig_.head, rig_.side, -leanIn * 0.55f);
 
     // 这具骨架的 bind pose 是 T-pose：手臂沿侧向轴笔直伸出，所以绕那根轴转等于
     // 让整条手臂绕自身长轴自转——看不见。先把手臂放成 A-pose 是这个动作的一部分
@@ -154,13 +155,16 @@ void ProceduralWalk::Sample(float t, std::vector<glm::mat4>& outPose) const {
 
     for (int s = 0; s < kRigSides; ++s) {
         const LegAngles& leg = (s == 0) ? left : right;
-        rotate(rig_.legUp[s], rig_.side, leg.hip * swingScale + crouchHip);
-        rotate(rig_.legLow[s], rig_.side, leg.knee + crouchKnee);
-        // Unwind the shin: the foot has to rotate against (hip + knee) to stay flat.
-        rotate(rig_.foot[s], rig_.side, leg.ankle - (crouchHip + crouchKnee) * 0.55f);
-        // 蹲下时趾关节要反过来背屈一点，否则脚尖戳进地面：脚掌被踝关节带平了，
-        // 但趾骨的静止姿态仍是平的。
-        rotate(rig_.toe[s], rig_.side, leg.toe - crouchKnee * 0.30f);
+        // 步态的摆动量按蹲深收窄；底座的静止角原样加上去。
+        const float lift = swingLift[s];
+        rotate(rig_.legUp[s], rig_.side, leg.hip * gait + crouch.hip);
+        rotate(rig_.legLow[s], rig_.side, leg.knee * gait * lift + crouch.knee);
+        // 踝：步态自己的踝角 + 抵消小腿世界倾角的那一项。倾角是"髋 + 膝"的签名和，
+        // 所以补的是 -(hip + knee) —— 少这一项时只有鞋跟着地，地面解算把整具角色
+        // 抬起来，蹲姿就永远蹲不下去（实测 0.24 m）。
+        rotate(rig_.foot[s], rig_.side, leg.ankle + crouch.ankle);
+        // 蹲着时趾骨背屈：鞋底前掌本来会压进地面。
+        rotate(rig_.toe[s], rig_.side, leg.toe - crouch.knee * 0.10f);
 
         // 对侧摆臂：同侧腿往后时手臂往前，正好相反。
         const float arm = -tune.armSwing * (leg.hip / std::max(tune.hipSwing, 1e-4f));
@@ -168,11 +172,13 @@ void ProceduralWalk::Sample(float t, std::vector<glm::mat4>& outPose) const {
         // 屈得更深——后摆时直、前面时弯，这才读得出"放松地走"。
         const float swingN = arm / std::max(tune.armSwing, 1e-4f);   // +1 后摆, -1 前摆
         const float elbow = -(tune.elbowBase + tune.elbowSwing * (0.5f - 0.5f * swingN));
-        rotate(rig_.armUp[s], rig_.side, arm);
+        // 蹲着时手臂前伸一点、肘更弯：垂手会扫到裙摆。
+        const float armReach = -0.30f * tune.crouch;
+        rotate(rig_.armUp[s], rig_.side, arm + armReach);
         // 肩胛不是刚性支架：它跟着手臂前后动。三度就够让轮廓不再读成"方块上装着
         // 一条铰接的棍子"。
         rotate(rig_.clavicle[s], rig_.up, -tune.clavicleRoll * swingN);
-        rotate(rig_.armLow[s], rig_.side, elbow);
+        rotate(rig_.armLow[s], rig_.side, elbow - 0.30f * tune.crouch);
         // ……再加一个恒定的前臂外展。这是把手拿出裙摆的那一环：肱骨没法在不把姿态
         // 摆得又僵又 A 形的前提下离躯干够远，所以间隙在前臂这一级换。
         rotate(rig_.armLow[s], rig_.up, tune.armOut * (s == 0 ? 1.0f : -1.0f));
@@ -183,6 +189,19 @@ void ProceduralWalk::Sample(float t, std::vector<glm::mat4>& outPose) const {
         const float deviate = tune.wristDeviate * swingN * (s == 0 ? 1.0f : -1.0f);
         rotate(rig_.hand[s], rig_.up, deviate);
     }
+}
+
+void ProceduralWalk::Sample(float t, std::vector<glm::mat4>& outPose) const {
+    // t 折进 0..1。Looping() 为 true，所以这里做取模而不是钳制。
+    //
+    // 先在**时间域**取模、再除以 duration，而不是先除再 floor：两者在数学上等价，
+    // 但在浮点里不等价——`(t+dur)/dur - floor(...)` 与 `t/dur - floor(...)` 会因为
+    // 中间某一步的舍入差出一个 ULP，于是"t 与 t+Duration 给出同一姿态"这条循环语义
+    // 在个别 t 上不成立。这个等式是状态机做相位比较与回归取证时的前提，不能是近似的。
+    float folded = (duration_ > 0.0f) ? std::fmod(t, duration_) : 0.0f;
+    if (folded < 0.0f) folded += duration_;         // t 可能为负
+    const float phase = (duration_ > 0.0f) ? (folded / duration_) : 0.0f;
+    SampleAtPhase(phase, outPose);
 }
 
 } // namespace gldx

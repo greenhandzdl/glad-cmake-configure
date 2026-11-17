@@ -106,32 +106,44 @@ void ProceduralAttack::Sample(float t, std::vector<glm::mat4>& outPose) const {
     }
 
     // ---- 右臂（持械手）----
-    // 先下放到 A-pose 基准，这样"挥"才是前后方向而不是绕自身长轴自转。
+    //
+    // 这具骨架的手臂只有 4 根骨（锁骨/上臂/前臂/手），所以"挥剑"只能靠两连杆的
+    // 胳膊演。关键在于**顺序**与**轴**：
+    //
+    //   1. 先把手臂从 T-pose 放下来到 A-pose（armDown）。这是常驻基准。
+    //   2. 抬（绕 FORWARD 轴）：把上臂从斜下抬到侧上方。**先做这一步**——手臂还
+    //      垂着的时候绕竖直轴转，等于让它绕自身长轴自旋，看起来完全没动。
+    //   3. 扫（绕 UP 轴）：在抬起来的高度上做横向圆弧，这才是"挥"。
+    //   4. 屈肘/扣腕：把"剑"收到肩后（蓄力）或甩到身前（挥出）。
+    //
+    // 之前的版本把 2/3 写反了（先绕 up 扫、再抬很少），实测手腕相对肩的矢量在
+    // 整段里只动了 0.3 m（trace 的 handLen 列），画面就是一具站着的人。
+    const float armRaised = (drive < 0.0f) ? tune.windupArmUp * (-drive)
+                                           : tune.swingArmUp * drive;
+    const float armSweep  = (drive < 0.0f) ? tune.windupArmBack * (-drive)
+                                           : tune.swingArmBack * drive;
+    const float elbow     = (drive < 0.0f) ? tune.windupElbow * (-drive)
+                                           : tune.swingElbow * drive;
+    const float wrist     = (drive < 0.0f) ? 0.0f : tune.swingWrist * drive;
+
     rotate(rig_.armUp[kRigRight], rig_.forward, +tune.armDown);
-
-    // 上臂：蓄力时向后上方拉，挥出时向前下方划过。
-    // drive < 0 取 windup 的角，drive > 0 取 swing 的角，两者在 drive=0 处自然
-    // 都退回到 A-pose 基准，所以段与段之间不会跳。
-    const float armBack = (drive < 0.0f) ? tune.windupArmBack * (-drive)
-                                         : tune.swingArmBack * drive;
-    const float armUp = (drive < 0.0f) ? tune.windupArmUp * (-drive) : 0.0f;
-    const float elbow = (drive < 0.0f) ? tune.windupElbow * (-drive)
-                                       : tune.swingElbow * drive;
-
-    // 绕侧向轴的**正**向 = 向后，所以 armBack 直接用（正值=向后拉）。
-    rotate(rig_.armUp[kRigRight], rig_.side, armBack);
-    // 抬起到头侧。绕前向轴的负向是"往外/往上"抬起。
-    rotate(rig_.armUp[kRigRight], rig_.forward, -armUp);
+    // 抬：绕**竖直轴**。上臂的静止方向就是 +side（T-pose 时手臂指向侧面），所以
+    // 只有绕竖直轴转才会把它从"侧平举"抬到"上举"——绕 forward 转等于让它绕自身
+    // 长轴自旋（实测：armDown 之后只剩 0.13 rad 的投影，画面上就是手臂纹丝不动，
+    // 而角度明明写了 1.25 rad）。
+    rotate(rig_.armUp[kRigRight], rig_.up, armRaised);
+    // 扫：绕**竖直轴的前后分量**已经用掉了，横扫改成绕 FORWARD：手臂举起来之后
+    // 绕前向轴转就是把它从身前扫到身后（或反过来），这正是"挥"的那一维。
+    rotate(rig_.armUp[kRigRight], rig_.forward, -armSweep * 0.5f);
     rotate(rig_.armLow[kRigRight], rig_.side, -elbow);
-    // 挥出时手腕略压，让"武器"跟着走。
-    rotate(rig_.hand[kRigRight], rig_.side, -elbow * 0.35f);
+    rotate(rig_.hand[kRigRight], rig_.side, wrist);
 
     // ---- 左臂（配平）----
-    // 挥砍时左臂朝相反方向摆，这是让动作读起来"用了全身"的关键；只在右臂动
-    // 的话看起来像甩了一下手。
+    // 挥砍时左臂朝相反方向展开，这是让动作读起来"用了全身"的关键。
     rotate(rig_.armUp[kRigLeft], rig_.forward, -tune.armDown);
-    rotate(rig_.armUp[kRigLeft], rig_.side, -tune.offArmSwing * drive);
-    rotate(rig_.armLow[kRigLeft], rig_.side, -(0.55f + 0.35f * std::abs(drive)));
+    rotate(rig_.armUp[kRigLeft], rig_.forward, tune.offArmLift * std::abs(drive));
+    rotate(rig_.armUp[kRigLeft], rig_.up, tune.offArmSwing * drive);
+    rotate(rig_.armLow[kRigLeft], rig_.side, -(0.55f + 0.30f * std::abs(drive)));
     rotate(rig_.armLow[kRigLeft], rig_.up, 0.12f);
     rotate(rig_.hand[kRigLeft], rig_.side, -0.15f);
 }

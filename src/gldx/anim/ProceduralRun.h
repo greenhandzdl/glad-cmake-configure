@@ -19,10 +19,17 @@
  * ---- 一个必须承认的近似 ----
  *
  * 腾空期间**整具身体应当离开地面**，而腾空高度在这里没有被驱动：本类只负责
- * 姿态（腿的收放）。腾空高度要么由调用方从骨盆轨迹反解，要么（更常见）用
- * `AirborneWeightAt(t)` 作为掩码，把 `GroundContact` 的结果按权重衰减掉——
- * 跑步的腾空只有 0.1 秒左右，人的眼睛读的是"脚离地了没有"，不是一个精确的
- * 抛物线。这与跳跃不同：跳跃是一整段明确的腾空，那里值得走真抛物线。
+ * 姿态（腿的收放）。`AirborneWeightAt(t)` 是给调用方的连续权重，用它可以做两件事：
+ *
+ *  1. 把 `GroundContact` 的抬升按 `1 - weight` 衰减（权重为 1 时完全不贴地）；
+ *  2. **往上加腾空高度**。这一步很容易漏：只衰减不加，角色的脚在腾空帧会被解算
+ *     钉在地板上，人却在空中折腿——看着像悬着一根看不见的绳子。正确写法是
+ *     `高度 = (1 - weight) * 解算值 + weight * (站立高度 + 腾空高度)`，
+ *     与跳跃用的是同一个公式（见 demo 的 VerticalShiftFor）。
+ *
+ * 权重的形状是有讲究的：**值和斜率在腾空边界都为 0**（这里用 `sin²` 而不是
+ * `sin`）。它乘的是地面解算的抬升量，所以斜率不为 0 意味着腾空开始那一帧骨盆被
+ * 硬拽走几厘米——实测跑步起跳帧骨盆突变 5.9 cm，看起来像脚被地板弹了一下。
  */
 
 #ifndef GLDX_ANIM_PROCEDURALRUN_H
@@ -71,6 +78,11 @@ struct RunTuning {
 
     // 手臂下放的基准角：跑步时上臂本来就贴着身体，不需要走路那么多 A-pose。
     float armDown = 0.75f;
+
+    // 腾空高度（米）。这是**世界单位**，不在姿态里用——调用方拿 `AirborneWeightAt`
+    // 乘在垂直位移上（见 ProceduralRun.h 文件头）。12 cm 是慢跑的量级：抬得再高
+    // 就成跨栏了，而 0 会得到"两只脚在地上跳"。
+    float airbornePeak = 0.12f;
 };
 
 /**
@@ -102,6 +114,14 @@ public:
      * 各一段），一个标量相位说不清。
      */
     [[nodiscard]] float AirborneWeightAt(float t) const noexcept;
+
+    /**
+     * 时刻 t 的腾空高度（米），已经乘过权重。调用方把 `站立高度 + 它` 当作这一帧的
+     * 整具角色高度，其余部分与跳跃完全一致（见 demo 的 VerticalShiftFor）。
+     */
+    [[nodiscard]] float airborneRiseAt(float t) const noexcept {
+        return tuning_.airbornePeak * AirborneWeightAt(t);
+    }
 
     [[nodiscard]] const RunTuning& tuning() const noexcept { return tuning_; }
 

@@ -1,23 +1,30 @@
 /**
  * @file ProceduralCrouch.h
- * @brief 蹲下：静止的蹲伏姿态，带一点呼吸，不是"蹲着走"。
+ * @brief 静止蹲姿 = 蹲走**循环里的某一帧**，不是另一套曲线。
  *
- * ---- 为什么蹲着走不在这里 ----
+ * ---- 这条关系是硬要求，不是风格偏好 ----
  *
- * "蹲着走路"是 `ProceduralWalk` 的一个参数（`WalkTuning::crouch`），因为它用的
- * 是同一条步态曲线，只是步幅收窄、膝盖常态屈曲。把它做成这里的第二个动作，
- * 就得到两套会各自演化的腿部曲线。
+ * 上一版里 `ProceduralCrouch` 与 `ProceduralWalk::crouch` 各写一份常量。结果两边
+ * 慢慢分叉：蹲下的头高 1.097 m、蹲走 1.112 m，脚部位置差 2.5 cm——按 `4` 切到蹲走
+ * 时脚在地上蹭一下，反过来像踩空。任何"两个动作看起来应该连续"的地方，两套常量
+ * 迟早会给出两个答案。
  *
- * 这里做的是**另一种东西**：原地蹲伏。它没有周期性的迈步，姿态基本是静态的，
- * 但完全静止会读作"暂停中的模型"而不是"蹲着的人"。所以加了一点呼吸——胸腔
- * 起伏与极缓的重心摆动，幅度小到看不出是动画，但去掉它整个画面就死了。
+ * 所以本类**不再自己摆腿**：它持有一个 `WalkTuning{crouch = 1}` 的步态曲线，把相位
+ * 钉在 `kCrouchPhase`（0.25，双支撑相的中点：两条腿都在地上，是蹲姿最稳的一帧），
+ * 然后只叠一层呼吸。于是"蹲下 = 蹲走的某帧"这条性质由构造保证，可以逐字节验证。
  *
- * ---- 骨盆高度从哪来 ----
+ * ---- 为什么相位偏偏是 0.25 ----
  *
- * 与行走一样**不在这里写**：本类只负责关节角（膝盖弯多少、髋屈多少），
- * 骨盆实际降到多低由调用方从地面接触反解（`GroundContact::Solve`）。蹲姿的
- * 膝盖弯得很深，如果这里再写一个"骨盆下沉 0.35 m"，两处会打架——而打架的结果
- * 是脚陷进地面或者悬空，且没有任何报错。
+ * 0.0 也位于双支撑相（两条腿都着地），但那里的腿是一条前一条后——蹲着摆成那样看起来
+ * 像"要站起来"；0.25 处两条大腿对称、膝盖都朝前，才是参考图里那种"蹲着等"的样子。
+ * 而重心稳定靠的不是这个数：它靠 `knee = 2*hip` 那条比例让踝关节落在髋正下方（推导见
+ * ProceduralCrouch.cpp），以及地面解算每帧把最低鞋底钉回地板——两条腿本来就都在地上，
+ * 所以这个动作里根本没有"重心飘"的自由度。
+ *
+ * ---- 呼吸只动上身 ----
+ *
+ * 胸腔起伏、重心微摆、头轻微转动。**腿一动不动**：腿一动脚就会离开地面，而蹲下的脚
+ * 一旦离开地面，地面解算就会把整具角色抬起来——那正是"重心不稳"的观感来源。
  */
 
 #ifndef GLDX_ANIM_PROCEDURALCROUCH_H
@@ -38,36 +45,24 @@ struct CrouchTuning {
     // 它是**姿态**的深度，不是骨盆高度——后者由地面解算给出。
     float depth = 1.0f;
 
-    float kneeBend = 0.62f;   // rad，与 hipBend 相等 => 小腿垂直、膝盖在脚正上方（参考蹲姿）
-    float hipBend  = 0.62f;   // rad，髋前屈（与 kneeBend 相等时小腿垂直）
-    float ankleBend = 0.00f;  // rad，小腿垂直时脚掌本来就是平的
+    // 相位钉在步态循环的哪里。
+    //
+    // **必须是双支撑相（0 或 0.5），不能是中点 0.25**：走路的两条腿永远相差半个
+    // 周期，所以"两腿完全对称"的那一帧并不存在；能同时踩住地的只有双支撑相。
+    // 实测 0.25（一条腿在支撑中期、另一条在摆动中期）会让一条腿在后侧抬起来——
+    // 那是一个"单脚站着、另一只脚悬空"的姿态，重心根本不在支撑面里，看起来像
+    // 要倒。0 处左腿脚跟着地、右腿支撑末期，两只脚都实打实踩在地上。
+    //
+    // 0 与 0.5 是镜像；取 0（左腿在前）与 demo 里 `--action crouchwalk` 的起点一致，
+    // 于是"按 3 与按 4 的第一帧"是同一个姿态。
+    float posePhase = 0.0f;
 
-    // 骨盆向前移动多少（骨骼空间单位）。**这是唯一能移动重心的东西**：本函数其余
-    // 全部是旋转，而旋转搬不动质心——屈髋只是转大腿，前倾只是绕一个本来就在脚后方
-    // 的关节转上半身，脊柱倾角加到 48° 头依然落在脚跟后面（截图就是这样：脚踩实了，
-    // 整个人往后倒）。真人蹲下是先把臀往后送、再把上身挪回脚上方，在刚性骨架里就是
-    // 骨盆的平移。
-    float forwardShift = 0.0f;
-
-    // 骨盆下沉多少（骨骼空间单位）。**屈膝本身不会让身体变矮**——它只是把腿折起来，
-    // 而地面解算随后把最低点重新钉回地板，于是身体高度不变、小腿向两边甩出去。实测：
-    // 屈膝 1.55 rad 时 hips 仍在 0.988 m（与 rest 一样），"蹲"根本没蹲下去。
-    float hipDrop = 25.0f;
-
-    // 上身：蹲伏时躯干前倾，头抬起来看向前方（蹲着盯地面不自然）。
-    float spineLean = 0.78f;  // rad，蹲下时躯干要明显前倾，否则读起来像往后坐
-    float headLift  = 0.30f;  // rad，头反向仰起
-
-    // 手臂：蹲伏时手臂自然垂在身前或抱住膝盖。这里选了"垂在身侧略向前"——
-    // 抱膝需要手指骨，而参考资产没有。
-    float armDown = 1.15f;    // rad，A-pose 下放的基准
-    float armForward = 0.30f; // rad，手臂略向前
-    float elbowBend = 0.65f;  // rad
-
-    // 呼吸。周期独立于蹲姿本身，所以它是一个常驻的轻微运动。
+    // 呼吸。周期独立于蹲姿本身，所以它是一个常驻的轻微运动。**只动上身**：
+    // 腿一动脚就离地，地面解算随后把整具角色抬起来，那才是"重心不稳"的来源。
     float breathSeconds = 3.2f;   // 一次呼吸
-    float breathSpine   = 0.020f; // rad，胸腔起伏的幅度
-    float breathSway    = 0.012f; // rad，极缓的左右重心摆动
+    float breathSpine   = 0.022f; // rad，胸腔起伏的幅度
+    float breathSway    = 0.010f; // rad，极缓的左右重心摆动
+    float breathHead    = 0.030f; // rad，头随呼吸轻轻抬落
 };
 
 /**
@@ -77,7 +72,8 @@ struct CrouchTuning {
 class ProceduralCrouch final : public AnimPoseSource {
 public:
     ProceduralCrouch(const Skeleton& skeleton, const RigProfile& rig,
-                     const std::vector<glm::mat4>& restWorld, const CrouchTuning& tuning);
+                     const std::vector<glm::mat4>& restWorld, const CrouchTuning& tuning,
+                     const WalkTuning& walkTuning);
 
     [[nodiscard]] const char* name() const noexcept override { return "crouch"; }
     [[nodiscard]] float Duration() const noexcept override { return tuning_.breathSeconds; }
@@ -89,6 +85,9 @@ public:
 
     void Sample(float t, std::vector<glm::mat4>& outPose) const override;
 
+    /** 本动作钉在蹲走循环的哪个相位（见 CrouchTuning::posePhase）。 */
+    [[nodiscard]] float PosePhase() const noexcept { return tuning_.posePhase; }
+
     [[nodiscard]] const CrouchTuning& tuning() const noexcept { return tuning_; }
 
 private:
@@ -96,6 +95,9 @@ private:
     const RigProfile&             rig_;
     const std::vector<glm::mat4>& restWorld_;
     CrouchTuning                  tuning_;
+    // 蹲走的曲线本身。持有它是本类的全部意义：腿的角度来自同一条曲线，而不是
+    // 第二份常量（见文件头）。
+    ProceduralWalk                pose_;
 };
 
 } // namespace gldx

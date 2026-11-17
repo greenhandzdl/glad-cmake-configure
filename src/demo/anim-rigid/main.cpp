@@ -203,7 +203,7 @@ namespace {
 // member of Character: the input callback records it into the View, the frame loop
 // turns it into a machine Request. Keeping it out of Character is what lets the
 // callback stay free of the animation machine.
-enum class Action { Idle, Walk, Run, Crouch, CrouchWalk, Attack, Jump };
+enum class Action { Idle, Walk, Run, Crouch, CrouchWalk, Attack, Jump, Sit, Swim };
 
 // ---------------------------------------------------------------------------
 // The demo's own state around one character: everything that is NOT the rig
@@ -221,6 +221,42 @@ struct Character {
     std::vector<glm::mat4> palette;   // what the vertex shader reads as uBones[]
     GaitTuning tune;
 
+    // The ground solve's lift for the *rest* pose, in metres. This is the height at
+    // which an upright, straight-legged character stands on this floor, and it is not
+    // zero (measured: +11.6 mm) because the contact points are the sole plane, which
+    // sits a little below the rig origin. Flight needs it: while both feet are off the
+    // floor there is nothing to solve against, so a jump's root motion has to be
+    // measured from this height rather than from "whatever the solve last said". The
+    // jump's take-off and touch-down frames are authored with straight legs - i.e.
+    // exactly the rest pose - so the airborne branch and the grounded branch meet at
+    // this number with no step. Measured at load, once.
+    float restLift = 0.0f;
+    // Lowest bind-pose vertex measured along `rig.up` (rig units). The sole plane sits
+    // this far below the bone positions; GroundContact needs it, and so does the
+    // floor-violation check (see the pose table).
+    float bindLowestOnUp = 0.0f;
+    // Hip height a seated pose should sit at, in METRES, and the rise that gets it there
+    // from the standing height. Sitting is not ground-solved (see GroundWeightFor): its
+    // height is authored, because the contact that matters is the seat and the engine's
+    // solve only knows the soles. Keeping the number here (metres, world) avoids the
+    // unit trap that a pelvis translation inside a pose source would hit - poses are in
+    // RIG units (x0.01 on this asset), so 0.87 m written there is 8.7 mm.
+    // ABSOLUTE world height of the hips while seated, in metres.
+    //
+    // This is NOT "the hip height above the floor" - it goes through
+    // `sitRise = seatedHip - (hips.y + restLift)`, and for a non-solved pose the final
+    // shift is `restLift + sitRise = seatedHip - hips.y`. `hips.y` is the REST hip
+    // height (~0.99 m here), so any value below it pushes the whole character UNDER
+    // the floor - which is exactly what 0.19/0.22/0.51 did (measured shift -0.76 m,
+    // head at -0.60 m). Sitting needs `seatedHip` slightly ABOVE the standing hip
+    // height so the pelvis drops by the right amount and no more.
+    float seatedHip  = 0.295f;
+    float sitRise    = 0.0f;
+    // Bind-space corner box of the pelvis, measured once at load. The SEATED solve uses
+    // it (see GroundContact::AddBodyContact): sitting puts the weight on the seat, and
+    // the four sole points cannot see the seat.
+
+
     // The action layer. `walk` is the only source this demo holds, and the machine
     // owns neither it nor the rig - both live right above, so destroying the
     // character in the wrong order is the only way to dangle (see AnimStateMachine.h).
@@ -236,6 +272,8 @@ struct Character {
     std::unique_ptr<gldx::ProceduralWalk>   crouchWalkSource;
     std::unique_ptr<gldx::ProceduralAttack> attackSource;
     std::unique_ptr<gldx::ProceduralJump>   jumpSource;
+    std::unique_ptr<gldx::ProceduralSit>    sitSource;
+    std::unique_ptr<gldx::ProceduralSwim>   swimSource;
 
     // Which one-shot action is still running, if any, and whether it has ended.
     //
@@ -252,6 +290,25 @@ struct Character {
         else if (a == Action::Jump) src = jumpSource.get();
         return src != nullptr && src->FinishedAt(t);
     }
+    // Which AnimPoseSource backs an action, for the machine. Crouch-walking and the
+    // static crouch both go through the machine too; the two phase-driven gaits are
+    // reported separately because the machine cannot know their cycles (see the frame
+    // loop: it samples them at machine time, which is exactly a cycle phase).
+    [[nodiscard]] const gldx::AnimPoseSource* sourceFor(Action a) const {
+        switch (a) {
+            case Action::Idle:       return idleSource.get();
+            case Action::Walk:       return walkSource.get();
+            case Action::Run:        return runSource.get();
+            case Action::Crouch:     return crouchSource.get();
+            case Action::CrouchWalk: return crouchWalkSource.get();
+            case Action::Attack:     return attackSource.get();
+            case Action::Jump:       return jumpSource.get();
+            case Action::Sit:        return sitSource.get();
+            case Action::Swim:       return swimSource.get();
+        }
+        return nullptr;
+    }
+
     gldx::AnimStateMachine               machine;
 
 
@@ -309,16 +366,126 @@ struct Character {
     }
 };
 
+// ---------------------------------------------------------------------------
+// The one place that decides where the character sits vertically, for one action at
+// one time. Both the frame loop and the report tables call these, so the numbers the
+// panel prints are the numbers the picture is made of. That is not a nicety: the
+// report used to measure the pose *before* the ground solve, and it claimed a crouch
+// 35 cm lower than the one on screen (0.999 m reported, 1.208 m rendered), which sent
+// the previous tuning round chasing a number that no pixel could ever agree with.
+// ---------------------------------------------------------------------------
+
+// How much ground contact to apply: 1 = fully grounded, 0 = fully airborne.
+//
+// A jump is a boolean because it has one clearly defined flight arc; a run is a
+// continuous weight because it has two short flights per cycle and a boolean would
+// snap the pelvis on the boundary frame.
+float GroundWeightFor(const Character& c, Action a, float t) {
+    switch (a) {
+        case Action::Jump:
+            return (c.jumpSource && !c.jumpSource->GroundedAt(t)) ? 0.0f : 1.0f;
+        case Action::Run:
+            return c.runSource ? 1.0f - c.runSource->AirborneWeightAt(t) : 1.0f;
+        case Action::Swim:
+            return 0.0f;   // feet do not touch the floor; the water rise owns the height
+        case Action::Sit:
+            // The support is the SEAT, not the soles, so the sole solve has nothing to
+            // say. The height is authored (see Character::seatedHip) and applied through
+            // the same channel as a jump's arc.
+            return 0.0f;
+        default:
+            return 1.0f;   // walk / idle / crouch / crouchwalk / attack
+    }
+}
+
+// Metres to add to every palette translation. `solvedLift` is `ground.Solve()`'s
+// answer for the pose the caller just built.
+//
+// While grounded the solve IS the answer: it puts the lowest sole on the floor and
+// the pelvis height falls out of the leg angles. While airborne it means nothing -
+// the soles are not supposed to be on the floor - so the flight height is measured
+// from `restLift` (where straight legs stand) plus the source's own arc. The jump's
+// take-off and touch-down frames are authored with straight legs, i.e. the rest pose,
+// so at those two instants `restLift + 0 == solvedLift` and the branches meet with no
+// visible step; that is the whole reason the arc is applied here and not inside the
+// pose (the pose is in rig units, the arc is in metres).
+float VerticalShiftFor(const Character& c, Action a, float t, float solvedLift) {
+    const float weight = GroundWeightFor(c, a, t);
+    float rise = 0.0f;
+    if (a == Action::Jump && c.jumpSource) {
+        rise = c.jumpSource->AirborneRiseAt(t);
+    } else if (a == Action::Sit) {
+        rise = c.sitRise;
+    } else if (a == Action::Swim && c.swimSource) {
+        // A swimmer does not stand on the floor: the whole body floats at the water
+        // line. Applied through the same channel as a jump's arc, so there is exactly
+        // one place that decides "how high is this character right now".
+        rise = c.swimSource->waterRise();
+    } else if (a == Action::Run && c.runSource) {
+        // A run's flight is short, so its height is scaled by the same continuous
+        // weight that gates the solve - with the weight's slope zero at the boundary,
+        // so the pelvis never jumps. Without this term the run's feet stay pinned to
+        // the floor while the legs fold, i.e. "running on a treadmill that follows you".
+        rise = c.runSource->airborneRiseAt(t);
+    }
+    const float flight = c.restLift + rise;
+    // Written as a weighted sum so the walk path stays bit-identical: weight is
+    // exactly 1 there, and 1*x + 0*y is x in IEEE arithmetic.
+    return weight * solvedLift + (1.0f - weight) * flight;
+}
+
 // Camera + the runtime state the pass, the HUD and the input callbacks share.
 struct View {
-    float yaw      = 0.62f;   // radians around the character, 0 = straight ahead (+Z)
-    float pitch    = 0.17f;
-    float distance = 3.6f;
+    // Orbit state + input conversion live in the engine now (gldx::OrbitCamera):
+    // 19 demos used to spell this out, with three different drag sensitivities and
+    // two different pitch clamp ranges. The `target` is still driven here because
+    // `--target-y` belongs to this demo's framing, not to the camera maths.
+    gldx::OrbitCamera orbit;
+    // This demo's framing, spelled out rather than inherited: the engine defaults
+    // (yaw .7 / pitch .3 / distance 8) are a generic three-quarter view, and taking
+    // them silently moved every frozen frame this demo is verified against.
+    View() {
+        orbit.settings().yaw = 0.62f;
+        orbit.settings().pitch = 0.17f;
+        orbit.settings().distance = 3.6f;
+        orbit.settings().target = glm::vec3(0.0f, 0.92f, 0.0f);   // sternum height
+        orbit.settings().minDistance = 0.8f;
+        orbit.settings().maxDistance = 30.0f;
+    }
+
     float fov      = 42.0f;
     float speed    = 1.30f;   // metres per second of floor travel
     // What the number keys asked for. Applied to the machine inside the frame loop,
     // never from a callback (see the OnKey comment).
     Action requestAction = Action::Walk;
+    // When that request was made, in animation seconds, and how far into the clip we
+    // are. One-shot actions (attack/jump) auto-return to idle, and that decision has
+    // to be measured from the REQUEST - see the frame loop.
+    float actionStartedAt = 0.0f;
+    float actionElapsed   = 0.0f;
+    unsigned requestSerial = 0;      // see Request()
+    unsigned lastSentSerial = 0;     // what the frame loop has already forwarded
+    // One dt per frame for the state machine, and the "have we Set() it yet" flag.
+    float lastAnimSeconds = 0.0f;
+    bool  machineInitialised = false;
+
+    // Every action switch goes through here (number keys and --action alike), so the
+    // "when did this start" bookkeeping cannot be forgotten at one of the two call
+    // sites - which is exactly how the number keys came to do nothing for attack/jump.
+    // `now` is passed in rather than read from `clock`: the key callback fires
+    // between frames, and `clock` is only refreshed inside the frame loop - so a
+    // request made from a callback would stamp the PREVIOUS frame's time (and at
+    // startup, zero). One frame of error is invisible; inheriting a stale or zero
+    // timestamp is not, because the one-shot auto-return compares against it.
+    void Request(Action a, double now) {
+        requestAction = a;
+        actionStartedAt = static_cast<float>(now);
+        actionElapsed = 0.0f;
+        // Bumped on every explicit request. The frame loop compares it with the value it
+        // last forwarded to the machine, so a key press reaches the machine exactly once
+        // even though the request state persists for the whole action.
+        ++requestSerial;
+    }
 
     float freezeAt = 0.0f;    // > 0 pins the clock, for reproducible snapshots
     double clock   = 0.0;     // animation seconds (already clamped by freezeAt)
@@ -331,10 +498,12 @@ struct View {
     bool normalMap = true;    // ...including the normal map (else geometry normals only)
     bool wireframe = false;
     bool showHud    = true;
-    bool report     = false;  // dump the gait's joint angles and sole heights once
+    bool report     = false;  // dump the gait's joint angles and the per-action table once
+    bool trace      = false;  // dump a 16 row time trace of the selected action once
 
-    float groundLift = 0.0f;   // metres the pelvis was moved to keep a sole on the floor
-    float soleHeight = 0.0f;   // metres, lowest sole after the solve (0 = touching)
+    float groundLift = 0.0f;   // metres the whole character was shifted this frame
+    float airRise    = 0.0f;   // metres of that shift that came from a jump arc
+    float soleHeight = 0.0f;   // metres, lowest sole after the shift (0 = touching)
 
     bool dragging = false;
     double lastX = 0.0;
@@ -546,6 +715,8 @@ public:
                 case Action::CrouchWalk: actionName = "crouchwalk"; break;
                 case Action::Attack: actionName = "attack"; break;
                 case Action::Jump:   actionName = "jump";   break;
+                case Action::Sit:    actionName = "sit";    break;
+                case Action::Swim:   actionName = "swim";   break;
             }
             std::snprintf(line, sizeof(line), "%s %s | gait phase %.2f cycle | %.2f m/s",
                           actionName, view_.walk ? "on " : "off",
@@ -562,9 +733,22 @@ public:
                           static_cast<int>(character_.palette.size()), gldx::kMaxBonePalette,
                           static_cast<double>(model.bindDeviation()), view_.drawCalls);
             hud.AddLine(line, gldx::Hud::kDim);
-            std::snprintf(line, sizeof(line), "ground: pelvis %+6.1f mm | lowest sole %+6.1f mm",
-                          static_cast<double>(view_.groundLift * 1000.0f),
-                          static_cast<double>(view_.soleHeight * 1000.0f));
+            // The two numbers that decide whether a frame reads as "standing" or
+            // "in the air": the vertical shift applied to the whole character, and
+            // where its lowest sole ended up. `air` names the part of the shift that
+            // came from a jump arc rather than from the ground solve, so a jump whose
+            // arc is not reaching the picture is caught by reading one line.
+            if (view_.airRise > 0.0f) {
+                std::snprintf(line, sizeof(line),
+                              "ground: shift %+6.1f mm (air %+6.0f mm) | lowest sole %+6.1f mm",
+                              static_cast<double>(view_.groundLift * 1000.0f),
+                              static_cast<double>(view_.airRise * 1000.0f),
+                              static_cast<double>(view_.soleHeight * 1000.0f));
+            } else {
+                std::snprintf(line, sizeof(line), "ground: shift %+6.1f mm | lowest sole %+6.1f mm",
+                              static_cast<double>(view_.groundLift * 1000.0f),
+                              static_cast<double>(view_.soleHeight * 1000.0f));
+            }
             hud.AddLine(line, gldx::Hud::kDim);
             // The maps come out of the FBX itself, so this line is the claim
             // "textured", not "a texture file was found next to the model".
@@ -580,7 +764,7 @@ public:
 
         hud.BeginSection(gldx::Hud::Anchor::BottomLeft, 14.0f);
         hud.AddLines({
-            "0 idle  1 walk  2 run  3 crouch  4 crouchwalk  5 attack  6 jump",
+            "0 idle  1 walk  2 run  3 crouch  4 crouchwalk  5 attack  6 jump  7 sit  8 swim",
             "W walk on/off   G floor   F wireframe   H hud",
             "drag orbit   wheel zoom   Esc quit",
         }, gldx::Hud::kDim);
@@ -609,7 +793,7 @@ gldx::Texture2DDesc MakeSolidDesc(std::uint8_t r = 255, std::uint8_t g = 255,
 // unit scale, the orientation, the rest-world cache and the palette names, and
 // owns the 1x1 stand-in maps. What is left is this demo's own bookkeeping.
 void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
-                     bool reportGait) {
+                     bool reportGait, const char* traceAction) {
     // Classification has to happen BEFORE the upload, and it is the reason this
     // function is shaped the way it is. RiggedModel refuses to own the exporter
     // name table (two tables that disagree bind a rig halfway - see its file
@@ -631,12 +815,12 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // a reference to a moved-from Skeleton, whose bone list is empty while the
     // RigProfile still holds valid-*looking* indices, so the very next RestWorld()
     // reads off the end. That is the crash this comment exists to prevent.)
-    float bindLowestOnUp = 0.0f;
     bool firstVertex = true;
     for (const gldx::SkinnedMeshData& mesh : data.meshes) {
         for (const gldx::SkinnedVertex& v : mesh.vertices) {
             const float d = glm::dot(v.position, character.rig.up);
-            bindLowestOnUp = firstVertex ? d : std::min(bindLowestOnUp, d);
+            character.bindLowestOnUp = firstVertex ? d
+                                                    : std::min(character.bindLowestOnUp, d);
             firstVertex = false;
         }
     }
@@ -657,11 +841,34 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // draw, but this is the one place that has a RigProfile to give it.
     character.model.SetOrientation(character.rig.side, character.rig.up, character.rig.forward);
 
+
     character.ground = gldx::GroundContact(
         skeleton, character.rig.up,
         {character.rig.foot[gldx::kRigLeft], character.rig.foot[gldx::kRigRight]},
         {character.rig.toe[gldx::kRigLeft], character.rig.toe[gldx::kRigRight]},
-        bindLowestOnUp);
+        character.bindLowestOnUp);
+    // NOTE: the pelvis contact is NOT added to `ground` (the stand/walk solve). It
+    // would be harmless there - a standing pelvis is 0.99 m up, far above the soles,
+    // so it never wins the min() - but keeping it out makes the walk path provably
+    // unchanged. Only the seated solve uses it (see ResetGroundFor below).
+
+    // Where straight legs stand. Measured once, through the same solve the frame loop
+    // uses, so the airborne branch and the grounded branch of VerticalShiftFor meet
+    // at the same height with no step on the take-off / touch-down frames.
+    {
+        std::vector<glm::mat4> restPose;
+        gldx::ResetToRest(skeleton, restPose);
+        std::vector<glm::mat4> restPalette;
+        skeleton.ComputeSkinning(restPose, model.Mat4(), restPalette);
+        const gldx::GroundContact::Solution s = character.ground.Solve(restPalette);
+        character.restLift = s.valid() ? s.lift : 0.0f;
+        // Where a standing pelvis actually ends up (rest pose + its lift), so the seated
+        // height below can be stated as an absolute number rather than a delta from a
+        // number nobody remembers.
+        const glm::vec4 hips = restPalette[(std::size_t)character.rig.hips] *
+                               glm::vec4(-glm::vec3(skeleton.bone(character.rig.hips)->inverseBind[3]), 1.0f);
+        character.sitRise = character.seatedHip - (hips.y + character.restLift);
+    }
 
     // One cycle = two steps, and one step lays down the horizontal distance the
     // foot covers between its extremes: 2 * legLength * sin(hipSwing). The floor
@@ -706,12 +913,22 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
             skeleton, character.rig, model.restWorld(), crouchTune,
             character.cycleSeconds(1.0f));
     }
+    // Crouch is crouch-WALK's own curve held at one phase (see ProceduralCrouch.h):
+    // the two actions cannot drift apart because there is only one curve. `report`
+    // prints the byte-level delta between them so "same pose" stays a measurement.
     character.crouchSource = std::make_unique<gldx::ProceduralCrouch>(
-        skeleton, character.rig, model.restWorld(), gldx::CrouchTuning{});
+        skeleton, character.rig, model.restWorld(), gldx::CrouchTuning{}, character.tune);
     character.attackSource = std::make_unique<gldx::ProceduralAttack>(
         skeleton, character.rig, model.restWorld(), gldx::AttackTuning{});
     character.jumpSource = std::make_unique<gldx::ProceduralJump>(
         skeleton, character.rig, model.restWorld(), gldx::JumpTuning{});
+    character.sitSource = std::make_unique<gldx::ProceduralSit>(
+        skeleton, character.rig, model.restWorld(), gldx::SitTuning{});
+    character.swimSource = std::make_unique<gldx::ProceduralSwim>(
+        skeleton, character.rig, model.restWorld(), gldx::SwimTuning{});
+    // Face down. The sign is the difference between freestyle and backstroke, and it
+    // now lives in the pose source so it shares a frame with the arm targets.
+    character.swimSource->SetProneAngle(1.55f);
     character.machine.Set(character.walkSource.get());
 
     // The number keys / --action pick a source directly instead of going through the
@@ -800,28 +1017,47 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
 
         // Per-action pose check. Numbers, not pictures: this is what lets a caller (or
         // an agent that cannot look at a screenshot) verify that an action is
-        // anatomically plausible. The three columns that matter:
-        //   pelvis  - how far the body sits above the floor. A crouch must be clearly
-        //             LOWER than idle; a value near -1000 mm means the legs folded the
-        //             wrong way and the ground solve dragged the body underground.
-        //   sole    - lowest sole after the solve. Must be ~0; anything else means the
-        //             character is hovering or sunk.
-        //   height  - head height, i.e. how tall the character reads on screen. A
-        //             crouch must be visibly shorter than idle, a jump taller.
-        struct Probe { const char* name; const gldx::AnimPoseSource* src; };
+        // anatomically plausible. Every column is measured on the FINAL pose - after
+        // the vertical shift the frame loop applies - because that is what the camera
+        // sees. Measuring before the solve is how the previous round shipped a "crouch"
+        // that the table put at 0.999 m while the picture stood at 1.208 m: the table
+        // was reporting a pose no pixel ever showed, and three tuning rounds chased it.
+        //
+        //   hip     - pelvis height. A crouch must be clearly LOWER than idle; a value
+        //             near -1 m means the legs folded the wrong way and the solve
+        //             dragged the body underground.
+        //   sole    - lowest sole point. 0 = planted. A jump's samples must leave 0
+        //             during the flight, or the character is not leaving the ground.
+        //   head    - head bone height: how tall the character reads on screen.
+        //   fly     - metres of the shift that came from the source's own arc.
+        //   fwd     - pelvis offset from the ankles along the character's forward axis.
+        //             This decides whether a crouch reads as crouching (pelvis behind
+        //             or over the feet) or as pitching forward over the toes.
+        //   foot    - horizontal distance, left ankle to right ankle along forward.
+        //             THIS is the column that says "stride". For any action whose
+        //             walking cycle is the demo's (walk / crouchwalk) it must equal
+        //             `cycleMetres / 2`, because the floor scrolls one whole cycle per
+        //             step pair; a foot that spans less skates.
+        struct Probe { const char* name; Action action; const gldx::AnimPoseSource* src; };
         const Probe probes[] = {
-            {"idle", character.idleSource.get()}, {"walk", character.walkSource.get()},
-            {"run", character.runSource.get()},   {"crouch", character.crouchSource.get()},
-            {"crouchwalk", character.crouchWalkSource.get()},
-            {"attack", character.attackSource.get()}, {"jump", character.jumpSource.get()},
+            {"idle", Action::Idle, character.idleSource.get()},
+            {"walk", Action::Walk, character.walkSource.get()},
+            {"run", Action::Run, character.runSource.get()},
+            {"crouch", Action::Crouch, character.crouchSource.get()},
+            {"crouchwalk", Action::CrouchWalk, character.crouchWalkSource.get()},
+            {"attack", Action::Attack, character.attackSource.get()},
+            {"jump", Action::Jump, character.jumpSource.get()},
+            {"sit", Action::Sit, character.sitSource.get()},
+            {"swim", Action::Swim, character.swimSource.get()},
         };
-        std::fprintf(stderr, "[anim-rigid] pose check: %-11s %9s %9s %9s %9s\n",
-                     "action", "pelvis", "sole", "head", "lift");
+        std::fprintf(stderr, "[anim-rigid] pose check: %-11s %8s %8s %8s %7s %8s %8s %8s\n",
+                     "action", "hip", "sole", "head", "fly", "fwd", "foot", "stride");
         for (const Probe& pr : probes) {
             if (pr.src == nullptr) continue;
-            float pelvis = 0.0f, sole = 0.0f, head = 0.0f, lift = 0.0f;
-            float pelvisLo = 1e9f, pelvisHi = -1e9f;
-            const int kSamples = 8;
+            float hipSum = 0.0f, soleMin = 1e9f, soleMax = -1e9f, headMax = -1e9f;
+            float flyMax = 0.0f, fwdMax = -1e9f, fwdMin = 1e9f, footMax = -1e9f;
+            float lowestY = 1e9f;
+            const int kSamples = 16;
             for (int i = 0; i < kSamples; ++i) {
                 const float t = pr.src->Duration() * static_cast<float>(i)
                                 / static_cast<float>(kSamples);
@@ -830,43 +1066,359 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                 std::vector<glm::mat4> palette;
                 skeleton.ComputeSkinning(pose, model.Mat4(), palette);
                 const auto solved = character.ground.Solve(palette);
+                const float solvedLift = solved.valid() ? solved.lift : 0.0f;
+                const float shift = VerticalShiftFor(character, pr.action, t, solvedLift);
                 if (solved.valid()) {
-                    gldx::GroundContact::ApplyLift(palette, solved.lift);
-                    lift = solved.lift;
-                    sole = solved.lowestAfter;
+                    gldx::GroundContact::ApplyLift(palette, shift);
                 }
-                std::vector<glm::mat4> world;
-                skeleton.ComputeWorld(pose, model.Mat4(), world);
-                const float p = world[character.rig.hips][3].y;
-                pelvisLo = std::min(pelvisLo, p);
-                pelvisHi = std::max(pelvisHi, p);
-                // Head BONE, not "highest bone": when the character crouches the
-                // raised arms or the hair can out-top the skull, and taking the max
-                // over all bones then reports a crouch that barely got shorter.
-                const int hb = character.rig.head;
-                const float topmost = (hb >= 0)
-                    ? world[(std::size_t)hb][3].y
-                    : world[character.rig.hips][3].y;
-                head = std::max(head, topmost);
+                // Bone positions through the SAME palette the mesh is drawn with, so
+                // the vertical shift lands on these numbers too.
+                // palette[i] * (0,0,0,1) is NOT the bone position: palette is
+                // world * inverseBind, so it maps a BIND-space vertex forward. The
+                // bone's own posed position is the inverse-bind origin transformed by
+                // that same matrix, i.e. palette[i] * (-inverseBind[i] * origin),
+                // which is world[i][3] exactly. Taking the origin instead puts every
+                // joint at the root's translation and makes the whole table read zero
+                // (measured before this fix: idle head 0.014 m).
+                auto bonePos = [&](int bone) {
+                    const glm::vec4 p = palette[(std::size_t)bone] *
+                                        glm::vec4(-glm::vec3(skeleton.bone(bone)->inverseBind[3]),
+                                                  1.0f);
+                    return glm::vec3(p);
+                };
+                const glm::vec3 hip = bonePos(character.rig.hips);
+                const glm::vec3 head = bonePos(character.rig.head);
+                const glm::vec3 ankleL = bonePos(character.rig.foot[gldx::kRigLeft]);
+                const glm::vec3 ankleR = bonePos(character.rig.foot[gldx::kRigRight]);
+                // Grounded solves are allowed the tolerance; a flight sample is the
+                // one that matters ("this frame really is off the floor").
+                const float sole = -solvedLift + shift;
+                // Lowest point over EVERY bone, not just the four sole contacts.
+                //
+                // `sole` only knows the feet, so a pose that buries a knee, a hip or a
+                // hand reports sole = 0 while visibly sinking through the floor (the sit
+                // pose did exactly that). This walks the whole palette so "does anything
+                // go below y = 0" is answerable for any action.
+                // Floor-violation probe, using only quantities this table already
+                // trusts: `sole` (the solved sole height) and `hip`.
+                //
+                // A bone sweep is the obvious idea and it does not work here: bone
+                // origins sit at the joints, so a kneeling/sitting pose has knee and
+                // hip origins a metre below the hips while the SKIN is on the floor.
+                // Measured, that reported every authored-height pose as sinking by
+                // over a metre - the number was the knee joint, not a violation.
+                //
+                // What can be checked without the mesh:
+                //   ground-solved poses -> `sole` is the real floor distance, must be >= 0
+                //   authored-height poses -> the hips must be a plausible height above
+                //   the floor (not negative, not standing)
+                lowestY = std::min(lowestY, sole);
+                hipSum += hip.y;
+                soleMin = std::min(soleMin, sole);
+                soleMax = std::max(soleMax, sole);
+                headMax = std::max(headMax, head.y);
+                if (pr.action == Action::Jump && character.jumpSource) {
+                    flyMax = std::max(flyMax, character.jumpSource->AirborneRiseAt(t));
+                }
+                const float fwd = glm::dot(hip - 0.5f * (ankleL + ankleR), character.rig.forward);
+                fwdMax = std::max(fwdMax, fwd);
+                fwdMin = std::min(fwdMin, fwd);
+                footMax = std::max(footMax, glm::dot(ankleL - ankleR, character.rig.forward));
             }
-            pelvis = 0.5f * (pelvisLo + pelvisHi);
-            // Forward offset of the pelvis from where the feet are: the quantity that
-            // decides whether the character reads as crouching or as falling over.
-            std::vector<glm::mat4> pose0, pal0, world0;
-            pr.src->Sample(0.0f, pose0);
-            skeleton.ComputeWorld(pose0, model.Mat4(), world0);
-            const float footZ = 0.5f * (world0[(std::size_t)character.rig.foot[0]][3].z
-                                      + world0[(std::size_t)character.rig.foot[1]][3].z);
-            const float hipY = world0[(std::size_t)character.rig.hips][3].y;
-            const float headY = world0[(std::size_t)character.rig.head][3].y;
-            const float pelvisZ = world0[(std::size_t)character.rig.hips][3].z;
+            const float hipAvg = hipSum / static_cast<float>(kSamples);
+            // Two hard rules the whole action set must satisfy:
+            //   SINK   - something ends up below the floor (y < -2 cm)
+            //   FLOAT  - nothing touches the floor at all (lowest > +6 cm) for a pose
+            //            that is supposed to be in contact
+            // Airborne poses are exempt: run and jump spend part of the cycle with
+            // NOTHING near the floor, which is correct, and their ground samples are
+            // already validated by the `sole` and `fly` columns.
+            const bool airborne = pr.action == Action::Jump || pr.action == Action::Run;
+            const bool sinks  = !airborne && lowestY < -0.03f;
+            const bool floats = !airborne && (lowestY > 0.10f) && pr.action != Action::Swim;
+            const char* verdict = sinks ? "  <- SINKS" : (floats ? "  <- FLOATS" : "");
+            if (std::getenv("GLDX_LOW")) {
+                std::fprintf(stderr, "  [low] %s lowestY=%.3f\n", pr.name, (double)lowestY);
+            }
+            // The stride a walking cycle implies: the floor scrolls cycleMetres per
+            // cycle, i.e. one step pair. Anything else is a skate, and the number is
+            // reported next to the measured foot span so the two can be compared
+            // instead of guessed at.
+            const float strideScale = (pr.action == Action::CrouchWalk && character.crouchWalkSource)
+                                          ? character.crouchWalkSource->strideScale() : 1.0f;
+            const float expected = (pr.action == Action::Walk || pr.action == Action::CrouchWalk)
+                                       ? 0.5f * character.cycleMetres * strideScale
+                                       : 0.0f;
             std::fprintf(stderr,
-                         "[anim-rigid] pose check: %-11s %8.3f m %8.4f m %8.3f m %8.1f mm  fwd %+7.3f m\n",
-                         pr.name, (double)pelvis, (double)sole, (double)head,
-                         (double)(lift * 1000.0f), (double)(pelvisZ - footZ));
-            std::fprintf(stderr, "[anim-rigid]   drop: hip %.3f m, headBone %.3f m (hip-to-head %.3f m)\n",
-                         (double)hipY, (double)headY, (double)(headY - hipY));
+                         "[anim-rigid] pose check: %-11s %7.3fm %7.3fm %7.3fm %6.2fm "
+                         "%+7.3fm %7.3fm %7.3fm%s\n",
+                         pr.name, static_cast<double>(hipAvg),
+                         static_cast<double>(0.5f * (soleMin + soleMax)),
+                         static_cast<double>(headMax), static_cast<double>(flyMax),
+                         static_cast<double>(0.5f * (fwdMin + fwdMax)),
+                         static_cast<double>(footMax), static_cast<double>(expected),
+                         (expected > 0.0f && footMax < 0.75f * expected) ? "  <- SKATES"
+                                                                        : verdict);
         }
+    }
+
+    // Per-time trace of ONE action, 16 rows. Coarser or finer than the table above:
+    // that one samples one point per action, this one walks the timeline, which is
+    // the only way to see a transient - a one-frame pop between two poses does not
+    // appear in a table of eight evenly spaced samples, and it is exactly what a
+    // freeze-frame grid also hides (each cell is a separate still).
+    //
+    //   air     - the source's own claim about flight height at t (jump). If this is
+    //             non-zero and `sole` is not, the arc is not reaching the picture.
+    //   sole    - lowest sole after the frame loop's shift. Must be 0 while grounded
+    //             and positive exactly where `air > 0`.
+    //   head    - head bone height, i.e. what the silhouette does.
+    //   kneeFwd - knee bone ahead of the hip along forward, in metres. A positive
+    //             number during STANCE is the "leg sticking out in front" failure: the
+    //             swinging knee should be the one that goes forward, and a planted leg
+    //             should have its knee behind or under the hip.
+    if (traceAction != nullptr && *traceAction != '\0') {
+        Action action = Action::Walk;
+        const gldx::AnimPoseSource* src = character.walkSource.get();
+        if (std::strcmp(traceAction, "idle") == 0) { action = Action::Idle; src = character.idleSource.get(); }
+        else if (std::strcmp(traceAction, "run") == 0) { action = Action::Run; src = character.runSource.get(); }
+        else if (std::strcmp(traceAction, "crouch") == 0) { action = Action::Crouch; src = character.crouchSource.get(); }
+        else if (std::strcmp(traceAction, "crouchwalk") == 0) { action = Action::CrouchWalk; src = character.crouchWalkSource.get(); }
+        else if (std::strcmp(traceAction, "attack") == 0) { action = Action::Attack; src = character.attackSource.get(); }
+        else if (std::strcmp(traceAction, "jump") == 0) { action = Action::Jump; src = character.jumpSource.get(); }
+        else if (std::strcmp(traceAction, "sit") == 0) { action = Action::Sit; src = character.sitSource.get(); }
+        else if (std::strcmp(traceAction, "swim") == 0) { action = Action::Swim; src = character.swimSource.get(); }
+        if (src != nullptr) {
+            // The trace's rows are the source's OWN timeline (t = 0 .. Duration). For an
+            // action the frame loop samples at the raw clock that is the same thing, but
+            // for the phase-driven ones (walk / crouchwalk) the demo maps the clock
+            // through `walkTimeFor`, so a row here is a phase, not a wall-clock instant.
+            // Say which, so `--on trace` + `--action X --freeze-at Y` cannot be read as
+            // "Y seconds into the clip" when it is not.
+            const bool phaseDriven = (action == Action::Walk || action == Action::CrouchWalk);
+            std::fprintf(stderr, "[anim-rigid] trace: %s over %.3f s%s\n", src->name(),
+                         static_cast<double>(src->Duration()),
+                         phaseDriven ? "  (phase-driven: feed the source t = walkTimeFor(phase))"
+                                     : "  (time-driven: sample at the raw clock)");
+            std::fprintf(stderr,
+                         "[anim-rigid] trace: %6s %6s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s\n",
+                         "t", "phase", "air", "shift", "sole", "head", "hipH",
+                         "ankleH", "kneeFwd", "hipFwd", "handFwd", "handUp", "handLen",
+                         "wFwd", "wSide", "armLf", "armRf");
+            constexpr int kRows = 16;
+            for (int i = 0; i < kRows; ++i) {
+                const float t = src->Duration() * static_cast<float>(i)
+                                / static_cast<float>(kRows);
+                std::vector<glm::mat4> pose;
+                src->Sample(t, pose);
+                std::vector<glm::mat4> palette;
+                skeleton.ComputeSkinning(pose, model.Mat4(), palette);
+                const auto solved = character.ground.Solve(palette);
+                const float solvedLift = solved.valid() ? solved.lift : 0.0f;
+                const float shift = VerticalShiftFor(character, action, t, solvedLift);
+                if (solved.valid()) gldx::GroundContact::ApplyLift(palette, shift);
+                // Same convention as the table above: a bone's posed position is
+                // palette * (its inverse-bind origin), i.e. world[3], not palette * 0.
+                auto bonePos = [&](int b) {
+                    const glm::vec4 p = palette[(std::size_t)b] *
+                                        glm::vec4(-glm::vec3(skeleton.bone(b)->inverseBind[3]),
+                                                  1.0f);
+                    return glm::vec3(p);
+                };
+                const glm::vec3 hip = bonePos(character.rig.hips);
+                const glm::vec3 head = bonePos(character.rig.head);
+                const float air = (action == Action::Jump && character.jumpSource)
+                                      ? character.jumpSource->AirborneRiseAt(t) : 0.0f;
+                // The columns that decide whether a crouch reads as a crouch: where the
+                // seat is (hip height), where the knees are (knee forward of the hip:
+                // positive = knees in front, which is what a crouch looks like), and
+                // whether the pelvis is over the feet or out behind them (hipFwd).
+                // heelH: the LOWEST bone of the whole rig (except the root's children
+                // below the hips, which is just the feet). For a seated pose this is the
+                // pelvis, and it is the number that decides whether the character is
+                // actually sitting on the floor or hanging in the air - the ground solve
+                // only looks at four SOLE points, so it cannot answer that.
+                float heelH = 1e9f;
+                for (std::size_t b = 0; b < palette.size(); ++b) {
+                    const glm::vec4 pb = palette[b] *
+                                         glm::vec4(-glm::vec3(skeleton.bone((int)b)->inverseBind[3]), 1.0f);
+                    heelH = std::min(heelH, pb.y);
+                }
+                const glm::vec3 ankleL = bonePos(character.rig.foot[gldx::kRigLeft]);
+                // Hand travel: where the RIGHT wrist ended up relative to its shoulder,
+                // projected on the character's own forward/up axes, plus how far it is
+                // from the shoulder. An attack that "does nothing" shows up here as a
+                // wrist that never moves and a shoulder distance that never grows.
+                const glm::vec3 shoulderR = bonePos(character.rig.armUp[gldx::kRigRight]);
+                const glm::vec3 wristL = bonePos(character.rig.hand[gldx::kRigLeft]);
+                const glm::vec3 wristR = bonePos(character.rig.hand[gldx::kRigRight]);
+                const glm::vec3 handVec = wristR - shoulderR;
+                const float handFwd = glm::dot(handVec, character.rig.forward);
+                const float handUp  = glm::dot(handVec, character.rig.up);
+                const float handLen = glm::length(handVec);
+                // How far apart the two wrists are ALONG the body (forward) vs ACROSS it
+                // (side). A freestyle stroke puts one hand well ahead of the other, so
+                // `spreadFwd` must be large; arms fanned out sideways - the failure this
+                // column exists to catch - shows up as `spreadSide` large and
+                // `spreadFwd` ~0.
+                const glm::vec3 dWrist = wristR - wristL;
+                (void)dWrist;
+                const glm::vec3 kneeL = bonePos(character.rig.legLow[gldx::kRigLeft]);
+                const glm::vec3 footMid = 0.5f * (ankleL + bonePos(character.rig.foot[gldx::kRigRight]));
+                // ---- joint probe (GLDX_DEBUG_JOINTS=1) ----
+                //
+                // Prints the WORLD position of the leg joints in the body frame:
+                // (fwd, side, y). Three numbers per joint are what makes a sit pose
+                // answerable instead of guessable:
+                //
+                //   knee.side must be well away from 0   (knees out to the sides -> W)
+                //   ankle.side must be OUTSIDE knee.side  (shin folds back outward)
+                //   both y near 0                         (they lie on the floor)
+                //
+                // The full-body screenshots hide the legs behind the skirt and the top
+                // view cannot show depth, so "which axis is wrong" is unanswerable from
+                // pictures alone. This is the instrument for that.
+                if (std::getenv("GLDX_DEBUG_JOINTS") != nullptr) {
+                    // Measured from the LEFT THIGH ROOT, not from the `hips` bone:
+                    // `hips` is the pelvis and its origin can sit well away from where
+                    // the legs branch, which made `side` read past the leg's own length.
+                    const glm::vec3 rootPos = bonePos(character.rig.legUp[gldx::kRigLeft]);
+                    auto jp = [&](int bone) {
+                        const glm::vec3 p = bonePos(bone);
+                        const glm::vec3 d = p - rootPos;
+                        return glm::vec3(glm::dot(d, character.rig.forward),
+                                         glm::dot(d, character.rig.side), p.y);
+                    };
+                    const glm::vec3 hipP = jp(character.rig.legUp[gldx::kRigLeft]);
+                    std::fprintf(stderr,
+                                 "[joints] %-11s t=%.2f\n"
+                                 "  hip   fwd=%+.3f side=%+.3f y=%+.3f\n"
+                                 "  kneeL fwd=%+.3f side=%+.3f y=%+.3f\n"
+                                 "  ankleL fwd=%+.3f side=%+.3f y=%+.3f\n"
+                                 "  kneeR fwd=%+.3f side=%+.3f y=%+.3f\n"
+                                 "  ankleR fwd=%+.3f side=%+.3f y=%+.3f\n",
+                                 src->name(), static_cast<double>(t),
+                                 static_cast<double>(hipP.x), static_cast<double>(hipP.y),
+                                 static_cast<double>(hipP.z),
+                                 static_cast<double>(jp(character.rig.legLow[gldx::kRigLeft]).x),
+                                 static_cast<double>(jp(character.rig.legLow[gldx::kRigLeft]).y),
+                                 static_cast<double>(jp(character.rig.legLow[gldx::kRigLeft]).z),
+                                 static_cast<double>(jp(character.rig.foot[gldx::kRigLeft]).x),
+                                 static_cast<double>(jp(character.rig.foot[gldx::kRigLeft]).y),
+                                 static_cast<double>(jp(character.rig.foot[gldx::kRigLeft]).z),
+                                 static_cast<double>(jp(character.rig.legLow[gldx::kRigRight]).x),
+                                 static_cast<double>(jp(character.rig.legLow[gldx::kRigRight]).y),
+                                 static_cast<double>(jp(character.rig.legLow[gldx::kRigRight]).z),
+                                 static_cast<double>(jp(character.rig.foot[gldx::kRigRight]).x),
+                                 static_cast<double>(jp(character.rig.foot[gldx::kRigRight]).y),
+                                 static_cast<double>(jp(character.rig.foot[gldx::kRigRight]).z));
+                }
+                std::fprintf(stderr,
+                             "[anim-rigid] trace: %6.3f %6.3f %8.4f %8.4f %8.4f %8.4f %8.4f %8.4f %8.4f %8.4f %8.4f %8.4f %8.4f %8.4f %8.4f %8.4f %8.4f\n",
+                             static_cast<double>(t),
+                             static_cast<double>(src->Duration() > 0.0f ? t / src->Duration() : 0.0f),
+                             static_cast<double>(air), static_cast<double>(shift),
+                             static_cast<double>(-solvedLift + shift),
+                             static_cast<double>(head.y), static_cast<double>(hip.y),
+                             static_cast<double>(ankleL.y),
+                             static_cast<double>(glm::dot(kneeL - hip, character.rig.forward)),
+                             static_cast<double>(glm::dot(hip - footMid, character.rig.forward)),
+                             // Where the head is, along the walking direction: the one
+                             // column that says "the torso leans over the feet" instead
+                             // of "the character is sitting back on its heels".
+                             static_cast<double>(handFwd), static_cast<double>(handUp),
+                             static_cast<double>(handLen),
+                             static_cast<double>(glm::dot(wristR - wristL, character.rig.forward)),
+                             static_cast<double>(glm::abs(glm::dot(wristR - wristL, character.rig.side))),
+                             // Upper-arm direction along the body's forward axis, per
+                             // side: a freestyle stroke alternates these between ~+1
+                             // (pointing at the direction of travel) and ~-1 (pulled
+                             // back past the hip). Both of them stuck near 0 means the
+                             // arms are fanned out sideways - the failure this column
+                             // exists to catch.
+                             // Wrist position expressed in the body frame, in metres:
+                             // (forward, side). A freestyle stroke traces a large circle
+                             // in this plane, so these two columns must sweep through
+                             // roughly +/-0.5 m. Values that stay near a constant mean
+                             // the arms are pinned - which is what "wiper" looks like.
+                             // Body-frame wrist offsets. `bonePos` is WORLD space and the
+                             // swim pose rotates the whole body about `orientation()*side`,
+                             // so the rig's axes must be rotated by the same matrix before
+                             // dotting - otherwise the two columns mix "prone" and
+                             // "upright" frames and describe nothing (measured: a wrist
+                             // 1.4 m sideways when the arm is 0.52 m long).
+                             static_cast<double>(glm::dot(
+                                 bonePos(character.rig.hand[gldx::kRigLeft]) -
+                                 bonePos(character.rig.hips),
+                                 model.orientation() * character.rig.forward)),
+                             static_cast<double>(glm::dot(
+                                 bonePos(character.rig.hand[gldx::kRigLeft]) -
+                                 bonePos(character.rig.hips),
+                                 model.orientation() * character.rig.side)));
+            }
+        }
+    }
+
+    // ---- "crouch IS a frame of crouch-walk": verified, not asserted ----
+    //
+    // The requirement is that switching to crouch must not change the pose at all - a
+    // crouch is not a second set of leg constants, it is crouch-walk's curve held at one
+    // phase (see ProceduralCrouch.h). So the two sources are sampled at the same instant
+    // and every bone matrix is compared. At t = 0 the breathing term is exactly zero
+    // (sin(0)), so the answer must be bit-identical; anywhere else it is the breath,
+    // which is what `drift` reports in rad-equivalent terms.
+    if (character.crouchSource && character.crouchWalkSource) {
+        std::vector<glm::mat4> a, b;
+        float worst = 0.0f;
+        float worstT = 0.0f;
+        constexpr int kChecks = 8;
+        for (int i = 0; i < kChecks; ++i) {
+            const float t = character.crouchSource->Duration() * static_cast<float>(i)
+                            / static_cast<float>(kChecks);
+            character.crouchSource->Sample(t, a);
+            character.crouchWalkSource->SampleAtPhase(character.crouchSource->PosePhase(), b);
+            float d = 0.0f;
+            for (std::size_t k = 0; k < a.size() && k < b.size(); ++k) {
+                const glm::mat4 m = a[k] - b[k];
+                for (int c = 0; c < 4; ++c) {
+                    d = std::max(d, glm::length(glm::vec3(m[c])));
+                }
+            }
+            if (d > worst) { worst = d; worstT = t; }
+        }
+        // t = 0 is the exact one; the rest is the breathing overlay and must stay small.
+        character.crouchSource->Sample(0.0f, a);
+        character.crouchWalkSource->SampleAtPhase(character.crouchSource->PosePhase(), b);
+        float exact = 0.0f;
+        for (std::size_t k = 0; k < a.size() && k < b.size(); ++k) {
+            const glm::mat4 m = a[k] - b[k];
+            for (int c = 0; c < 4; ++c) exact = std::max(exact, glm::length(glm::vec3(m[c])));
+        }
+        // The ground solve runs at 8-bit-visible precision, so this only holds if the
+        // two palettes agree to the last bit; report it at full precision rather than
+        // rounding to %.3e, which prints 0.000e+00 for anything under the print width.
+        // ...and the same comparison through the whole remaining pipeline (skinning
+        // matrices + the ground solve), because that - not the local pose - is what the
+        // vertex shader reads. A bitmap diff between the two actions cannot be tighter
+        // than this number.
+        std::vector<glm::mat4> palA, palB;
+        skeleton.ComputeSkinning(a, model.Mat4(), palA);
+        skeleton.ComputeSkinning(b, model.Mat4(), palB);
+        const auto solA = character.ground.Solve(palA);
+        const auto solB = character.ground.Solve(palB);
+        if (solA.valid()) gldx::GroundContact::ApplyLift(palA, solA.lift);
+        if (solB.valid()) gldx::GroundContact::ApplyLift(palB, solB.lift);
+        float palDelta = 0.0f;
+        for (std::size_t k = 0; k < palA.size() && k < palB.size(); ++k) {
+            const glm::mat4 m = palA[k] - palB[k];
+            for (int c = 0; c < 4; ++c) palDelta = std::max(palDelta, glm::length(glm::vec3(m[c])));
+        }
+        std::fprintf(stderr,
+                     "[anim-rigid] crouch == crouchwalk@phase %.2f: t=0 pose %.6e, drawn palette "
+                     "%.6e (both must be 0); worst over a breath %.3e at t=%.2f s\n",
+                     static_cast<double>(character.crouchSource->PosePhase()),
+                     static_cast<double>(exact), static_cast<double>(palDelta),
+                     static_cast<double>(worst), static_cast<double>(worstT));
     }
 
     // Which rig slots failed to bind, and the one assertion this demo takes most
@@ -881,7 +1433,7 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
 } // namespace
 
 int main(int argc, char** argv) {
-    const gldx::cli::Flags flags(argc, argv, {"hud", "walk", "ground", "wireframe", "maps", "normalmap", "report"},
+    const gldx::cli::Flags flags(argc, argv, {"hud", "walk", "ground", "wireframe", "maps", "normalmap", "report", "trace"},
                                  {"model", "speed", "fov", "yaw", "pitch", "distance", "freeze-at",
                                   "target-y", "action"},
                                  "anim-rigid");
@@ -898,13 +1450,18 @@ int main(int argc, char** argv) {
     view.normalMap = flags.on("normalmap", true);
     view.showHud   = flags.on("hud", true);
     view.report    = flags.on("report", false);
+    view.trace     = flags.on("trace", false);
     view.speed     = flags.real("speed", view.speed, 0.2f, 6.0f);
     view.fov       = flags.real("fov", view.fov, 15.0f, 100.0f);
-    view.yaw       = flags.real("yaw", view.yaw);
-    view.pitch     = flags.real("pitch", view.pitch, -1.45f, 1.45f);
-    view.distance  = flags.real("distance", view.distance, 0.8f, 30.0f);
+    view.orbit.settings().yaw =
+        flags.real("yaw", view.orbit.settings().yaw);
+    view.orbit.settings().pitch =
+        flags.real("pitch", view.orbit.settings().pitch, -1.45f, 1.45f);
+    view.orbit.settings().distance =
+        flags.real("distance", view.orbit.settings().distance, 0.8f, 30.0f);
     view.freezeAt  = flags.real("freeze-at", 0.0f, 0.0f, 1.0e6f);
-    view.target.y  = flags.real("target-y", view.target.y, 0.0f, 3.0f);
+    view.orbit.settings().target.y =
+        flags.real("target-y", view.orbit.settings().target.y, 0.0f, 3.0f);
 
     // Which action to play. Exists so the non-walk actions can be verified without
     // a keyboard: the number keys are unreachable from a `--quit-after` run, and a
@@ -913,16 +1470,19 @@ int main(int argc, char** argv) {
     // this is a demo, and a typo should not stop the window from opening.
     {
         const std::string action = flags.string("action", "walk");
-        if (action == "idle")        view.requestAction = Action::Idle;
-        else if (action == "walk")   view.requestAction = Action::Walk;
-        else if (action == "run")    view.requestAction = Action::Run;
-        else if (action == "crouch") view.requestAction = Action::Crouch;
-        else if (action == "crouchwalk") view.requestAction = Action::CrouchWalk;
-        else if (action == "attack") view.requestAction = Action::Attack;
-        else if (action == "jump")   view.requestAction = Action::Jump;
+
+        if (action == "idle")        view.Request(Action::Idle, 0.0);
+        else if (action == "walk")   view.Request(Action::Walk, 0.0);
+        else if (action == "run")    view.Request(Action::Run, 0.0);
+        else if (action == "crouch") view.Request(Action::Crouch, 0.0);
+        else if (action == "crouchwalk") view.Request(Action::CrouchWalk, 0.0);
+        else if (action == "attack") view.Request(Action::Attack, 0.0);
+        else if (action == "jump")   view.Request(Action::Jump, 0.0);
+        else if (action == "sit")    view.Request(Action::Sit, 0.0);
+        else if (action == "swim")   view.Request(Action::Swim, 0.0);
         else {
             std::fprintf(stderr, "[anim-rigid] unknown --action '%s'; using walk "
-                                 "(known: idle, walk, run, crouch, crouchwalk, attack, jump)\n",
+                                 "(known: idle, walk, run, crouch, crouchwalk, attack, jump, sit, swim)\n",
                          action.c_str());
         }
     }
@@ -976,9 +1536,8 @@ int main(int argc, char** argv) {
     // that library). A drag orbits, the wheel scales the distance.
     window.OnCursor([&view](gldx::win::Window&, gldx::win::Vec2d pos) {
         if (!view.dragging) return;
-        view.yaw   -= static_cast<float>(pos.x - view.lastX) * 0.006f;
-        view.pitch  = std::clamp(view.pitch + static_cast<float>(pos.y - view.lastY) * 0.006f,
-                                 -1.45f, 1.45f);
+        view.orbit.Drag(glm::vec2(static_cast<float>(pos.x - view.lastX),
+                                  static_cast<float>(pos.y - view.lastY)));
         view.lastX = pos.x;
         view.lastY = pos.y;
     });
@@ -991,8 +1550,9 @@ int main(int argc, char** argv) {
         view.lastY = c.y;
     });
     window.OnScroll([&view](gldx::win::Window&, double, double dy) {
-        view.distance = std::clamp(view.distance * static_cast<float>(std::exp(-dy * 0.12)),
-                                   0.8f, 30.0f);
+        // exp(-dy*0.12) and OrbitSettings::zoomFactor=0.9 give the same feel; the
+        // clamp (0.8..30 m) lives in the settings so it cannot drift per call site.
+        view.orbit.Scroll(static_cast<float>(dy) * 1.2f);
     });
     window.OnKey([&view, hudRaw](gldx::win::Window&, gldx::win::Key key,
                                  gldx::win::KeyAction action, int) {
@@ -1005,13 +1565,20 @@ int main(int argc, char** argv) {
             // to the machine, because switching actions is a per-frame decision
             // (it needs the current phase) and must not happen inside a GLFW
             // callback that can fire between two of our own updates.
-            case gldx::win::Key::Num0: view.requestAction = Action::Idle; break;
-            case gldx::win::Key::Num1: view.requestAction = Action::Walk; break;
-            case gldx::win::Key::Num2: view.requestAction = Action::Run; break;
-            case gldx::win::Key::Num3: view.requestAction = Action::Crouch; break;
-            case gldx::win::Key::Num4: view.requestAction = Action::CrouchWalk; break;
-            case gldx::win::Key::Num5: view.requestAction = Action::Attack; break;
-            case gldx::win::Key::Num6: view.requestAction = Action::Jump; break;
+            // One helper for all of them: it records WHEN, so a one-shot action
+            // (attack/jump) starts its clock on the key press rather than inheriting
+            // "we are 3 s into the demo, which is past the end of the clip".
+            // `App::Now()` is the demo's own clock (glfwGetTime is forbidden outside
+            // the window library), and it is the same time base the frame loop uses.
+            case gldx::win::Key::Num0: view.Request(Action::Idle, gldx::win::App::Get().Now()); break;
+            case gldx::win::Key::Num1: view.Request(Action::Walk, gldx::win::App::Get().Now()); break;
+            case gldx::win::Key::Num2: view.Request(Action::Run, gldx::win::App::Get().Now()); break;
+            case gldx::win::Key::Num3: view.Request(Action::Crouch, gldx::win::App::Get().Now()); break;
+            case gldx::win::Key::Num4: view.Request(Action::CrouchWalk, gldx::win::App::Get().Now()); break;
+            case gldx::win::Key::Num5: view.Request(Action::Attack, gldx::win::App::Get().Now()); break;
+            case gldx::win::Key::Num6: view.Request(Action::Jump, gldx::win::App::Get().Now()); break;
+            case gldx::win::Key::Num7: view.Request(Action::Sit, gldx::win::App::Get().Now()); break;
+            case gldx::win::Key::Num8: view.Request(Action::Swim, gldx::win::App::Get().Now()); break;
             case gldx::win::Key::H:
                 view.showHud = !view.showHud;
                 hudRaw->hud.SetVisible(view.showHud);
@@ -1019,6 +1586,31 @@ int main(int argc, char** argv) {
             default: break;
         }
     });
+
+    // Which action the `--on trace` table should walk. Resolved once, next to the
+    // action parsing, so the table and `--action` cannot disagree.
+    const std::string traceAction = view.trace
+        ? flags.string("action", "walk") : std::string();
+
+    // Test hook: press a number key at a given wall-clock second, so the behaviour the
+    // number keys produce can be reproduced from a script. Without it the only way to
+    // exercise "press 5 at t = 5 s" was a human hand, which is how the bug below
+    // survived: `--action attack` starts AT t = 0, where the old code was correct.
+    //
+    //   GLDX_PRESS_AT=5 GLDX_PRESS_KEY=5  -> treat as "the user pressed 5 at 5 s"
+    const char* pressAtEnv = std::getenv("GLDX_PRESS_AT");
+    const char* pressKeyEnv = std::getenv("GLDX_PRESS_KEY");
+    const double pressAt = (pressAtEnv && *pressAtEnv) ? std::atof(pressAtEnv) : -1.0;
+    const int pressKey = (pressKeyEnv && *pressKeyEnv) ? std::atoi(pressKeyEnv) : -1;
+    bool pressDone = false;
+    // A SECOND press, so "tap 6 twice quickly" is scriptable. It exists because that is
+    // the one interaction a single hook cannot express, and it is exactly where a
+    // one-shot action has to restart instead of being swallowed.
+    const char* press2AtEnv = std::getenv("GLDX_PRESS_AT2");
+    const char* press2KeyEnv = std::getenv("GLDX_PRESS_KEY2");
+    const double press2At = (press2AtEnv && *press2AtEnv) ? std::atof(press2AtEnv) : -1.0;
+    const int press2Key = (press2KeyEnv && *press2KeyEnv) ? std::atoi(press2KeyEnv) : -1;
+    bool press2Done = false;
 
     bool firstFrame = true;
     window.OnFrame([&](const gldx::win::FrameInfo& info) {
@@ -1036,7 +1628,7 @@ int main(int argc, char** argv) {
         if (load.valid() && load.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             auto result = load.get();
             if (result) {
-                UploadCharacter(character, std::move(*result), view.report);
+                UploadCharacter(character, std::move(*result), view.report, traceAction.c_str());
             } else {
                 character.error = result.error();
                 std::fprintf(stderr, "[anim-rigid] load failed: %s\n", result.error().c_str());
@@ -1049,74 +1641,188 @@ int main(int argc, char** argv) {
         view.clock = (view.freezeAt > 0.0f) ? std::min(info.time, static_cast<double>(view.freezeAt))
                                             : info.time;
         const float animSeconds = static_cast<float>(view.clock);
-        view.scroll = view.speed * animSeconds;
+        // The floor scrolls at the character's real speed, except while crouch-walking:
+        // that gait lays down `strideScale()` of the standing stride per cycle (see the
+        // crouchwalk branch below), so the ground must advance by the same factor or
+        // the planted foot slides.
+        const float scrollScale = (view.requestAction == Action::CrouchWalk
+                                   && character.crouchWalkSource)
+                                      ? character.crouchWalkSource->strideScale() : 1.0f;
+        view.scroll = view.speed * scrollScale * animSeconds;
 
         if (character.ready()) {
             const gldx::RiggedModel& model = character.model;
 
-            // One-shot actions hand control back to idle when they end. Suppressed
-            // under --freeze-at: a frozen frame is meant to sit exactly where the
-            // clock put it, and auto-returning would make attack/jump's final frame
-            // impossible to snapshot at all (which is the point of
-            // `--action attack --freeze-at 2`).
+            // One-shot actions hand control back to idle when they end.
+            //
+            // Two rules here, and both were missing:
+            //
+            //  1. The timers must MEASURE from the moment the action was requested,
+            //     not from the demo's own start. `oneShotFinished(t)` takes a clip
+            //     time, and this used to pass the absolute clock - so by the time you
+            //     had walked around for a second, `t >= Duration()` was already true
+            //     and pressing 5 or 6 returned to idle on the very next frame. That
+            //     read as "the number keys don't work for attack and jump".
+            //  2. Auto-return is switched off under `--freeze-at`: a frozen frame is
+            //     meant to sit exactly where the clock put it, and auto-returning
+            //     would make attack/jump's final frame impossible to snapshot
+            //     (`--action attack --freeze-at 2`).
+            view.actionElapsed = animSeconds - view.actionStartedAt;
             if (view.freezeAt <= 0.0f
                 && (view.requestAction == Action::Attack || view.requestAction == Action::Jump)
-                && character.oneShotFinished(view.requestAction, animSeconds)) {
-                view.requestAction = Action::Idle;
+                && character.oneShotFinished(view.requestAction, view.actionElapsed)) {
+                view.Request(Action::Idle, animSeconds);
             }
 
-            const float phase = character.phaseFor(view.speed, animSeconds);
-            // Default path unchanged: Action::Walk samples the walk source at the
-            // exact phase the pre-animation-layer demo used, so `--off hud
-            // --freeze-at` frames stay byte-identical.
-            const bool walking = (view.requestAction == Action::Walk);
-            if (walking && view.walk && character.rig.walkable && character.walkSource) {
-                character.walkSource->Sample(
-                    character.walkTimeFor(phase), character.pose);
-            } else if (walking) {
-                gldx::ResetToRest(model.skeleton(), character.pose);
-            } else if (!view.walk) {
-                // W (walk on/off) is the master switch for the whole action layer:
-                // with it off every action collapses to rest, which is what makes
-                // `--off walk` a stable A/B baseline regardless of the number keys.
-                gldx::ResetToRest(model.skeleton(), character.pose);
-            } else {
-                // The other four actions are time-driven rather than phase-driven.
-                // Their clock is the same frozen-friendly `animSeconds`, so a
-                // `--freeze-at` frame is still a pure function of argv.
-                switch (view.requestAction) {
-                    case Action::Idle:
-                        if (character.idleSource)
-                            character.idleSource->Sample(animSeconds, character.pose);
-                        break;
-                    case Action::Run:
-                        if (character.runSource)
-                            character.runSource->Sample(animSeconds, character.pose);
-                        break;
-                    case Action::Crouch:
-                        if (character.crouchSource)
-                            character.crouchSource->Sample(animSeconds, character.pose);
-                        break;
-                    case Action::CrouchWalk:
-                        // Phase-driven like walk, because it *is* walk - the floor
-                        // and the feet have to stay in step or the character skates.
-                        if (character.crouchWalkSource)
-                            character.crouchWalkSource->Sample(
-                                character.walkTimeFor(phase), character.pose);
-                        break;
-                    case Action::Attack:
-                        if (character.attackSource)
-                            character.attackSource->Sample(animSeconds, character.pose);
-                        break;
-                    case Action::Jump:
-                        if (character.jumpSource)
-                            character.jumpSource->Sample(animSeconds, character.pose);
-                        break;
-                    case Action::Walk:
-                        break;   // handled above
+        // Simulated key press (see GLDX_PRESS_AT above). It goes through the same
+        // View::Request the OnKey handler uses, so this exercises the real path.
+        if (!press2Done && press2At >= 0.0 && animSeconds >= press2At && press2Key >= 0) {
+            press2Done = true;
+            static const Action kByKey2[9] = {Action::Idle, Action::Walk, Action::Run,
+                                             Action::Crouch, Action::CrouchWalk,
+                                             Action::Attack, Action::Jump, Action::Sit,
+                                             Action::Swim};
+            if (press2Key < 9) view.Request(kByKey2[press2Key], animSeconds);
+        }
+        if (!pressDone && pressAt >= 0.0 && animSeconds >= pressAt && pressKey >= 0) {
+            pressDone = true;
+            static const Action kByKey[9] = {Action::Idle, Action::Walk, Action::Run,
+                                             Action::Crouch, Action::CrouchWalk,
+                                             Action::Attack, Action::Jump, Action::Sit,
+                                             Action::Swim};
+            if (pressKey < 9) view.Request(kByKey[pressKey], animSeconds);
+        }
+        // The clock every TIME-DRIVEN action is sampled at.
+        //
+        // It is the clip's own time - `now - when the action was requested` - not the
+        // demo's absolute clock. Sampling at the absolute clock was the reason the
+        // number keys looked dead for attack and jump: `--action attack` starts at
+        // t = 0, where the two clocks coincide, so it always looked right; but press 5
+        // five seconds into a session and the clip was sampled at t = 5.0 s, which is
+        // past its end, i.e. it clamped to the last frame - the recovery stance. The
+        // auto-return timer was measured the same wrong way, so it handed control back
+        // to idle on the very next frame. Both are fixed by using one clock.
+        const float clipSeconds = view.actionElapsed;
+
+        const float phase = character.phaseFor(view.speed, animSeconds);
+
+        // ---- every action goes through the state machine, so switching is a
+        // ---- CROSS-FADE instead of a cut ----
+        //
+        // The demo used to pick a source and call Sample() on it directly. That is right
+        // for a reference still (`--freeze-at` frames must be exactly the source's own
+        // pose) but wrong for the interactive path: pressing a number key snapped the
+        // character from one pose to a completely different one in a single frame.
+        //
+        // Now both paths go through `machine`: the same source, the same clock, but the
+        // request is a *transition*. Two consequences worth naming:
+        //
+        //   * The clip clock the machine keeps is what gets sampled, so `clipSeconds` is
+        //     no longer the sampling argument - it is what the auto-return rule reads,
+        //     and what the machine is fed (one dt per frame).
+        //   * The two phase-driven gaits (walk / crouchwalk) are NOT sampled at machine
+        //     time: the demo owns the treadmill, so their phase comes from `phase`
+        //     above. Both are fed through the machine anyway so that walk -> crouchwalk
+        //     and walk -> run blend like everything else.
+        // A frame's dt, CLAMPED. The first frame blocks on the model load (seconds), and
+        // a machine fed that dt finishes any 0.18 s transition inside a single frame -
+        // which is exactly how "the cross-fade does not happen for some switches"
+        // appeared: the switch worked, the transition was over before the first frame
+        // the new pose could be seen on. 50 ms cap = never let one stalled frame skip a
+        // visible transition, still long enough for real frame times.
+        const float rawDt = animSeconds - view.lastAnimSeconds;
+        const float dt = std::clamp(rawDt, 0.0f, 0.05f);
+        view.lastAnimSeconds = animSeconds;
+
+        if (!view.machineInitialised) {
+            character.machine.Set(character.sourceFor(view.requestAction));
+            view.machineInitialised = true;
+        } else {
+            gldx::AnimTransition transition;
+            transition.seconds = 0.18f;
+            transition.atContact = false;
+
+            // Forward the request ONLY when it is new (see View::Request).
+            //
+            // This is the bug that made the jump "glued to the floor": the request state
+            // persists for the whole action, so this used to re-request on EVERY frame.
+            // `AnimStateMachine::Request` treats "same source as current" as a no-op -
+            // but for a ONE-SHOT action the right reading of a repeat is "start over",
+            // and the machine cannot know that. The result was a jump that restarted at
+            // t = 0 every frame, i.e. forever frozen in the crouch phase: `--on trace`
+            // showed sole rising to 1.13 m (it starts once there) while pressing 6
+            // showed no lift at all.
+            if (view.requestSerial != view.lastSentSerial) {
+                view.lastSentSerial = view.requestSerial;
+                const gldx::AnimPoseSource* want = character.sourceFor(view.requestAction);
+                // One-shot actions RESTART; looping ones just request.
+                //
+                // `Request` is a no-op when the source is already current, which is right
+                // for a gait (the caller re-requests every frame and must not reset the
+                // phase) but wrong for jump/attack: tapping 6 while a jump is mid-air has
+                // to play the jump again from its first frame. Without this the second
+                // press was swallowed and the character froze part-way through the
+                // previous jump.
+                const bool oneShot = (view.requestAction == Action::Jump
+                                      || view.requestAction == Action::Attack);
+                if (oneShot) {
+                    character.machine.Restart(want, transition);
+                } else {
+                    character.machine.Request(want, transition);
                 }
             }
+            character.machine.Update(dt);
+        }
+
+
+
+        // Lightweight guard: a null source (rig not uploaded yet) leaves the pose alone.
+        if (character.machine.Current() != nullptr) {
+            const gldx::AnimPoseSource* cur = character.machine.Current();
+            const gldx::AnimPoseSource* nxt = character.machine.Pending();
+
+            // For the phase-driven gaits, drive the machine's own clock from the
+            // treadmill phase so the feet stay in step with the floor. This is legal
+            // because the machine's time for a looping source IS its phase.
+            if (cur == character.walkSource.get() || cur == character.crouchWalkSource.get()) {
+                const float stride = (cur == character.crouchWalkSource.get())
+                                         ? character.crouchWalkSource->strideScale() : 1.0f;
+                character.machine.SetCurrentTime(character.walkTimeFor(phase * stride));
+            }
+
+            if (nxt == nullptr) {
+                character.machine.Evaluate(character.pose);
+            } else {
+                // Mid-transition. The machine blends the two sources it was given, and
+                // for the gaits that means both at the same phase (a walk-to-run blend
+                // that ran at two different phases would scrub). Sample them here
+                // instead: drive the machine's two times, then let it blend.
+                if (nxt == character.walkSource.get() || nxt == character.crouchWalkSource.get()) {
+                    character.machine.SetPendingTime(character.walkTimeFor(phase));
+                }
+                character.machine.Evaluate(character.pose);
+            }
+
+            // Swim is the one action that needs a ROOT rotation, and it cannot live in
+            // the pose sources (they write LOCAL matrices; this is a WORLD-axis rotate).
+            // It is applied AFTER the blend so a walk -> swim transition tilts the body
+            // in gradually - the machine's weight is what makes that smooth, and
+            // rotating before the blend would blend a lying body with a standing one.
+            // The prone rotation is NOT applied here any more: the swim source owns it
+            // (ProceduralSwim::SetProneAngle) because it must be in the same coordinate
+            // frame as the arm target directions computed inside Sample. Rotating
+            // afterwards left the arms almost motionless - the target direction and the
+            // rest direction were nearly parallel, so acos() gave a tiny angle. Only
+            // the blend weight scaling still belongs here, and that is now expressed by
+            // temporarily overriding the source's prone angle during the transition.
+            (void)cur;
+            (void)nxt;
+        }
+
             model.skeleton().ComputeSkinning(character.pose, model.Mat4(), character.palette);
+
+
+
 
             // Ground contact, solved forward from the pose instead of authored by
             // hand: find the lowest of the four sole points *after* posing, then
@@ -1125,56 +1831,42 @@ int main(int argc, char** argv) {
             // support) and it cannot drift out of sync with the legs - which is
             // exactly the failure mode of the first version, where the legs
             // scissored and the feet stayed flat on the floor.
-            // How much of the ground solve to apply. 1 = fully grounded (walk,
-            // idle, crouch, attack), 0 = fully airborne.
             //
-            // This gate is the whole reason `GroundedAt` / `AirborneWeightAt` are on
-            // the pose-source interface: the solve finds the lowest sole point and
-            // slides the character so it touches the floor, which is exactly right
-            // while a foot is planted and exactly wrong while both feet are off the
-            // ground - during a jump it drags the character back down, and the
-            // result looks like it is hanging from an invisible wire. The demo
-            // cannot know the flight schedule itself, so it asks the source.
-            float groundWeight = 1.0f;
-            switch (view.requestAction) {
-                case Action::Jump:
-                    // Boolean is correct here: a jump has one clearly defined flight
-                    // arc, so there is nothing to fade.
-                    if (character.jumpSource && !character.jumpSource->GroundedAt(animSeconds))
-                        groundWeight = 0.0f;
-                    break;
-                case Action::Run:
-                    // Continuous, because a run has two short flights per cycle and a
-                    // boolean would snap the pelvis height on the boundary frame.
-                    if (character.runSource)
-                        groundWeight = 1.0f - character.runSource->AirborneWeightAt(animSeconds);
-                    break;
-                default: break;   // walk / idle / crouch / attack are always grounded
+            // The solve is NOT the whole vertical story: a jump asks for its own arc
+            // on top of it (`VerticalShiftFor`, which owns the grounded/airborne
+            // split). Gating the solve off for the flight and stopping there - which
+            // is what this demo used to do - leaves the character hanging at standing
+            // height with its legs tucked, because nothing supplies the rise.
+            const gldx::GroundContact::Solution solved =
+                character.ground.Solve(character.palette);
+            const float solvedLift = solved.valid() ? solved.lift : 0.0f;
+            // `clipSeconds`, NOT `animSeconds`. The arc functions take a CLIP time; the
+            // absolute clock is only equal to it when the action started at t = 0. With
+            // `animSeconds` here, pressing 6 three seconds into a session asked the jump
+            // arc "how high are you at t = 3 s of a 1.03 s clip", got 0 (clamped past the
+            // end), and the character stayed glued to the floor - the whole reason the
+            // live jump never left the ground while `--on trace` (which starts at t = 0)
+            // showed the arc rising correctly.
+            const float shift = VerticalShiftFor(character, view.requestAction, clipSeconds,
+                                                 solvedLift);
+            view.groundLift = shift;
+            view.airRise = (view.requestAction == Action::Jump && character.jumpSource)
+                               ? character.jumpSource->AirborneRiseAt(clipSeconds)
+                               : 0.0f;
+            if (solved.valid() && view.walk) {
+                gldx::GroundContact::ApplyLift(character.palette, shift);
             }
-
-            const gldx::GroundContact::Solution solved = character.ground.Solve(character.palette);
-            view.groundLift = solved.lift * groundWeight;
-            if (solved.valid() && view.walk && groundWeight > 0.0f) {
-                gldx::GroundContact::ApplyLift(character.palette, solved.lift * groundWeight);
-            }
-            // During full flight there is no ground contact to report, and printing
-            // the unsolved value would misrepresent the frame.
-            if (groundWeight <= 0.0f) view.groundLift = 0.0f;
-            // What the solve achieved, measured the same way it was solved: the
-            // lowest sole point after the shift. Printed in millimetres because
+            // Where the lowest sole ended up after the shift: the number that says
+            // "planted" (0) or "in the air" (>0). Printed in millimetres because
             // "0.000 m" in a panel is indistinguishable from "not measured".
-            view.soleHeight = solved.valid() ? solved.lowestAfter : 0.0f;
+            view.soleHeight = solved.valid() ? (-solved.lift + shift) : 0.0f;
         }
 
         const float aspect = info.fbHeight > 0
                                  ? static_cast<float>(info.fbWidth) / static_cast<float>(info.fbHeight)
                                  : 1.0f;
-        const float cp = std::cos(view.pitch);
-        const glm::vec3 eye = view.target + view.distance * glm::vec3(cp * std::sin(view.yaw),
-                                                                     std::sin(view.pitch),
-                                                                     cp * std::cos(view.yaw));
-        camera.SetPerspective(view.fov, aspect, 0.05f, 200.0f);
-        camera.LookAt(eye, view.target, glm::vec3(0.0f, 1.0f, 0.0f));
+        view.orbit.Apply(view.fov, aspect, 0.05f, 200.0f);
+        camera = view.orbit.camera();
 
         gldx::RenderFrame frame;
         frame.fbWidth     = info.fbWidth;

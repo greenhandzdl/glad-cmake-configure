@@ -94,6 +94,8 @@ export {
 #include "gldx/anim/ProceduralCrouch.h"
 #include "gldx/anim/ProceduralAttack.h"
 #include "gldx/anim/ProceduralJump.h"
+#include "gldx/anim/ProceduralSit.h"
+#include "gldx/anim/ProceduralSwim.h"
 #include "gldx/anim/AnimStateMachine.h"
 #include "gldx/anim/GroundContact.h"
 #include "gldx/anim/RiggedModel.h"
@@ -113,6 +115,7 @@ export {
 
 // --- camera ----------------------------------------------------------------
 #include "gldx/camera/Camera.h"
+#include "gldx/camera/OrbitCamera.h"
 #include "gldx/camera/Frustum.h"
 #include "gldx/camera/Picking.h"
 #include "gldx/camera/VoxelRay.h"

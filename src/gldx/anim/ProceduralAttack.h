@@ -41,32 +41,39 @@
 namespace gldx {
 
 struct AttackTuning {
-    float windupSeconds = 0.18f;   // 蓄力（往后拉）
-    float swingSeconds  = 0.14f;   // 挥出（这一段必须短，快才有力量感）
-    float recoverSeconds = 0.30f;  // 收势（回到站姿）
+    // 三段时长。挥出段必须短（快才有力量感），收势不能省（停在挥出末端像卡住了）。
+    float windupSeconds  = 0.24f;  // 蓄力（把手臂拉到身后）
+    float swingSeconds   = 0.18f;  // 挥出（最快的一段）
+    float recoverSeconds = 0.34f;  // 收势（回到站姿）
 
-    // 蓄力段：右臂向后上方拉，躯干向右后转。
-    float windupArmBack  = 1.05f;  // rad，上臂后摆
-    float windupArmUp    = 0.55f;  // rad，上臂抬起（举过头侧）
-    float windupElbow    = 1.35f;  // rad，屈肘把"武器"收到肩后
-    float windupTorsoYaw = 0.42f;  // rad，躯干向右转（蓄势）
-    float windupLean     = -0.10f; // rad，略微后仰
+    // ---- 手臂：这具骨架的手是两连杆，所以"挥剑"只有一种演法 ----
+    //
+    // 上臂的静止方向就是 +side（T-pose），所以：
+    //   **抬** = 绕竖直轴（绕 forward 只会让它绕自身长轴自旋，实测画面上纹丝不动）；
+    //   **扫** = 抬起之后绕 forward，把手臂从前扫到后。
+    // 数值按"相对 A-pose"给，符号见 ProceduralAttack.cpp 的 rotate() 顺序。
+    float armDown       = 1.02f;   // rad，A-pose 基准（常驻）
+    float windupArmUp   = 2.3f;   // rad，蓄力时上臂抬到侧上方（约 72°，手臂举起来）
+    float windupArmBack = 0.35f;   // rad，同时向后拉（绕竖直轴）
+    float windupElbow   = 1.85f;   // rad，屈肘把"剑"收到肩后
+    float swingArmUp    = 1.95f;   // rad，挥出时手臂基本保持抬高（划过时不该掉下来）
+    float swingArmBack  = -0.95f;  // rad，横扫到身前（负 = 朝前，约 57°）
+    float swingElbow    = 0.15f;   // rad，挥到位时手臂几乎伸直
+    float swingWrist    = 0.7f;   // rad，扣腕："剑"跟着走
 
-    // 挥出段：右臂向前下方划过，躯干向左转回来并前倾。
-    float swingArmBack   = -0.85f; // rad，上臂前摆（负 = 朝前）
-    float swingElbow     = 0.20f;  // rad，挥出时手臂几乎伸直
-    float swingTorsoYaw  = -0.50f; // rad，躯干向左转
-    float swingLean      = 0.28f;  // rad，前倾（把体重送进去）
+    // ---- 躯干：蓄力向右转、挥出向左转回来，前倾把体重送进去 ----
+    float windupTorsoYaw = 0.55f;  // rad
+    float swingTorsoYaw  = -0.7f; // rad
+    float windupLean     = -0.08f; // rad，略微后仰
+    float swingLean      = 0.34f;  // rad，前倾
 
-    // 左臂的反向配平：挥砍时左臂向后摆以平衡，这是让动作读起来"用了全身"的关键。
-    float offArmSwing    = 0.55f;  // rad
+    // 左臂反向配平：挥砍时两臂一起动，动作才读得出"用了全身"。
+    float offArmSwing    = 1.05f;  // rad
+    float offArmLift     = 0.3f;  // rad，配平臂也抬起来（横向展开）
 
-    // 腿部：右脚在后蹬地，左脚在前承重。站立基础是错步（前后开立）。
-    float stanceStagger  = 0.22f;  // rad，两条腿的前后差
-    float stanceKnee     = 0.18f;  // rad，基础屈膝
-
-    // 手臂下放的基准（避免 T-pose 直接挥）。
-    float armDown = 1.02f;
+    // 站位：错步 + 基础屈膝。重心前后移动由躯干与髋的旋转承担，不抬高骨盆。
+    float stanceStagger  = 0.26f;  // rad，两条腿的前后差
+    float stanceKnee     = 0.20f;  // rad
 };
 
 /**

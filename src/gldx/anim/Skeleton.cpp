@@ -72,13 +72,24 @@ void Skeleton::ComputeWorld(const std::vector<glm::mat4>& localPose,
 void Skeleton::ComputeSkinning(const std::vector<glm::mat4>& localPose,
                                const glm::mat4& rootTransform,
                                std::vector<glm::mat4>& outSkinning) const {
-    // Local scratch: ComputeWorld writes world matrices and the caller only
-    // wants the skinned product, so the intermediate never escapes this call.
-    std::vector<glm::mat4> world;
-    ComputeWorld(localPose, rootTransform, world);
-    outSkinning.resize(bones_.size());
+    // No intermediate vector any more.
+    //
+    // This used to allocate a local `std::vector<glm::mat4> world` on EVERY call -
+    // that is ~1.5 KB of heap per frame for a 23-bone rig, which showed up as a
+    // visible malloc/free pair in the profiler for what is otherwise 23 matrix
+    // multiplies. The world matrix of bone i is needed exactly once (right here)
+    // and parents always precede children in `bones_`, so the chain can be walked
+    // in place: outSkinning doubles as the scratch, and each entry is overwritten
+    // with its own skinned product after its children have read it... which they
+    // cannot, because they read the PARENT's world matrix. So the parent's world
+    // matrix must survive until the last child is processed.
+    //
+    // The cheap way to keep both: compute world into outSkinning first, then do a
+    // second pass multiplying by inverseBind. Two passes over 23 entries in cache,
+    // zero allocations.
+    ComputeWorld(localPose, rootTransform, outSkinning);
     for (std::size_t i = 0; i < bones_.size(); ++i) {
-        outSkinning[i] = world[i] * bones_[i].inverseBind;
+        outSkinning[i] = outSkinning[i] * bones_[i].inverseBind;
     }
 }
 
