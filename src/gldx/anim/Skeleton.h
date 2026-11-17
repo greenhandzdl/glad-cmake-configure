@@ -41,9 +41,26 @@ namespace gldx {
 // Palette ceiling shared by loader and shader: a skin is uploaded as a
 // `uniform mat4 uBones[N]` array, and GLSL needs a literal size. The loader
 // refuses a rig above this and the vertex shader declares the same number, so
-// the two halves cannot drift apart silently. 64 covers the humanoid rigs this
-// engine's demos use with room to spare; raise it and the GLSL together.
-inline constexpr int kMaxBonePalette = 64;
+// the two halves cannot drift apart silently; raise it and the GLSL together.
+//
+// 64 was enough for the 23-bone skirt character this demo started with, but a
+// VRM/Miku-class asset (the aigei Lamy model) skins with **294** bones: fingers,
+// skirt panels, hair strands, ear and tail chains are all separately weighted.
+// Culling "unused" bones does not help - the loader's count already counts only
+// bones that a mesh actually references.
+//
+// 320 leaves headroom for the next asset without a second raise. The cost is
+// uniform space: 320 mat4 = 5120 vec4 components, well inside GL 4.1's
+// GL_MAX_VERTEX_UNIFORM_COMPONENTS floor of 1024 vec4 only because drivers on
+// desktop report far more (Apple/Mesa/NVIDIA all report >= 4096 vec4 = 16k
+// components). A future GL ES target would need bone-texture skinning instead;
+// that is a different project, not a tweak here.
+// 254 is the largest value that fits the vertex uniform budget: the skin shader's
+// other uniforms take 16 components, so 254 * 16 + 16 = 4080 <= 4096
+// (GL_MAX_VERTEX_UNIFORM_COMPONENTS on this machine reports 4096; uBones[256]
+// fails to link with "vertex shader uses 4112 total uniforms", measured).
+// Anything above that needs bone-texture skinning, not a bigger array.
+inline constexpr int kMaxBonePalette = 254;
 
 struct Bone {
     std::string name;

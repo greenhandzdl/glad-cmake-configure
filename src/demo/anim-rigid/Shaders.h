@@ -36,7 +36,7 @@ layout(location = 2) in vec2 aTexCoord;
 layout(location = 5) in uvec4 aBoneIndex;
 layout(location = 6) in vec4 aBoneWeight;
 
-uniform mat4 uBones[64];
+uniform mat4 uBones[254];
 uniform mat4 uViewProj;
 
 out vec3 vWorldPos;

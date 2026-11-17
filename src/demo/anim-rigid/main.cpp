@@ -102,10 +102,10 @@ namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
 
-// The GLSL declares `uniform mat4 uBones[64]` because a uniform array needs a
+// The GLSL declares `uniform mat4 uBones[N]` because a uniform array needs a
 // literal size. Pinning the engine's number to it here means a rig that outgrows
 // the shader fails the build instead of indexing past the end of the array.
-static_assert(gldx::kMaxBonePalette == 64, "uBones[N] in Shaders.h must match gldx::kMaxBonePalette");
+static_assert(gldx::kMaxBonePalette == 254, "uBones[N] in Shaders.h must match gldx::kMaxBonePalette");
 
 constexpr const char* kDefaultModel = "src/demo/anim-rigid/demo_should_be_ignored.fbx";
 
@@ -1427,7 +1427,8 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // picture (the limb just looks stiff) until this line names it. It used to be
     // hand-written here and lived through several review rounds with hand and
     // clavicle silently unbound.
-    std::fprintf(stderr, "[anim-rigid] rig: %s\n", character.rig.BindingReport().c_str());
+    std::fprintf(stderr, "[anim-rigid] rig: %s (naming family: %s)\n",
+                 character.rig.BindingReport().c_str(), character.rig.namingFamily());
 }
 
 } // namespace
