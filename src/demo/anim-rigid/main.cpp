@@ -1951,6 +1951,7 @@ int main(int argc, char** argv) {
                 for (int ci = 0; ci < gldx::RigChainKindCount; ++ci) {
                     const auto kind = static_cast<gldx::RigChainKind>(ci);
                     if (!character.rig.hasChain(kind)) continue;
+                    if (std::getenv("GLDX_NO_SECONDARY")) continue;   // A/B switch
                     const gldx::ChainTuning& tk = character.chainTune[ci];
                     character.chainSolvers[ci].Solve(character.rig.chains[ci], character.pose,
                                                      smWorld, model.restWorld(), tk,
