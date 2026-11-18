@@ -1,5 +1,7 @@
 module;
 
+#include <chrono>
+
 #include <cstdlib>
 
 #include "gldx/gmf.hpp"
@@ -211,6 +213,7 @@ ModelLoader::LoadSkinned(const std::string& path) {
     const unsigned int flags = aiProcess_Triangulate | aiProcess_GenSmoothNormals |
                                aiProcess_CalcTangentSpace | aiProcess_RemoveRedundantMaterials |
                                aiProcess_LimitBoneWeights;
+    const auto tStart = std::chrono::steady_clock::now();
     const aiScene* scene = importer.ReadFile(path, flags);
     if (!scene || !scene->mRootNode) {
         return std::unexpected(std::string("Assimp: ") + importer.GetErrorString());

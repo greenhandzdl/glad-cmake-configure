@@ -49,3 +49,4 @@
 # This is a whole-tree rule on purpose: it is the difference between "we read the
 # FBX" and "we committed the FBX".
 *.fbx
+output/.modelcache/

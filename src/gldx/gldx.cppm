@@ -98,6 +98,7 @@ export {
 #include "gldx/anim/ProceduralSwim.h"
 #include "gldx/anim/AnimStateMachine.h"
 #include "gldx/anim/GroundContact.h"
+#include "gldx/anim/SecondaryMotion.h"
 #include "gldx/anim/RiggedModel.h"
 
 // --- geometry --------------------------------------------------------------
@@ -159,6 +160,7 @@ export {
 #include "gldx/assets/ThreadPool.h"
 #include "gldx/assets/ImageLoader.h"
 #include "gldx/assets/ModelLoader.h"
+#include "gldx/assets/ModelCache.h"
 #include "gldx/assets/AssetManager.h"
 
 // --- util ------------------------------------------------------------------

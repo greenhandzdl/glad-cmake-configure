@@ -267,6 +267,22 @@ struct Character {
     // height so the pelvis drops by the right amount and no more.
     float seatedHip  = 0.295f;
     NamingChannel namingChannel = NamingChannel::Auto;
+
+    // One solver per chain kind. They hold per-joint angular state across frames, so
+    // they are members of the character rather than locals: a skirt that forgot its
+    // velocity between frames would snap to the target every frame and read as rigid.
+    gldx::ChainSolver chainSolvers[gldx::RigChainKindCount];
+
+    // Seconds since the previous secondary-motion step, already clamped. Kept separate
+    // from the machine's dt because the solver is only valid on a real time step: a
+    // frame that loads the model blocks for seconds and would integrate a spring over
+    // that whole interval.
+    float secondaryDt = 1.0f / 60.0f;
+    bool  secondaryPrimed = false;
+
+    // Per-kind chain parameters. Values are asset properties (how many panels, how
+    // soft), so they live here rather than in the engine - same rule as WalkTuning.
+    gldx::ChainTuning chainTune[gldx::RigChainKindCount];
     float sitRise    = 0.0f;
     // Bind-space corner box of the pelvis, measured once at load. The SEATED solve uses
     // it (see GroundContact::AddBodyContact): sitting puts the weight on the seat, and
@@ -826,6 +842,11 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     const gldx::RigNaming* naming = nullptr;
     if (character.namingChannel == NamingChannel::Mmd) naming = &animrigid::MmdNaming::Instance();
     character.rig = gldx::RigProfile::Classify(data.skeleton, naming);
+    if (std::getenv("GLDX_CHAINS")) {
+        for (int ci = 0; ci < gldx::RigChainKindCount; ++ci) {
+            std::fprintf(stderr, "[chain] kind=%d count=%d\n", ci, character.rig.chains[ci].count);
+        }
+    }
     if (std::getenv("GLDX_DUMP_JOINTS")) {
         auto show = [&](const char* label, int bone) {
             if (bone < 0) { std::fprintf(stderr, "[joint] %-10s <unbound>\n", label); return; }
@@ -976,6 +997,17 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // Face down. The sign is the difference between freestyle and backstroke, and it
     // now lives in the pose source so it shares a frame with the arm targets.
     character.swimSource->SetProneAngle(1.55f);
+    // Chain parameters, one set per kind. Numbers are per-asset: the skirt here is a
+    // 12-panel MMD hem, which is much softer than a tailor-made cape.
+    {
+        using gldx::RigChainKind;
+        auto& t = character.chainTune;
+        t[static_cast<int>(RigChainKind::Skirt)] = gldx::ChainTuning{0.22f, 0.88f, 0.30f};
+        t[static_cast<int>(RigChainKind::Hair)]  = gldx::ChainTuning{0.30f, 0.85f, 0.18f};
+        t[static_cast<int>(RigChainKind::Tail)]  = gldx::ChainTuning{0.28f, 0.86f, 0.12f};
+        t[static_cast<int>(RigChainKind::Ear)]   = gldx::ChainTuning{0.45f, 0.80f, -0.10f};
+    }
+
     character.machine.Set(character.walkSource.get());
 
     // The number keys / --action pick a source directly instead of going through the
@@ -1563,7 +1595,17 @@ int main(int argc, char** argv) {
     // a 30 MB parse never stalls the first frames (the window is already up).
     std::future<std::expected<gldx::LoadedSkinnedModelData, std::string>> load =
         std::async(std::launch::async, [modelPath] {
-            return gldx::ModelLoader::LoadSkinned(modelPath);
+            // Parse through the on-disk cache. A 12 MB FBX with 800k vertices spends
+            // 55 s inside assimp's FBX reader, and that cost is paid EVERY launch;
+            // with the cache a second run reads our own structure instead. The cache
+            // keys on the file's size+mtime and a format version, so editing the model
+            // (or the layout) silently re-parses rather than serving stale data.
+            gldx::ModelCacheOptions cache;
+            const char* noCache = std::getenv("GLDX_NO_MODEL_CACHE");
+            cache.enabled = (noCache == nullptr || *noCache == '\0');
+            return gldx::LoadSkinnedThroughCache(
+                modelPath, cache,
+                [modelPath] { return gldx::ModelLoader::LoadSkinned(modelPath); });
         });
 
     auto skinPass = std::make_unique<SkinPass>(character, view);
@@ -1688,7 +1730,11 @@ int main(int argc, char** argv) {
         // costs the parse time and makes every later frame identical for
         // identical argv.
         if (firstFrame && load.valid()) {
+            const auto t0 = std::chrono::steady_clock::now();
             load.wait();
+            const auto t1 = std::chrono::steady_clock::now();
+            std::fprintf(stderr, "[timing] parse (worker) = %.2f s\n",
+                         std::chrono::duration<double>(t1 - t0).count());
             firstFrame = false;
         }
         if (load.valid() && load.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
@@ -1884,6 +1930,33 @@ int main(int argc, char** argv) {
             (void)cur;
             (void)nxt;
         }
+
+            // Real seconds since the previous frame, clamped: the first frame after the
+            // model loads blocks for seconds, and integrating a spring over that whole
+            // interval would fling every chain.
+            character.secondaryDt = std::clamp(static_cast<float>(info.dt), 0.0f, 0.05f);
+
+            // ---- secondary motion: tail / skirt / hair / ears ----
+            //
+            // Runs BETWEEN the pose evaluation and skinning, and it is the only stage
+            // that carries state across frames. Ordering is forced: the solver reads
+            // each chain's ROOT world transform, so world matrices must exist first,
+            // and it writes LOCAL matrices, so skinning must come after.
+            //
+            // Assets without these bones leave every chain empty and this loop body
+            // never runs - that is what "optional" means here.
+            {
+                std::vector<glm::mat4> smWorld;
+                model.skeleton().ComputeWorld(character.pose, model.Mat4(), smWorld);
+                for (int ci = 0; ci < gldx::RigChainKindCount; ++ci) {
+                    const auto kind = static_cast<gldx::RigChainKind>(ci);
+                    if (!character.rig.hasChain(kind)) continue;
+                    const gldx::ChainTuning& tk = character.chainTune[ci];
+                    character.chainSolvers[ci].Solve(character.rig.chains[ci], character.pose,
+                                                     smWorld, model.restWorld(), tk,
+                                                     character.secondaryDt);
+                }
+            }
 
             model.skeleton().ComputeSkinning(character.pose, model.Mat4(), character.palette);
 

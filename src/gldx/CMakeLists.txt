@@ -27,6 +27,8 @@ set(GLDX_SOURCES
     anim/Pose.cpp
     anim/RiggedModel.cpp
     anim/GroundContact.cpp
+    anim/SecondaryMotion.cpp
+    assets/ModelCache.cpp
     anim/ProceduralWalk.cpp
     anim/ProceduralJump.cpp
     anim/ProceduralIdle.cpp

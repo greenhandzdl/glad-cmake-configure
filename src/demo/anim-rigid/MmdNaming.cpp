@@ -10,6 +10,33 @@ import gldx;
 #include <iterator>
 
 namespace animrigid {
+namespace {
+
+/**
+ * Render an int as the FULL-WIDTH digit(s) MMD uses in bone names.
+ *
+ * This asset names its skirt bones `スカート４-１` with U+FF10..U+FF19, not ASCII
+ * '0'..'9'. Searching for "スカート4-1" finds nothing and every chain silently comes
+ * back empty - the solver then does nothing and the skirt looks uninterpolated, which
+ * reads as "the solver is broken" rather than "the name did not match".
+ * Full-width digits run FF10..FF19, i.e. a constant +0xFEE0 offset.
+ */
+void AppendFullWidthDigits(char* buf, std::size_t cap, std::size_t& pos, int value) {
+    char ascii[8];
+    const int n = std::snprintf(ascii, sizeof(ascii), "%d", value);
+    for (int i = 0; i < n && pos + 4 < cap; ++i) {
+        // Multi-byte UTF-8: FF10 encodes as EF BC 90, so the offset lands in the low
+        // byte of a 3-byte sequence.
+        const unsigned cp = 0xFF10u + static_cast<unsigned>(ascii[i] - '0');
+        buf[pos++] = static_cast<char>(0xE0u | (cp >> 12));
+        buf[pos++] = static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu));
+        buf[pos++] = static_cast<char>(0x80u | (cp & 0x3Fu));
+    }
+    buf[pos] = '\0';
+}
+
+}  // namespace
+
 
 using gldx::RigChainKind;
 using gldx::RigSlot;
@@ -100,6 +127,42 @@ int MmdNaming::Detect(const gldx::Skeleton& skeleton) const {
 
 int MmdNaming::FindChain(const gldx::Skeleton& skeleton, RigChainKind kind,
                          int* out, int maxOut) const {
+    if (kind == RigChainKind::Hair) {
+        // Hair in this asset is per-strand chains named 後ろ髪<n>-<seg> (back) and
+        // 横髪<n>-<seg> (side). Same "panel-major" flattening as the skirt: several
+        // independent vertical chains, reported in order so the solver can treat them
+        // as independent.
+        int written = 0;
+        for (const char* group : {"後ろ髪", "横髪"}) {
+            for (int strand = 1; written < maxOut; ++strand) {
+                bool any = false;
+                for (int seg = 1; seg <= 6 && written < maxOut; ++seg) {
+                    char name[64];
+                    std::size_t pos = 0;
+                    for (const char* p = group; *p && pos + 1 < sizeof(name); ++p) name[pos++] = *p;
+                    name[pos] = '\0';
+                    AppendFullWidthDigits(name, sizeof(name), pos, strand);
+                    if (pos + 1 < sizeof(name)) name[pos++] = '-';
+                    name[pos] = '\0';
+                    AppendFullWidthDigits(name, sizeof(name), pos, seg);
+                    // Hair strands also carry a side suffix; try both bare and sided.
+                    int b = skeleton.Find(name);
+                    if (b < 0) {
+                        char sided[80];
+                        std::snprintf(sided, sizeof(sided), "%s.L", name);
+                        b = skeleton.Find(sided);
+                        if (b < 0) {
+                            std::snprintf(sided, sizeof(sided), "%s.R", name);
+                            b = skeleton.Find(sided);
+                        }
+                    }
+                    if (b >= 0) { out[written++] = b; any = true; }
+                }
+                if (!any) break;
+            }
+        }
+        return written;
+    }
     if (kind != RigChainKind::Skirt) return 0;   // this asset has no tail / ear chain
 
     // The skirt is **not one chain**: it is 8 radial panels of 3 joints each
@@ -114,8 +177,15 @@ int MmdNaming::FindChain(const gldx::Skeleton& skeleton, RigChainKind kind,
     for (int panel = 1; written < maxOut; ++panel) {
         bool anyThisPanel = false;
         for (int seg = 0; seg < 3 && written < maxOut; ++seg) {
-            char name[32];
-            std::snprintf(name, sizeof(name), "スカート%d-%d", panel, seg);
+            char name[64];
+            std::size_t pos = 0;
+            const char* prefix = "スカート";
+            for (const char* p = prefix; *p && pos + 1 < sizeof(name); ++p) name[pos++] = *p;
+            name[pos] = '\0';
+            AppendFullWidthDigits(name, sizeof(name), pos, panel);
+            if (pos + 1 < sizeof(name)) name[pos++] = '-';
+            name[pos] = '\0';
+            AppendFullWidthDigits(name, sizeof(name), pos, seg);
             const int bone = skeleton.Find(name);
             if (bone >= 0) {
                 out[written++] = bone;
