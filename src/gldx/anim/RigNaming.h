@@ -95,6 +95,34 @@ public:
      * 点名，而不是静默绑错。
      */
     [[nodiscard]] virtual int Detect(const Skeleton& skeleton) const;
+
+    /**
+     * 解析一条**可选链**（尾巴 / 裙摆 / 长发 / 兽耳），按从头到尾的顺序写进 `out`。
+     * 返回实际节数；0 表示"本族对这个部位没有说法"或"这具骨架没有它"。
+     *
+     * 默认实现返回 0——也就是说**默认所有资产都没有尾巴、没有裙子**。这是刻意的：
+     * 这是"引擎假设规范命名、demo 处理特异命名"这条分工的落点。引擎不认识任何具体
+     * 资产的特异骨名；带尾巴的角色由它自己的 naming 实现回答这个问题。
+     *
+     * 实现方写这个函数时的两条约定：
+     *   1. 顺序必须**从根到梢**（尾根 -> 尾尖、裙腰 -> 裙摆），因为解算按顺序传递。
+     *   2. 找不到就返回 0，不要返回半条链——半条链会让解算在中间断掉，看起来像
+     *      "尾巴只有前半截在动"，那比完全不动更难查。
+     */
+    [[nodiscard]] virtual int FindChain(const Skeleton& skeleton, RigChainKind kind,
+                                        int* out, int maxOut) const {
+        (void)skeleton; (void)kind; (void)out; (void)maxOut;
+        return 0;
+    }
+
+    /**
+     * 这条链是不是**闭环**（裙摆、披风下摆通常是一圈）。
+     *
+     * 环状链的解算要用首尾相接的弹簧，直线链不能。默认 false。
+     */
+    [[nodiscard]] virtual bool ChainIsClosed(RigChainKind /*kind*/) const noexcept {
+        return false;
+    }
 };
 
 /**

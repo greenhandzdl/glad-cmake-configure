@@ -1,5 +1,8 @@
 module;
 
+#include <cstdlib>
+#include <cstdio>
+
 #include "gldx/gmf.hpp"
 
 #include <cmath>
@@ -30,6 +33,8 @@ inline constexpr float kAxisEpsilon = 1e-4f;
 } // namespace
 
 RigProfile RigProfile::Classify(const Skeleton& skeleton, const RigNaming* naming) {
+    if (std::getenv("GLDX_TRACE_CLASSIFY"))
+        std::fprintf(stderr, "[classify] begin, %zu bones\n", skeleton.size());
     // 没指定族就自动挑一个。挑错了不会静默绑错——槽位会大面积 -1，BindingReport 会点名。
     const RigNaming& family = naming ? *naming : DetectBestNaming(skeleton);
 
@@ -111,7 +116,22 @@ RigProfile RigProfile::Classify(const Skeleton& skeleton, const RigNaming* namin
     // walkable 的真实判据是"髋 + **两条**大腿链"。原 demo 的注释写的是 "at least one usable
     // leg chain"，但代码要的是两条：只有一条腿时程序化步态摆不出交替支撑，画面比不摆更错，
     // 所以这个不一致以代码为准，注释在这里改正。
+    if (std::getenv("GLDX_TRACE_CLASSIFY"))
+        std::fprintf(stderr, "[classify] slots done, hips=%d\n", rig.hips);
     rig.walkable = rig.hips >= 0 && rig.legUp[kRigLeft] >= 0 && rig.legUp[kRigRight] >= 0;
+
+    // Optional chains (tail / skirt / hair / ear). Whatever the naming family says it
+    // found; the default implementation answers "none", so a rig without these parts
+    // simply leaves every chain empty - which is the whole point of making them
+    // optional rather than required slots.
+    for (int kind = 0; kind < RigChainKindCount; ++kind) {
+        const RigChainKind k = static_cast<RigChainKind>(kind);
+        int bones[kRigChainMax] = {};
+        const int n = family.FindChain(skeleton, k, bones, kRigChainMax);
+        const int take = std::min(std::max(n, 0), kRigChainMax);
+        rig.chains[kind].count = take;
+        for (int i = 0; i < take; ++i) rig.chains[kind].bones[i] = bones[i];
+    }
     return rig;
 }
 

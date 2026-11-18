@@ -60,6 +60,35 @@ enum class RigSlot : int {
 // 遍历写法要求这两个数永远一致，写错时后果是**遍历漏掉最后一个槽位**（clavicle.R 悄悄从
 // 20/20 的分母里消失，报表还显示"全绑上了"），而这种错不会有任何编译期提示。
 inline constexpr int kRigSlotCount = static_cast<int>(RigSlot::ClavicleRight) + 1;
+
+/**
+ * 可选骨骼链的最大长度。
+ *
+ * 人类共有的 20 个槽位都是**单关节**，一个 int 就够。但"尾巴""裙子""头发"不是单个
+ * 关节，而是**一条长度因资产而异的链**：这条裙子 8 节、那条 12 节，尾巴有的 4 节有的
+ * 7 节。所以可选部分用 `RigChain` 表示，而不是往 RigSlot 枚举里加固定槽位。
+ *
+ * 16 是"够用且不浪费"的折中：这个 demo 的裙摆是 12 节，尾巴是 5 节。超出就截断并在
+ * BindingReport 里点名，而不是静默丢弃——截断会让链尾明显不跟手，必须让人看见。
+ */
+inline constexpr int kRigChainMax = 16;
+
+/**
+ * 一条可选骨骼链的语义名字。
+ *
+ * 这些是**引擎层面**的通用概念（任何带尾巴/裙子的角色都会有），不是某个 FBX 的骨名。
+ * 具体资产用哪些骨名映射到这些概念，由 demo 侧的 RigNaming 实现决定——这就是
+ * "引擎假设规范命名、demo 处理特异命名"那条分工的落点。
+ */
+enum class RigChainKind : int {
+    Tail,        // 尾巴
+    Skirt,       // 裙摆 / 披风下摆（一整圈，按顺序从正前或某一侧开始）
+    Hair,        // 长发束
+    Ear,         // 兽耳
+    Count,
+};
+
+[[nodiscard]] constexpr int RigChainKindCount = static_cast<int>(RigChainKind::Count);
 static_assert(kRigSlotCount == 21, "RigSlot 多了/少了成员：同步更新 kRigSlotCount 与遍历");
 
 // "20/20 slots bound" 里的那个 20：步态/蒙皮真正会用到的槽位。spine1 是辅助槽位（躯干中段，

@@ -64,6 +64,34 @@ struct RigProfile {
     int hand[kRigSides]      = {-1, -1};   // 腕：手部网格主要被权重到的那个骨头
     int clavicle[kRigSides]  = {-1, -1};   // 锁骨/肩胛：只转几度，但少了它就"像个铰接木偶"
 
+    /**
+     * 一条可选骨骼链（尾巴 / 裙摆 / 长发 / 兽耳）。
+     *
+     * **为什么是链而不是单槽位**：这些部位在资产里的节数各不相同（这条裙子 12 节、
+     * 那条 8 节），固定槽位表达不了。`bones[i]` 是第 i 节的骨骼下标，`count` 是实际
+     * 节数（0 = 这个资产没有这条链）。
+     *
+     * **为什么 count == 0 是正常情况**：不带尾巴的角色不该被要求有尾巴骨。所有解算
+     * 侧的代码必须写成 `if (chain.count > 0) { ... }`，缺了跳过而不是当成错误。
+     */
+    struct RigChain {
+        int bones[kRigChainMax] = {};
+        int count = 0;
+
+        [[nodiscard]] bool present() const noexcept { return count > 0; }
+        [[nodiscard]] int  operator[](int i) const noexcept { return bones[i]; }
+    };
+
+    // 可选链，按 RigChainKind 索引。全部默认空 = "这个资产没有这类骨骼"，
+    // 这正是"尾巴设为 option、不存在就不解算"那条需求的落点。
+    RigChain chains[RigChainKindCount];
+
+    /** 某个资产有没有这条链。解算侧在动手之前先问这个。 */
+    [[nodiscard]] bool hasChain(RigChainKind kind) const noexcept {
+        const int k = static_cast<int>(kind);
+        return k >= 0 && k < RigChainKindCount && chains[k].present();
+    }
+
     // 量出来的正交三系（右手系）：forward = cross(side, up)。
     // 默认值只在一个轴都量不出来时才会留下（例如骨架根本没有髋或头），那种情况下
     // 步态不会走路，但至少不会算出 NaN——见 .cpp 里对退化分支的说明。

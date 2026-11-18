@@ -1,5 +1,7 @@
 module;
 
+#include <cstdlib>
+
 #include "gldx/gmf.hpp"
 
 // Assimp is an implementation detail of the assets module: <glad/gl.h> comes
@@ -272,6 +274,14 @@ ModelLoader::LoadSkinned(const std::string& path) {
             const aiBone* bone = src->mBones[b];
             if (!bone) continue;
             const std::string name = bone->mName.C_Str();
+            // Skip exporter helper bones (`_dummy_`, `_shadow_`, `_ik_`).
+            //
+            // They carry real vertex weights in the file but are never visible: the
+            // shadow/IK rigs are duplicates of the deform skeleton. Counting them
+            // against the palette is what makes a 240-bone character look like a
+            // 294-bone one and get rejected. Their weights are reassigned to the
+            // nearest kept ancestor below, so no vertex loses its influence.
+            if (IsHelperBoneName(name)) continue;
             inverseBindOf.emplace(name, toGlm(bone->mOffsetMatrix));
             nodeOf.emplace(name, bone->mNode);
         }
@@ -279,6 +289,12 @@ ModelLoader::LoadSkinned(const std::string& path) {
     if (inverseBindOf.empty()) {
         return std::unexpected("Assimp: no skinning data in " + path +
                                " (load it with Load() instead of LoadSkinned())");
+    }
+    if (std::getenv("GLDX_DUMP_BONES")) {
+        // Temporary diagnostic: print every skinned bone name so a new asset's naming
+        // family can be written against the real file instead of guessed at.
+        std::fprintf(stderr, "[bones] %s: %zu skinned bones\n", path.c_str(), inverseBindOf.size());
+        for (const auto& kv : inverseBindOf) std::fprintf(stderr, "  %s\n", kv.first.c_str());
     }
     if (inverseBindOf.size() > static_cast<std::size_t>(kMaxBonePalette)) {
         char msg[256];
@@ -484,12 +500,14 @@ ModelLoader::LoadSkinned(const std::string& path) {
         return index;
     };
 
+    unsigned int unskinnedMeshes = 0;
     for (unsigned int mi = 0; mi < scene->mNumMeshes; ++mi) {
         const aiMesh* src = scene->mMeshes[mi];
         if (!src || src->mNumVertices == 0) continue;
         if (src->mNumBones == 0) {
-            std::fprintf(stderr, "[ModelLoader] %s mesh %u has no bones; skipped by the "
-                                 "skinned path\n", path.c_str(), mi);
+            // One line per mesh turns a 147-part asset into 147 lines of noise; keep it
+            // behind the diagnostic flag and emit a single summary instead.
+            ++unskinnedMeshes;
             continue;
         }
 
@@ -592,6 +610,11 @@ ModelLoader::LoadSkinned(const std::string& path) {
         out.meshes.push_back(std::move(data));
     }
 
+    if (unskinnedMeshes) {
+        std::fprintf(stderr, "[ModelLoader] %s: %u mesh(es) carry no skin data and were "
+                             "skipped (imported %zu skinned)\n", path.c_str(), unskinnedMeshes,
+                     out.meshes.size());
+    }
     if (out.meshes.empty()) {
         return std::unexpected("Assimp: no skinned meshes imported from " + path);
     }

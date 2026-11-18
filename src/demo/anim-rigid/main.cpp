@@ -865,9 +865,17 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         // Where a standing pelvis actually ends up (rest pose + its lift), so the seated
         // height below can be stated as an absolute number rather than a delta from a
         // number nobody remembers.
-        const glm::vec4 hips = restPalette[(std::size_t)character.rig.hips] *
-                               glm::vec4(-glm::vec3(skeleton.bone(character.rig.hips)->inverseBind[3]), 1.0f);
-        character.sitRise = character.seatedHip - (hips.y + character.restLift);
+        //
+        // `rig.hips == -1` means the naming family did not recognise this rig at all
+        // (an MMD/PMX-named asset does not match Mixamo/Biped/UE). `skeleton.bone(-1)`
+        // is nullptr and dereferencing it is what produced EXC_BAD_ACCESS at 0x4c;
+        // the demo must still run, just without a believable seated height.
+        if (character.rig.hips >= 0) {
+            const glm::vec4 hips =
+                restPalette[(std::size_t)character.rig.hips] *
+                glm::vec4(-glm::vec3(skeleton.bone(character.rig.hips)->inverseBind[3]), 1.0f);
+            character.sitRise = character.seatedHip - (hips.y + character.restLift);
+        }
     }
 
     // One cycle = two steps, and one step lays down the horizontal distance the
@@ -1081,6 +1089,10 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                 // joint at the root's translation and makes the whole table read zero
                 // (measured before this fix: idle head 0.014 m).
                 auto bonePos = [&](int bone) {
+                    // `bone < 0` is the normal "this rig has no such slot" case, not an error:
+                    // skeleton.bone(-1) is nullptr and dereferencing it crashed with
+                    // EXC_BAD_ACCESS at address 0x4c on a rig with unbound slots.
+                    if (bone < 0 || bone >= static_cast<int>(palette.size())) return glm::vec3(0.0f);
                     const glm::vec4 p = palette[(std::size_t)bone] *
                                         glm::vec4(-glm::vec3(skeleton.bone(bone)->inverseBind[3]),
                                                   1.0f);
@@ -1220,6 +1232,7 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                 // Same convention as the table above: a bone's posed position is
                 // palette * (its inverse-bind origin), i.e. world[3], not palette * 0.
                 auto bonePos = [&](int b) {
+                    if (b < 0 || b >= static_cast<int>(palette.size())) return glm::vec3(0.0f);
                     const glm::vec4 p = palette[(std::size_t)b] *
                                         glm::vec4(-glm::vec3(skeleton.bone(b)->inverseBind[3]),
                                                   1.0f);
