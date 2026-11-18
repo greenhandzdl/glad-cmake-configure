@@ -63,6 +63,18 @@ glm::mat4 toGlm(const aiMatrix4x4& m) {
     return r;
 }
 
+/// Which source format a file came from, for the handful of places where the format's
+/// own convention leaks into the data (uv orientation today).
+enum class FileFormat { Generic, Pmx };
+
+FileFormat FormatOf(std::string_view path) {
+    const auto dot = path.rfind('.');
+    if (dot == std::string_view::npos) return FileFormat::Generic;
+    std::string ext(path.substr(dot));
+    for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return ext == ".pmx" ? FileFormat::Pmx : FileFormat::Generic;
+}
+
 bool LeavesDirectory(std::string_view ref) {
     if (ref.empty()) return true;
     if (ref.front() == '/' || ref.front() == '\\') return true;
@@ -201,6 +213,7 @@ ModelLoader::Load(const std::string& path) {
 // ---------------------------------------------------------------------------
 std::expected<LoadedSkinnedModelData, std::string>
 ModelLoader::LoadSkinned(const std::string& path) {
+    const FileFormat fileFormat = FormatOf(path);
     Assimp::Importer importer;
     // Deliberately no aiProcess_JoinIdenticalVertices: it can only be safe when
     // it also compares the bone weights it is about to merge, and the static
@@ -452,22 +465,31 @@ ModelLoader::LoadSkinned(const std::string& path) {
                 std::fprintf(stderr, "[ModelLoader] %s: embedded texture '%s' failed to decode\n",
                              path.c_str(), name.c_str());
             }
-        } else if (!LeavesDirectory(name)) {
-            // Not embedded, so it has to be a file: same directory rule as Load().
-            const std::string full = dir + name;
-            int w = 0, h = 0, channels = 0;
-            stbi_uc* pixels = stbi_load(full.c_str(), &w, &h, &channels, 4);
-            if (pixels) {
-                texture.desc.width = w;
-                texture.desc.height = h;
-                texture.desc.channels = 4;
-                texture.desc.pixels.assign(pixels, pixels + static_cast<std::size_t>(w) * h * 4);
-                stbi_image_free(pixels);
-            }
         } else {
-            std::fprintf(stderr, "[ModelLoader] %s: texture '%s' names a path outside the "
-                                 "model's own directory and is not loaded\n",
-                         path.c_str(), name.c_str());
+            // Normalise BEFORE the directory check: the check reasons about which
+            // directory a path escapes, and `..\..\..\textures\x.bmp` means something
+            // different depending on the separator convention. Testing the raw string
+            // first is what rejected 15 perfectly good paths in a PMX-derived asset.
+            std::string normalised = name;
+            for (char& c : normalised) {
+                if (c == '\\') c = '/';
+            }
+            if (LeavesDirectory(normalised)) {
+                std::fprintf(stderr, "[ModelLoader] %s: texture '%s' names a path outside the "
+                                     "model's own directory and is not loaded\n",
+                             path.c_str(), name.c_str());
+            } else {
+                const std::string full = dir + normalised;
+                int w = 0, h = 0, channels = 0;
+                stbi_uc* pixels = stbi_load(full.c_str(), &w, &h, &channels, 4);
+                if (pixels) {
+                    texture.desc.width = w;
+                    texture.desc.height = h;
+                    texture.desc.channels = 4;
+                    texture.desc.pixels.assign(pixels, pixels + static_cast<std::size_t>(w) * h * 4);
+                    stbi_image_free(pixels);
+                }
+            }
         }
 
         if (texture.desc.pixels.empty()) {
@@ -562,7 +584,15 @@ ModelLoader::LoadSkinned(const std::string& path) {
                 // broken" and sends you looking at the wrong end of the pipeline.
                 // The static Load() path is deliberately left alone: its existing
                 // demos sample their maps through their own shaders already.
-                dst.uv = glm::vec2(t.x, 1.0f - t.y);
+                //
+                // PMX is the exception. Its importer hands the atlas over already
+                // ordered top-row-first, so flipping v a second time puts every uv in
+                // the wrong half of the image: a white model whose few coloured patches
+                // (the sock stripe, the skirt print) land on the wrong body part. The
+                // flip is a property of the SOURCE format's convention, not of this
+                // loader, which is why it is keyed on the extension here.
+                const bool uvAlreadyTopDown = fileFormat == FileFormat::Pmx;
+                dst.uv = uvAlreadyTopDown ? glm::vec2(t.x, t.y) : glm::vec2(t.x, 1.0f - t.y);
             }
         }
 

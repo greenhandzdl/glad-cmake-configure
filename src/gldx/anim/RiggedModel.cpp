@@ -76,9 +76,48 @@ void RiggedModel::Upload(LoadedSkinnedModelData&& data, const RigProfile* rig) {
     // centimetres; a 1.63-unit one is already in metres. Guessing wrong is silent:
     // the camera ends up inside the model and the frame reads as "nothing loaded",
     // which gets debugged as a failed load rather than as a units bug.
-    unitScale_ = (rigHeight > 20.0f) ? 0.01f : 1.0f;
+    //
+    // The measurement above uses VERTICES, and on some files those disagree with the
+    // skeleton's own units: a PMX-derived asset here has 21-unit vertex space but bone
+    // origins at 12.1 (metres), so a vertices-only rule concludes "centimetres" and
+    // then shrinks a correctly-metre skeleton by 100x. Prefer the skeleton when it
+    // exists, because every joint position, the palette and the contact solve all live
+    // in bone space.
+    float boneSpan = 0.0f;
+    {
+        float lo = 1e9f, hi = -1e9f;
+        const int n = skeleton_.size();
+        for (int i = 0; i < n; ++i) {
+            const float d = glm::dot(glm::vec3(skeleton_.RestWorld(i)[3]), up);
+            lo = std::min(lo, d);
+            hi = std::max(hi, d);
+        }
+        if (n > 0 && hi > lo) boneSpan = hi - lo;
+    }
+    // Judge by BONES where they are informative. A humanoid skeleton spans somewhere
+    // between 1 and 200 units depending on the export: 1.7 (metres), 16.2 (this PMX),
+    // 168 (centimetres). Those three all mean "one person", and the vertices cannot
+    // arbitrate because on this asset they disagree with the bones by a factor of 10.
+    //
+    // The rule therefore keys off the BONE span when it is plausible at all, and only
+    // falls back to the vertex heuristic when the skeleton is degenerate.
+    const bool bonesPlausible = boneSpan > 0.5f && boneSpan < 400.0f;
+    float boneScale = 1.0f;
+    if (bonesPlausible) {
+        // Normalise the skeleton's own span to a human height so unitScale_ means the
+        // same thing regardless of which convention the file used.
+        if (boneSpan > 100.0f)      boneScale = 0.01f;   // centimetres
+        else if (boneSpan > 8.0f)   boneScale = 0.1f;    // decimetres (this PMX: 16.2)
+        else                        boneScale = 1.0f;    // metres
+    }
+    unitScale_ = bonesPlausible ? boneScale : ((rigHeight > 20.0f) ? 0.01f : 1.0f);
     // The 0.2 m floor exists so a degenerate / empty file does not divide by ~0 in
     // the caller's camera framing; it is a guard, not a measurement.
+    //
+    // Height stays vertex-based: a BONE span excludes the skull top and the sole, so
+    // using it invented a 1.36 m character out of a 1.64 m one. What the skeleton
+    // legitimately decides is the UNIT (unitScale_), which is why that is computed
+    // from boneSpan above while the height is scaled by it here.
     heightMetres_ = std::max(rigHeight * unitScale_, 0.2f);
 
     // ---- orientation -----------------------------------------------------

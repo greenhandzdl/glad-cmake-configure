@@ -5,56 +5,95 @@
  * @file MmdNaming.h
  * @brief **demo 侧**的 MMD/PMX 命名族：日文骨名 -> 引擎的语义槽位。
  *
- * 这个文件是「引擎假设规范命名、demo 处理特异命名」那条分工的落点，也是唯一一个
- * 认识具体资产骨名的地方。引擎（`gldx::RigNaming`）只提供接口，不认识 `腕捩`、
- * `ひざD` 这类名字。
+ * ## 为什么它在 demo 而不是引擎
  *
- * ## 为什么要放在 demo 而不是引擎
+ * MMD 的骨名是 `下半身`、`ひざ.L`、`足首D.R` —— 这些是**日文自由文本**，不是
+ * 标准。引擎里那一族（`MixamoNaming` / `BipedNaming` / `UeNaming`）用的是
+ * 通行英文命名（`Hips` / `LeftLeg` / `LeftFoot`），那是任何资产都能对照的
+ * 通用结构。
  *
- * MMD 的骨名是**建模者自由文本**，不是标准：`ひざ` 和 `膝` 都有人用，`足首D` 的
- * `D` 表示"变形用"，不是所有人都加。把这类名字写进引擎，等于把一份特定资产的
- * 惯例当成了通用知识，而且每来一个新资产就要往引擎里加一张表。放在 demo 里，
- * 引擎的 `RigNaming` 列表保持"通用族"（Mixamo/Blender、3ds Max Biped、UE），
- * 特异写法留在它该在的地方。
+ * 把日文名写进引擎有两层代价：
+ *   1. 引擎要为每套"非英文命名"积累一张表，彼此还会撞车（`腰` 在别的日系工具
+ *      里可能指胸）；
+ *   2. 想用 MMD 资产的人会被迫接受一份他没法改的映射。
  *
- * ## 这个族覆盖的东西
+ * 放在 demo 里则相反：引擎只提供 `RigNaming` 接口，认识这套日文名的责任落在
+ * 使用者身上——想换个写法，改这个文件即可，不用重新编译引擎。
  *
- * 20 个必需槽位里，MMD 用一套完全不同的命名（见 NamesFor 的表）。此外它还有引擎
- * 必需槽位之外的**可选链**：
+ * ## 用法
  *
- *   · `スカート`（裙摆）：8 组 × 3 节，沿裙腰一圈辐射排布
- *   · `後ろ髪` / `前髪` / `横髪`（头发）：多条
- *   · 尾巴：本资产没有
+ *     gldx::RigProfile::Classify(skeleton, &animrigid::MmdNaming::Instance());
  *
- * 这些通过 `FindChain()` 报给引擎；报了之后解算才会动它们，没报就完全跳过——
- * 这正是 optional 的意义。
+ * ## 覆盖的范围
+ *
+ * 20 个必需槽位（见 `NamesFor()`），另外两类**可选链**：
+ *
+ *   · `スカート`（裙摆）：若干组 × 3 节，沿裙腰一圈辐射排布
+ *   · `後ろ髪` / `横髪`（头发）：多条
+ *
+ * 链找不到时返回 0 —— 没有尾巴没有裙子的角色走"跳过"分支，这正是 optional
+ * 的意义（`ChainSolver` 对空链直接返回）。
  */
 
-// NOTE: no `#include "gldx/..."` here. Those headers are attached to the named module
-// `gldx`, so a textual include from a consumerTU is a second declaration in the global
-// module - the compiler rejects it with "declaration of 'X' in the global module
-// follows declaration in module gldx". The consumer includes this header *after*
-// `import gldx;` and the types are already visible.
+// No gldx includes: those headers belong to the named module `gldx`, and a textual
+// include from a consumer is a second declaration in the global module. The including
+// .cpp does `import gldx;` FIRST, then includes this file.
 
 #include <span>
-#include <string>
 
 namespace animrigid {
 
+// ---------------------------------------------------------------------------
+// Bone name tables. These are the SPECIFIC part: Japanese text, per-export.
+//
+// MMD naming notes, so the next person does not reverse-engineer them again:
+//   · `.L` / `.R` (ASCII) carry the side. Full-width `ＩＫ` marks an IK control bone,
+//     which must NOT be used as a deform joint - the body would follow the IK target
+//     instead of the FK chain.
+//   · `D` in `ひざD` / `足首D` means "deform" (変形用): a duplicate the skin is actually
+//     weighted to.
+//   · `捩` means "twist" (腕捩 = arm twist), likewise not a hinge joint.
+// Every table is `static constexpr const char* const[]` at namespace scope because the
+// interface returns a span - a span over a temporary would dangle.
+inline constexpr const char* const kEmpty[] = {};
+
+inline constexpr const char* const kHips[]  = {"下半身", "腰", "センター"};
+inline constexpr const char* const kSpine[] = {"上半身", "上半身2"};
+inline constexpr const char* const kChest[] = {"上半身2", "上半身3"};
+inline constexpr const char* const kHead[]  = {"頭", "首"};
+inline constexpr const char* const kNeck[]  = {"首"};
+
+inline constexpr const char* const kLegUpL[]  = {"足.L", "左足", "脚.L"};
+inline constexpr const char* const kLegUpR[]  = {"足.R", "右足", "脚.R"};
+inline constexpr const char* const kLegLowL[] = {"ひざ.L", "左ひざ", "膝.L"};
+inline constexpr const char* const kLegLowR[] = {"ひざ.R", "右ひざ", "膝.R"};
+inline constexpr const char* const kFootL[]   = {"足首.L", "左足首", "足首D.L"};
+inline constexpr const char* const kFootR[]   = {"足首.R", "右足首", "足首D.R"};
+inline constexpr const char* const kToeL[]    = {"つま先.L", "左つま先"};
+inline constexpr const char* const kToeR[]    = {"つま先.R", "右つま先"};
+inline constexpr const char* const kArmUpL[]  = {"腕.L", "左腕", "腕捩.L"};
+inline constexpr const char* const kArmUpR[]  = {"腕.R", "右腕", "腕捩.R"};
+inline constexpr const char* const kArmLowL[] = {"ひじ.L", "左ひじ", "肘.L"};
+inline constexpr const char* const kArmLowR[] = {"ひじ.R", "右ひじ", "肘.R"};
+inline constexpr const char* const kHandL[]   = {"手首.L", "左手首"};
+inline constexpr const char* const kHandR[]   = {"手首.R", "右手首"};
+inline constexpr const char* const kClavL[]   = {"肩.L", "左肩"};
+inline constexpr const char* const kClavR[]   = {"肩.R", "右肩"};
+
 /**
- * MMD/PMX 标准骨架 + 这个资产的特异写法。
+ * MMD/PMX 命名族。这是一个**覆盖**：引擎用通行英文命名，这里把日文名映射上去。
  *
- * `family()` 返回 `"MMD/PMX"`，会出现在 `--on report` 的 rig 行里，便于确认
- * 这份资产到底被当成哪一族解析了。
+ * `family()` 返回 `"MMD/PMX (demo)"`，出现在 `--on report` 的 rig 行里，一眼能看出
+ * 这份资产是被 demo 侧的覆盖解析的，而不是引擎内置族。
  */
 class MmdNaming final : public gldx::RigNaming {
 public:
-    [[nodiscard]] const char* family() const noexcept override { return "MMD/PMX"; }
+    [[nodiscard]] const char* family() const noexcept override { return "MMD/PMX (demo)"; }
 
     [[nodiscard]] std::span<const char* const> NamesFor(gldx::RigSlot slot) const override;
 
     /**
-     * 骨架里大范围存在日文骨名才算 MMD。只看两三个名字会被恰好同名的别的资产骗到
+     * 骨架里大范围存在日文骨名才算 MMD。只看一两个名字会被恰好同名的别的资产骗到
      * （`センター`、`上半身` 这种词在日系其它工具里也有）。
      */
     [[nodiscard]] int Detect(const gldx::Skeleton& skeleton) const override;
