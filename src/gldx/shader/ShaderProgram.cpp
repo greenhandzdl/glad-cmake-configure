@@ -233,6 +233,17 @@ void ShaderProgram::Set(const std::string& name, const glm::mat4& v) const {
     glProgramUniformMatrix4fv(id_, Loc(name), 1, GL_FALSE, glm::value_ptr(v));
 }
 
+void ShaderProgram::SetArray(const std::string& name, const glm::mat4* values, int count,
+                             int first) const {
+    if (count <= 0 || values == nullptr) return;
+    // `name` must be the ARRAY's name (e.g. "uBones"), not "uBones[0]": GL treats
+    // glProgramUniformMatrix4fv's `location` as the first element and the name as the
+    // array, and querying "uBones[0]" for a program that declares `uBones[N]` happens
+    // to work on some drivers and returns -1 on others.
+    glProgramUniformMatrix4fv(id_, Loc(name), count, GL_FALSE,
+                              reinterpret_cast<const GLfloat*>(values));
+}
+
 void ShaderProgram::SetBlockBinding(const std::string& blockName, GLuint binding) const {
     const GLuint idx = glGetUniformBlockIndex(id_, blockName.c_str());
     if (idx != GL_INVALID_INDEX) {

@@ -119,6 +119,19 @@ public:
     void Set(const std::string& name, const glm::mat3& v) const;
     void Set(const std::string& name, const glm::mat4& v) const;
 
+    /**
+     * Upload a whole `mat4[]` uniform in ONE GL call, starting at `first`.
+     *
+     * The per-element path (`Set("uBones[i]", m)`) costs one location lookup and one
+     * `glProgramUniformMatrix4fv` per bone. On a 240-bone rig that is 240 driver calls
+     * per frame to move 15 KB, and the multi-mesh draw repeats it per program. This
+     * overload exists so the cost is one call for the whole palette.
+     *
+     * `first` is the index of `name`'s array element to start at, which is what lets a
+     * caller that shares one array (`uBones[0]`) upload it in one go.
+     */
+    void SetArray(const std::string& name, const glm::mat4* values, int count, int first = 0) const;
+
     // Associate a named uniform block with a UBO binding point. GLSL 4.10 has
     // no layout(binding=...) on blocks, so the mapping is done explicitly from
     // C++ (mirrors what UniformBuffer::BindBase(index) later binds against).

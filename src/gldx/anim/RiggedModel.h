@@ -280,6 +280,10 @@ private:
     std::vector<glm::mat4>   pose_;
     std::vector<glm::mat4>   palette_;
     std::vector<std::string> paletteNames_;
+
+    // The uniform array's own name ("uBones"), used by the single-call upload in
+    // BindPalette. Kept beside paletteNames_ so the two spellings cannot drift.
+    std::string paletteArrayName_ = "uBones";
     std::vector<std::string> missingTexturePaths_;
 
     std::string sourcePath_;

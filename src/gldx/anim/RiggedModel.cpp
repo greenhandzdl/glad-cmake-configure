@@ -148,6 +148,9 @@ void RiggedModel::Upload(LoadedSkinnedModelData&& data, const RigProfile* rig) {
     // reintroduced at the other end.
     pose_.resize(skeleton_.size());
     paletteNames_.clear();
+    // The array's own name, for the single-call upload path. `paletteNames_` keeps the
+    // per-element spellings only because a few demos still address individual bones.
+    paletteArrayName_ = "uBones";
     paletteNames_.reserve(skeleton_.size());
     for (std::size_t i = 0; i < skeleton_.size(); ++i) {
         restWorld_[i] = skeleton_.RestWorld(static_cast<int>(i));
@@ -363,9 +366,10 @@ void RiggedModel::BindPalette(const ShaderProgram& program,
         // truncation this guard exists for.
         return;
     }
-    for (std::size_t i = 0; i < count; ++i) {
-        program.Set(paletteNames_[i], palette[i]);
-    }
+    // One call for the whole array. The shader declares `uBones[N]`, so uploading
+    // from element 0 with the array's own name is the supported form; doing it
+    // per-element (240 driver calls per frame on this rig) is what this replaces.
+    program.SetArray(paletteArrayName_, palette.data(), static_cast<int>(count), 0);
 }
 
 } // namespace gldx
