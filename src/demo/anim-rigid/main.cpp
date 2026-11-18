@@ -96,6 +96,8 @@ import gldx;
 import gldxwin;
 import gldxcli;
 
+#include "MmdNaming.h"
+
 #include "Shaders.h"
 
 namespace {
@@ -212,6 +214,19 @@ enum class Action { Idle, Walk, Run, Crouch, CrouchWalk, Attack, Jump, Sit, Swim
 // lookup is gldx::RigProfile. What stays here is the scratch they write into
 // and the walk-specific numbers derived from them.
 // ---------------------------------------------------------------------------
+/**
+ * Which naming family resolves this asset's bone names.
+ *
+ * `Auto` is the old behaviour: the engine's built-in general-purpose families
+ * (Mixamo/Blender, 3ds Max Biped, UE) compete on Detect(). `Mmd` selects the
+ * demo-side MMD/PMX family, which is the only place that knows Japanese bone names.
+ *
+ * The point of having this as a runtime switch rather than a compile-time pick is
+ * that the *same* pose sources must drive both rigs: swapping the model plus this
+ * channel is the whole difference.
+ */
+enum class NamingChannel { Auto, Mmd };
+
 struct Character {
     gldx::RiggedModel model;
     gldx::RigProfile  rig;
@@ -251,6 +266,7 @@ struct Character {
     // head at -0.60 m). Sitting needs `seatedHip` slightly ABOVE the standing hip
     // height so the pelvis drops by the right amount and no more.
     float seatedHip  = 0.295f;
+    NamingChannel namingChannel = NamingChannel::Auto;
     float sitRise    = 0.0f;
     // Bind-space corner box of the pelvis, measured once at load. The SEATED solve uses
     // it (see GroundContact::AddBodyContact): sitting puts the weight on the seat, and
@@ -802,7 +818,30 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     //
     // So: classify the skeleton in place, measure the two numbers that depend on
     // the *measured* up axis, hand those to the model, and only then move the data.
-    character.rig = gldx::RigProfile::Classify(data.skeleton);
+    // The naming family is chosen **here, in the demo** - the engine only knows the
+    // interface. `--naming mmd` forces the MMD/PMX family; anything else (default
+    // "auto") lets RigProfile::Detect() pick among the built-in general-purpose
+    // families. This is the "channel" the task asks for: the same pose sources drive
+    // a Mixamo-named rig and an MMD-named one, and only this line differs.
+    const gldx::RigNaming* naming = nullptr;
+    if (character.namingChannel == NamingChannel::Mmd) naming = &animrigid::MmdNaming::Instance();
+    character.rig = gldx::RigProfile::Classify(data.skeleton, naming);
+    if (std::getenv("GLDX_DUMP_JOINTS")) {
+        auto show = [&](const char* label, int bone) {
+            if (bone < 0) { std::fprintf(stderr, "[joint] %-10s <unbound>\n", label); return; }
+            const glm::mat4 rw = data.skeleton.RestWorld(bone);
+            const glm::vec3 p(rw[3]);
+            std::fprintf(stderr, "[joint] %-10s idx=%-3d pos=(%+.3f %+.3f %+.3f)\n",
+                         label, bone, (double)p.x, (double)p.y, (double)p.z);
+        };
+        show("hips", character.rig.hips);
+        show("spine", character.rig.spine);
+        show("chest", character.rig.chest);
+        show("head", character.rig.head);
+        show("legUp.L", character.rig.legUp[gldx::kRigLeft]);
+        show("legLow.L", character.rig.legLow[gldx::kRigLeft]);
+        show("foot.L", character.rig.foot[gldx::kRigLeft]);
+    }
 
     // Where the sole plane is: the lowest bind-pose vertex projected on the rig's
     // up axis. It has to come from the VERTICES, not from the bones - the ankle
@@ -1449,7 +1488,7 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
 int main(int argc, char** argv) {
     const gldx::cli::Flags flags(argc, argv, {"hud", "walk", "ground", "wireframe", "maps", "normalmap", "report", "trace"},
                                  {"model", "speed", "fov", "yaw", "pitch", "distance", "freeze-at",
-                                  "target-y", "action"},
+                                  "target-y", "action", "naming"},
                                  "anim-rigid");
     if (flags.wantsHelp()) {
         flags.printUsage();
@@ -1605,6 +1644,15 @@ int main(int argc, char** argv) {
     // action parsing, so the table and `--action` cannot disagree.
     const std::string traceAction = view.trace
         ? flags.string("action", "walk") : std::string();
+
+    // Naming channel: which family resolves this asset's bone names. `auto` (default)
+    // lets the engine's general-purpose families compete; `mmd` picks the demo-side
+    // MMD/PMX family. This is the switch that lets the SAME pose sources drive a
+    // Mixamo-named rig and a Japanese-named one - the engine has no idea either exists.
+    {
+        const std::string namingOpt = flags.string("naming", "auto");
+        character.namingChannel = (namingOpt == "mmd") ? NamingChannel::Mmd : NamingChannel::Auto;
+    }
 
     // Test hook: press a number key at a given wall-clock second, so the behaviour the
     // number keys produce can be reproduced from a script. Without it the only way to
