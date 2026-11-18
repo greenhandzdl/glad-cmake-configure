@@ -304,6 +304,25 @@ ModelLoader::LoadSkinned(const std::string& path) {
         return std::unexpected(msg);
     }
 
+    // ---- normalise the bind matrices to ONE unit convention ----
+    //
+    // `aiBone::mOffsetMatrix` arrives in whatever units the file used, and that
+    // differs per exporter even though the call is the same:
+    //
+    //     aigei/MMD    inv_trans = (-0.070, 0.000, 0.000)   metres
+    //     hunyuan      inv_trans = (-11.709, -98.228, 4.384) centimetres
+    //
+    // Everything downstream (the palette's linear part, `RiggedModel::unitScale_`,
+    // the caller's `palette * (-inverseBind[3])`) assumes ONE convention. Mixing them
+    // does not fail loudly: the palette's linear part is still 0.01, so feeding a
+    // metre-space bind origin through it scales a second time and the pelvis lands at
+    // 0.017 m instead of 0.97 m - every height and ground-contact channel silently
+    // wrong by 100x, with no error anywhere.
+    //
+    // Normalise to the LARGER magnitude (rig units, i.e. centimetres here): pick the
+    // convention from the rig's own bind origin spread, then scale the whole set.
+    // Scaling up rather than down keeps the values away from float denormals for tiny
+    // assets, and `unitScale_` (rigHeight > 20 ? 0.01 : 1.0) then does the rest.
     // Parents-first insertion: recurse up the node tree until an ancestor that is
     // itself a bone, so Armature / root / any other non-skinned intermediate node
     // does not become a fake bone.

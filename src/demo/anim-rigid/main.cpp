@@ -1127,15 +1127,19 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                 // which is world[i][3] exactly. Taking the origin instead puts every
                 // joint at the root's translation and makes the whole table read zero
                 // (measured before this fix: idle head 0.014 m).
+                // World matrices for this pose. `ComputeWorld` is the one place that
+                // knows how a local pose chain composes with the root transform, and it
+                // already applies the model's unit scale - which is why neither the
+                // palette (mesh->bone) nor `RestWorld * pose` (double transform) can be
+                // used as a drop-in for a joint's world position.
+                std::vector<glm::mat4> worldMats;
+                skeleton.ComputeWorld(pose, model.Mat4(), worldMats);
                 auto bonePos = [&](int bone) {
-                    // `bone < 0` is the normal "this rig has no such slot" case, not an error:
-                    // skeleton.bone(-1) is nullptr and dereferencing it crashed with
-                    // EXC_BAD_ACCESS at address 0x4c on a rig with unbound slots.
-                    if (bone < 0 || bone >= static_cast<int>(palette.size())) return glm::vec3(0.0f);
-                    const glm::vec4 p = palette[(std::size_t)bone] *
-                                        glm::vec4(-glm::vec3(skeleton.bone(bone)->inverseBind[3]),
-                                                  1.0f);
-                    return glm::vec3(p);
+                    // `bone < 0` is the normal "this rig has no such slot" case, not an
+                    // error: skeleton.bone(-1) is nullptr, and dereferencing it crashed
+                    // with EXC_BAD_ACCESS at 0x4c on a rig with unbound slots.
+                    if (bone < 0 || bone >= static_cast<int>(worldMats.size())) return glm::vec3(0.0f);
+                    return glm::vec3(worldMats[(std::size_t)bone][3]);
                 };
                 const glm::vec3 hip = bonePos(character.rig.hips);
                 const glm::vec3 head = bonePos(character.rig.head);
