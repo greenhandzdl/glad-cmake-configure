@@ -497,6 +497,10 @@ ModelLoader::LoadSkinned(const std::string& path) {
             out.missingTexturePaths.push_back(name);
             return -1;
         }
+        if (std::getenv("GLDX_TEXCHK"))
+            std::fprintf(stderr, "[texchk] role=%d idx=%d '%s' %dx%d\n",
+                         static_cast<int>(role), static_cast<int>(out.textures.size()),
+                         name.c_str(), texture.desc.width, texture.desc.height);
         const int index = static_cast<int>(out.textures.size());
         out.textures.push_back(std::move(texture));
         textureIndexByName.emplace(name, index);
@@ -517,6 +521,13 @@ ModelLoader::LoadSkinned(const std::string& path) {
             if (src->Get(AI_MATKEY_BASE_COLOR, base) != AI_SUCCESS) {
                 src->Get(AI_MATKEY_COLOR_DIFFUSE, base);
             }
+            // Opacity is a SEPARATE key, and the one assimp's MMD importer actually
+            // fills: it writes PMX's diffuse[3] to AI_MATKEY_OPACITY and only the RGB
+            // three floats to COLOR_DIFFUSE. A material whose alpha is 0 therefore
+            // arrives with base.a == 1 and reads as fully opaque, which is how this
+            // loader came to draw parts the artist had switched off.
+            float opacity = 1.0f;
+            if (src->Get(AI_MATKEY_OPACITY, opacity) == AI_SUCCESS) base.a = opacity;
             material.baseColor = glm::vec4(base.r, base.g, base.b, base.a);
             src->Get(AI_MATKEY_METALLIC_FACTOR, material.metallic);
             src->Get(AI_MATKEY_ROUGHNESS_FACTOR, material.roughness);
@@ -538,6 +549,60 @@ ModelLoader::LoadSkinned(const std::string& path) {
                     loadMap(src, aiTextureType_SHININESS, SkinnedTexture::Role::Roughness);
             }
         }
+        // MMD alpha comes from the texture, and assimp drops that fact on the floor.
+        //
+        // PMX has no per-material blend flag that assimp maps to anything; what it
+        // has is a diffuse TEXTURE whose own alpha channel is the material's
+        // transparency. A face model paints blush, eyeliner and the mouth line into
+        // one mostly-transparent "facial" sheet composited over the head. Imported
+        // with a constant alpha of 1 that sheet is drawn solid, so a soft red
+        // eyeliner becomes a hard red ring around the eyes.
+        //
+        // The discriminator is the DECODED ALPHA, not the format and not "has an
+        // albedo": on this asset only 4 of 15 maps carry any transparency at all
+        // (facial 82.7 %, pants 5.8 %, bra 3.6 %, hair 0.6 %), and marking all 21
+        // materials blended - which a `fileFormat == Pmx` test did - pushes the
+        // whole character through the blend path with depth writes off, so cloth
+        // and hair start drawing through each other.
+        //
+        // Reading alpha here is also the honest test for the generic formats, but it
+        // would change behaviour for existing glTF/FBX assets whose maps carry an
+        // unused alpha channel, so this stays gated on PMX and only tightens from
+        // there.
+        bool hasAlpha = false;
+        if (fileFormat == FileFormat::Pmx && material.albedoTexture >= 0) {
+            const SkinnedTexture& albedo =
+                out.textures[static_cast<std::size_t>(material.albedoTexture)];
+            const std::vector<unsigned char>& px = albedo.desc.pixels;
+            // A handful of transparent texels is not a transparent material: every
+            // atlas has a few stray pixels at the seams. 5 % of the map is well above
+            // that and well below "this is a compositing sheet".
+            std::size_t transparent = 0;
+            for (std::size_t i = 3; i < px.size(); i += 4) {
+                if (px[i] < 250) ++transparent;
+            }
+            const std::size_t texels = px.size() / 4;
+            hasAlpha = texels > 0 && transparent * 20 > texels;   // > 5 %
+        }
+
+        // A PMX material whose DIFFUSE ALPHA is 0 is a part the artist switched OFF.
+        //
+        // MMD models ship optional clothing in the same mesh, and the author turns a
+        // piece off by setting its material alpha to 0 rather than deleting faces -
+        // that is how the same file offers "with boots" and "barefoot". Blender opens
+        // such a file and shows the character barefoot: 8 of this asset's 60 materials
+        // are alpha 0 (靴2 / 靴2金属部 boots, ブラ / ブラ_レース部分 / ブラリボン bra,
+        // 赤面 / 照れ blush). assimp reports that alpha faithfully, and this loader was
+        // throwing it away and drawing the parts, so the render grew white boots the
+        // reference does not have.
+        //
+        // Skipping the draw (not blending at alpha 0) is what matches the author's
+        // intent and Blender: an alpha-0 quad still writes depth if it is merely
+        // blended, and those hidden shells sit exactly where the visible skin is.
+        if (fileFormat == FileFormat::Pmx && material.baseColor.a <= 0.004f) {
+            material.hidden = true;
+        }
+        material.blended = hasAlpha;
         const int index = static_cast<int>(out.materials.size());
         out.materials.push_back(material);
         materialIndexBySceneIndex.emplace(sceneMaterialIndex, index);
@@ -585,14 +650,24 @@ ModelLoader::LoadSkinned(const std::string& path) {
                 // The static Load() path is deliberately left alone: its existing
                 // demos sample their maps through their own shaders already.
                 //
-                // PMX is the exception. Its importer hands the atlas over already
-                // ordered top-row-first, so flipping v a second time puts every uv in
-                // the wrong half of the image: a white model whose few coloured patches
-                // (the sock stripe, the skirt print) land on the wrong body part. The
-                // flip is a property of the SOURCE format's convention, not of this
-                // loader, which is why it is keyed on the extension here.
-                const bool uvAlreadyTopDown = fileFormat == FileFormat::Pmx;
-                dst.uv = uvAlreadyTopDown ? glm::vec2(t.x, t.y) : glm::vec2(t.x, 1.0f - t.y);
+                // PMX needs the SAME flip, and an earlier version of this comment
+                // claimed the opposite. It said the PMX importer "hands the atlas over
+                // already ordered top-row-first, so flipping v a second time puts every
+                // uv in the wrong half". That conclusion came from a model rendering
+                // all-white, and it was not the UVs - it was the demo binding ONE
+                // material for all 60 meshes, so every panel sampled the near-white
+                // skin atlas. The evidence could not distinguish "wrong half of the
+                // image" from "right half, wrong image", and the fix chosen assumed
+                // the former.
+                //
+                // What settled it was the eye mesh: its UV rect covers the iris in the
+                // flipped convention and the eyebrows in the as-is one, and with no
+                // flip the character rendered with gold eyebrow-arcs pasted over its
+                // eyes. Every atlas in this asset agrees - hair, socks, skirt prints and
+                // the facial sheet all land correctly with the flip and smear without
+                // it. So there is no format exception: assimp's own v convention is
+                // what it is, and one flip serves both formats.
+                dst.uv = glm::vec2(t.x, 1.0f - t.y);
             }
         }
 

@@ -283,6 +283,91 @@ glm::mat4 RiggedModel::Mat4() const {
     return glm::mat4(orientation_) * glm::scale(glm::mat4(1.0f), glm::vec3(unitScale_));
 }
 
+
+namespace {
+
+// Resolve a material index to its slot, or -1 when the model has no such material.
+int MaterialIndexOrNone(const std::vector<SkinnedMaterial>& mats, int material) {
+    if (material < 0 || static_cast<std::size_t>(material) >= mats.size()) return -1;
+    return material;
+}
+
+}  // namespace
+
+const Texture2D& RiggedModel::AlbedoOrFallback(int material) const {
+    const int mi = MaterialIndexOrNone(materials_, material);
+    if (mi >= 0) {
+        const int index = materials_[static_cast<std::size_t>(mi)].albedoTexture;
+        if (index >= 0 && static_cast<std::size_t>(index) < textures_.size()) {
+            return textures_[static_cast<std::size_t>(index)];
+        }
+    }
+    return fallbackAlbedo_;
+}
+
+const Texture2D& RiggedModel::NormalOrFallback(int material) const {
+    const int mi = MaterialIndexOrNone(materials_, material);
+    if (mi >= 0) {
+        const int index = materials_[static_cast<std::size_t>(mi)].normalTexture;
+        if (index >= 0 && static_cast<std::size_t>(index) < textures_.size()) {
+            return textures_[static_cast<std::size_t>(index)];
+        }
+    }
+    return fallbackNormal_;
+}
+
+const Texture2D& RiggedModel::MetallicOrFallback(int material) const {
+    const int mi = MaterialIndexOrNone(materials_, material);
+    if (mi >= 0) {
+        const int index = materials_[static_cast<std::size_t>(mi)].metallicTexture;
+        if (index >= 0 && static_cast<std::size_t>(index) < textures_.size()) {
+            return textures_[static_cast<std::size_t>(index)];
+        }
+    }
+    return fallbackScalar_;
+}
+
+const Texture2D& RiggedModel::RoughnessOrFallback(int material) const {
+    const int mi = MaterialIndexOrNone(materials_, material);
+    if (mi >= 0) {
+        const int index = materials_[static_cast<std::size_t>(mi)].roughnessTexture;
+        if (index >= 0 && static_cast<std::size_t>(index) < textures_.size()) {
+            return textures_[static_cast<std::size_t>(index)];
+        }
+    }
+    return fallbackScalar_;
+}
+
+bool RiggedModel::hasAlbedo(int material) const {
+    const int mi = MaterialIndexOrNone(materials_, material);
+    return mi >= 0 && materials_[static_cast<std::size_t>(mi)].albedoTexture >= 0;
+}
+
+bool RiggedModel::hasNormal(int material) const {
+    const int mi = MaterialIndexOrNone(materials_, material);
+    return mi >= 0 && materials_[static_cast<std::size_t>(mi)].normalTexture >= 0;
+}
+
+bool RiggedModel::hasMetallic(int material) const {
+    const int mi = MaterialIndexOrNone(materials_, material);
+    return mi >= 0 && materials_[static_cast<std::size_t>(mi)].metallicTexture >= 0;
+}
+
+bool RiggedModel::hasRoughness(int material) const {
+    const int mi = MaterialIndexOrNone(materials_, material);
+    return mi >= 0 && materials_[static_cast<std::size_t>(mi)].roughnessTexture >= 0;
+}
+
+bool RiggedModel::isBlended(int material) const {
+    const int mi = MaterialIndexOrNone(materials_, material);
+    return mi >= 0 && materials_[static_cast<std::size_t>(mi)].blended;
+}
+
+bool RiggedModel::isHidden(int material) const {
+    const int mi = MaterialIndexOrNone(materials_, material);
+    return mi >= 0 && materials_[static_cast<std::size_t>(mi)].hidden;
+}
+
 const Texture2D& RiggedModel::AlbedoOrFallback() const {
     if (hasAlbedo_) {
         const int index = materials_.front().albedoTexture;

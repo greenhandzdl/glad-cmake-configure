@@ -113,7 +113,44 @@ int MmdNaming::FindChain(const gldx::Skeleton& skeleton, gldx::RigChainKind kind
         }
         return written;
     }
-    if (kind != gldx::RigChainKind::Skirt) return 0;   // no tail / ear chain here
+    // The tail is ONE chain, not a set of panels: `しっぽ１` .. `しっぽ１２` (plus a
+    // base joint `しっぽ支`). It is a single articulated rope hanging off the hips, so
+    // the order is simply 1, 2, 3, ... and the solver wants them base-to-tip.
+    //
+    // Returning 0 here - which this used to do, with a comment claiming the asset had
+    // no tail - is NOT a neutral no-op. An unsolved chain does not disappear; it stays
+    // welded in bind pose. On a tail that reads as a thick rigid tube folded at the
+    // hip, and nothing in the picture points at this function. The report line says
+    // `kind=0 count=0`, which looks like "the asset has no tail" rather than "the
+    // lookup was never asked".
+    //
+    // MMD tails appear in two shapes: numbered `しっぽ１`, or per-segment suffixed
+    // `しっぽ１-１`. Try plain-numbered first, then the dashed reading, and stop at the
+    // first gap - a hole mid-chain means this is a different chain.
+    if (kind == gldx::RigChainKind::Tail) {
+        int written = 0;
+        for (int seg = 1; seg <= maxOut; ++seg) {
+            char name[64];
+            std::size_t pos = 0;
+            const char* prefix = "しっぽ";
+            for (const char* p = prefix; *p && pos + 1 < sizeof(name); ++p) name[pos++] = *p;
+            name[pos] = '\0';
+            AppendFullWidthDigits(name, sizeof(name), pos, seg);
+            int bone = skeleton.Find(name);
+            if (bone < 0) {
+                std::size_t dashed = pos;
+                if (dashed + 1 < sizeof(name)) name[dashed++] = '-';
+                name[dashed] = '\0';
+                AppendFullWidthDigits(name, sizeof(name), dashed, 1);
+                bone = skeleton.Find(name);
+            }
+            if (bone < 0) break;
+            out[written++] = bone;
+        }
+        return written;
+    }
+
+    if (kind != gldx::RigChainKind::Skirt) return 0;   // no ear chain here
 
     // The skirt is **not one chain**: it is N radial panels of 3 joints each
     // (`スカート1-0..2`, `スカート2-0..2`, ...). Feeding only one panel would animate

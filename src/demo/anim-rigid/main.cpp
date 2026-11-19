@@ -109,7 +109,16 @@ constexpr float kPi = 3.14159265358979323846f;
 // the shader fails the build instead of indexing past the end of the array.
 static_assert(gldx::kMaxBonePalette == 254, "uBones[N] in Shaders.h must match gldx::kMaxBonePalette");
 
-constexpr const char* kDefaultModel = "src/demo/anim-rigid/demo_should_be_ignored.fbx";
+// The asset this demo is built around: SKINNED, textured, and named in a family the
+// demo overrides (MMD/PMX), which is what makes the naming channel testable by just
+// running the binary. It also carries the optional skirt/hair chains.
+//
+// `demo_should_be_ignored.fbx` used to be the default, but it is a placement slot that
+// the repo deliberately does NOT ship, so `./output/anim-rigid` with no arguments used
+// to open on a load error - and every HUD line then read as "nothing works" rather
+// than "no model". A default that only works when the user passes --model is not a
+// default.
+constexpr const char* kDefaultModel = "src/assets/models/aigei/Lamy_Idol_Mark2_1.0.pmx";
 
 // ---------------------------------------------------------------------------
 // The gait. This is the part that is actually this demo's - everything it reads
@@ -487,6 +496,21 @@ struct View {
 
     float fov      = 42.0f;
     float speed    = 1.30f;   // metres per second of floor travel
+    // `--hide-mat N`: skip every mesh bound to material N. Diagnosis only - when a
+    // patch of the model is the wrong colour, the question is *which draw* paints
+    // it, and the fastest answer is to delete that draw and look again. Reading the
+    // material table cannot answer it: MMD models routinely ship a dozen materials
+    // that all have white base colours and the colour arrives from the texture, so
+    // "who is red here" has no textual answer.
+    int hideMaterial = -1;
+    // `--only-mat N`: the converse - draw nothing but material N. Together with
+    // --hide-mat it turns "which mesh is this pixel" into two snapshots instead of
+    // a guess.
+    int onlyMaterial = -1;
+    // `--on allparts`: draw the parts the asset switched off (PMX diffuse alpha 0).
+    // Default off, because the author's default look is the reference this demo is
+    // verified against; this switch exists to A/B that decision.
+    bool allParts = false;
     // What the number keys asked for. Applied to the machine inside the frame loop,
     // never from a callback (see the OnKey comment).
     Action requestAction = Action::Walk;
@@ -653,38 +677,137 @@ public:
             // drop the whole call (the failure looks like "the model vanished").
             // AlbedoOrFallback() and friends are that guarantee, so this loop has
             // no null case to handle.
+            // ---- per-mesh material binding ----
+            //
+            // This loop used to bind ONE material (`PrimaryMaterial()`) and its maps
+            // before drawing every mesh. On a 60-mesh / 15-material character that is
+            // silently wrong: every panel samples the first material's atlas, which on
+            // this asset is the near-white skin map - so a fully textured model
+            // rendered white, and the few coloured patches that showed through were
+            // the one image's non-white corners landing somewhere plausible.
+            //
+            // The maps and the material scalars are now chosen per mesh through
+            // `meshMaterial()[i]`, and the `uHas*` flags move with them.
             const bool useMaps = view_.maps;
-            const bool hasNormal = useMaps && view_.normalMap && model.hasNormal();
-            const gldx::Texture2D& albedo = useMaps ? model.AlbedoOrFallback() : model.fallbackAlbedo();
-            const gldx::Texture2D& normal = hasNormal ? model.NormalOrFallback() : model.fallbackNormal();
-            const gldx::Texture2D& metallic =
-                useMaps ? model.MetallicOrFallback() : model.fallbackScalar();
-            const gldx::Texture2D& roughness =
-                useMaps ? model.RoughnessOrFallback() : model.fallbackScalar();
-            albedo.Bind(0);
-            normal.Bind(1);
-            metallic.Bind(2);
-            roughness.Bind(3);
-            skin_->Set("uAlbedo", 0);
-            skin_->Set("uNormal", 1);
-            skin_->Set("uMetallic", 2);
-            skin_->Set("uRoughness", 3);
-            // A sampler bound to a fallback is still a sampler *sampled*; the flag
-            // says whether the value it returns means anything, which is what the
-            // shader branches on.
-            skin_->Set("uHasAlbedo", (useMaps && model.hasAlbedo()) ? 1 : 0);
-            skin_->Set("uHasNormal", hasNormal ? 1 : 0);
-            skin_->Set("uHasMetallic", (useMaps && model.hasMetallic()) ? 1 : 0);
-            skin_->Set("uHasRoughness", (useMaps && model.hasRoughness()) ? 1 : 0);
+            const bool useNormal = useMaps && view_.normalMap;
+            const auto& meshMat = model.meshMaterial();
+            const auto& materials = model.materials();
 
-            const gldx::SkinnedMaterial material = model.PrimaryMaterial();
-            skin_->Set("uBaseColor", material.baseColor);
-            skin_->Set("uMetallicFactor", material.metallic);
-            skin_->Set("uRoughnessFactor", material.roughness);
+            int boundMaterial = -2;   // -2 = nothing bound yet, -1 = out of range
+            bool blending = glIsEnabled(GL_BLEND) == GL_TRUE;   // tracked, not assumed off
+            if (meshMat.empty()) {
+                // A rig with no material list at all: bind the fallbacks once so every
+                // sampler still points at a complete texture (Apple drops the draw
+                // otherwise) and let the flags switch the sampling off.
+                const gldx::Texture2D& albedo = model.fallbackAlbedo();
+                const gldx::Texture2D& normal = model.fallbackNormal();
+                const gldx::Texture2D& scalar = model.fallbackScalar();
+                albedo.Bind(0);
+                normal.Bind(1);
+                scalar.Bind(2);
+                scalar.Bind(3);
+                skin_->Set("uAlbedo", 0);
+                skin_->Set("uNormal", 1);
+                skin_->Set("uMetallic", 2);
+                skin_->Set("uRoughness", 3);
+                skin_->Set("uHasAlbedo", 0);
+                skin_->Set("uHasNormal", 0);
+                skin_->Set("uHasMetallic", 0);
+                skin_->Set("uHasRoughness", 0);
+                boundMaterial = -1;
+            }
 
-            for (const gldx::SkinnedMesh& mesh : model.meshes()) {
-                mesh.Draw();
+            for (std::size_t mi = 0; mi < model.meshes().size(); ++mi) {
+                const int matIndex = (mi < meshMat.size()) ? meshMat[mi] : -1;
+
+                if (view_.hideMaterial >= 0 && matIndex == view_.hideMaterial) continue;
+                if (view_.onlyMaterial >= 0 && matIndex != view_.onlyMaterial) continue;
+                // Parts the asset switched off (PMX diffuse alpha 0) stay off: the
+                // author's default look is the reference, and these are optional
+                // clothing, not missing data. `--on allparts` draws them anyway for
+                // comparison.
+                if (!view_.allParts && model.isHidden(matIndex)) continue;
+
+                if (matIndex != boundMaterial) {
+                    boundMaterial = matIndex;
+                    const bool hasAlbedo = useMaps && model.hasAlbedo(matIndex);
+                    const bool hasNormal = useNormal && model.hasNormal(matIndex);
+                    const bool hasMetallic = useMaps && model.hasMetallic(matIndex);
+                    const bool hasRoughness = useMaps && model.hasRoughness(matIndex);
+
+                    model.AlbedoOrFallback(matIndex).Bind(0);
+                    model.NormalOrFallback(matIndex).Bind(1);
+                    model.MetallicOrFallback(matIndex).Bind(2);
+                    model.RoughnessOrFallback(matIndex).Bind(3);
+                    skin_->Set("uAlbedo", 0);
+                    skin_->Set("uNormal", 1);
+                    skin_->Set("uMetallic", 2);
+                    skin_->Set("uRoughness", 3);
+                    skin_->Set("uHasAlbedo", hasAlbedo ? 1 : 0);
+                    skin_->Set("uHasNormal", hasNormal ? 1 : 0);
+                    skin_->Set("uHasMetallic", hasMetallic ? 1 : 0);
+                    skin_->Set("uHasRoughness", hasRoughness ? 1 : 0);
+
+                    if (matIndex >= 0 && static_cast<std::size_t>(matIndex) < materials.size()) {
+                        const gldx::SkinnedMaterial& m = materials[static_cast<std::size_t>(matIndex)];
+                        if (std::getenv("GLDX_MAT"))
+                            std::fprintf(stderr, "[mat] %d base=(%.2f %.2f %.2f %.2f) alb=%d\n",
+                                         matIndex, (double)m.baseColor.r, (double)m.baseColor.g,
+                                         (double)m.baseColor.b, (double)m.baseColor.a,
+                                         m.albedoTexture);
+                        skin_->Set("uBaseColor", m.baseColor);
+                        skin_->Set("uMetallicFactor", m.metallic);
+                        skin_->Set("uRoughnessFactor", m.roughness);
+                    }
+                }
+
+                if (std::getenv("GLDX_DRAWMESH")) {
+                    static int shown = 0;
+                    if (shown++ < 25)
+                        std::fprintf(stderr, "[draw] mesh %zu mat=%d verts=%zu\n", mi, matIndex,
+                                     model.meshes()[mi].vertexCount());
+                }
+
+                // ---- alpha blending, per material ----
+                //
+                // MMD face models paint blush, eyeliner and the mouth line on one
+                // mostly-transparent sheet laid over the head. Drawn opaque it is a
+                // solid-band tattoo; drawn blended it is a soft wash. The blend state
+                // is ours to set because this pass owns GL state, so it has to be set
+                // per mesh, not once (one character legitimately mixes both).
+                //
+                // Depth writes are left OFF for blended meshes: that sheet sits a few
+                // millimetres off the skin, and with depth writes on it would occlude
+                // the eyes drawn later in the same frame. It is painted geometry, not
+                // a solid surface, so it has no business in the depth buffer.
+                const bool blended = useMaps && model.isBlended(matIndex);
+                if (blended != blending) {
+                    blending = blended;
+                    if (blended) {
+                        glEnable(GL_BLEND);
+                        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                        glDepthMask(GL_FALSE);
+                    } else {
+                        glDisable(GL_BLEND);
+                        glDepthMask(GL_TRUE);
+                    }
+                }
+                // The blend equation multiplies by the FRAGMENT alpha, so switching
+                // GL_BLEND on is only half the job - the shader has to emit the
+                // texture's alpha rather than a constant 1.0. Set on every mesh
+                // because the value follows the material, not the pass.
+                skin_->Set("uBlended", blended ? 1 : 0);
+
+                model.meshes()[mi].Draw();
                 ++draws;
+            }
+
+            // Pass-local GL state is restored, never inherited: the next pass (the HUD,
+            // in particular) draws its glyphs blended and assumes it is the one turning
+            // blending on.
+            if (blending) {
+                glDisable(GL_BLEND);
+                glDepthMask(GL_TRUE);
             }
         }
 
@@ -1522,9 +1645,9 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
 } // namespace
 
 int main(int argc, char** argv) {
-    const gldx::cli::Flags flags(argc, argv, {"hud", "walk", "ground", "wireframe", "maps", "normalmap", "report", "trace"},
+    const gldx::cli::Flags flags(argc, argv, {"hud", "walk", "ground", "wireframe", "maps", "normalmap", "report", "trace", "allparts"},
                                  {"model", "speed", "fov", "yaw", "pitch", "distance", "freeze-at",
-                                  "target-y", "action", "naming"},
+                                  "target-y", "action", "naming", "hide-mat", "only-mat"},
                                  "anim-rigid");
     if (flags.wantsHelp()) {
         flags.printUsage();
@@ -1538,10 +1661,13 @@ int main(int argc, char** argv) {
     view.maps      = flags.on("maps", true);
     view.normalMap = flags.on("normalmap", true);
     view.showHud   = flags.on("hud", true);
+    view.allParts  = flags.on("allparts", false);
     view.report    = flags.on("report", false);
     view.trace     = flags.on("trace", false);
     view.speed     = flags.real("speed", view.speed, 0.2f, 6.0f);
     view.fov       = flags.real("fov", view.fov, 15.0f, 100.0f);
+    view.hideMaterial = flags.integer("hide-mat", -1);
+    view.onlyMaterial = flags.integer("only-mat", -1);
     view.orbit.settings().yaw =
         flags.real("yaw", view.orbit.settings().yaw);
     view.orbit.settings().pitch =
@@ -1696,7 +1822,11 @@ int main(int argc, char** argv) {
     // MMD/PMX family. This is the switch that lets the SAME pose sources drive a
     // Mixamo-named rig and a Japanese-named one - the engine has no idea either exists.
     {
-        const std::string namingOpt = flags.string("naming", "auto");
+        // A .pmx file is MMD by construction, so auto-detect from the name rather than
+        // forcing the user to remember a flag pair. `--naming auto|mmd` still wins.
+        const bool looksMmd = modelPath.size() > 4 &&
+                              modelPath.compare(modelPath.size() - 4, 4, ".pmx") == 0;
+        const std::string namingOpt = flags.string("naming", looksMmd ? "mmd" : "auto");
         character.namingChannel = (namingOpt == "mmd") ? NamingChannel::Mmd : NamingChannel::Auto;
     }
 

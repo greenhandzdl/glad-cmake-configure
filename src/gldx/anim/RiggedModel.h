@@ -168,6 +168,45 @@ public:
     // This is the accessor a draw loop should call - it is the answer to trap (1)
     // and it costs one branch.
     [[nodiscard]] const Texture2D& AlbedoOrFallback() const;
+
+    /**
+     * Per-MATERIAL accessors.
+     *
+     * `AlbedoOrFallback()` and friends answer for `materials().front()` only, which is
+     * correct for a one-material model and silently wrong for anything else: a
+     * 60-mesh character with 15 materials drawn through the front material's map is
+     * uniformly the colour of that one image. That is exactly how a fully textured
+     * asset rendered white - the skin atlas is near-white, so every panel sampled it.
+     *
+     * Callers that draw a mesh list must pick the map by that mesh's material index
+     * (`meshMaterial()[i]`), which is what these overloads are for.
+     */
+    [[nodiscard]] const Texture2D& AlbedoOrFallback(int material) const;
+    [[nodiscard]] const Texture2D& NormalOrFallback(int material) const;
+    [[nodiscard]] const Texture2D& MetallicOrFallback(int material) const;
+    [[nodiscard]] const Texture2D& RoughnessOrFallback(int material) const;
+
+    /** Does THIS material carry the given map? The `uHas*` flags must match. */
+    [[nodiscard]] bool hasAlbedo(int material) const;
+    [[nodiscard]] bool hasNormal(int material) const;
+    [[nodiscard]] bool hasMetallic(int material) const;
+    [[nodiscard]] bool hasRoughness(int material) const;
+    /**
+     * Should this material's draw be alpha-blended (alpha sampled from the albedo)?
+     *
+     * The caller owns the blend state, so this is a question it has to ask - which
+     * makes it easy to forget, and the failure is silent and ugly: a whole
+     * transparent "facial" sheet painted opaque. See SkinnedMaterial::blended.
+     */
+    [[nodiscard]] bool isBlended(int material) const;
+
+    /**
+     * Was this material switched off by the asset (PMX diffuse alpha 0)?
+     *
+     * A caller that draws anyway gets a character wearing the parts the author hid -
+     * white boots over bare feet, a bra under a dress. See SkinnedMaterial::hidden.
+     */
+    [[nodiscard]] bool isHidden(int material) const;
     [[nodiscard]] const Texture2D& NormalOrFallback() const;
     [[nodiscard]] const Texture2D& MetallicOrFallback() const;
     [[nodiscard]] const Texture2D& RoughnessOrFallback() const;

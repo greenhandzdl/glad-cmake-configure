@@ -17,7 +17,15 @@ namespace {
 // Bump when the layout below changes. Everything (including the string fields) is
 // written in order, so any structural change invalidates old files wholesale - which
 // is the point: a cache that can be *half* valid is worse than no cache.
-constexpr uint32_t kFormatVersion = 1;
+//
+// v2: SkinnedMaterial gained `blended`. `WriteVec` dumps the struct as raw bytes, so
+// adding a member silently changes the stride. Without a bump an OLD file still
+// passes the version check and is then read back with every field after `twoSided`
+// shifted by one bool - which parsed cleanly and produced an EMPTY material list, so
+// the model rendered with fallback textures and nothing looked corrupt enough to
+// notice. Bump this in the same commit as any change to a struct that goes through
+// WriteVec/ReadVec.
+constexpr uint32_t kFormatVersion = 2;
 
 constexpr char kMagic[8] = {'G', 'L', 'D', 'X', 'M', 'D', 'L', '1'};
 

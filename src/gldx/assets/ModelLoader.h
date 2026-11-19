@@ -53,6 +53,22 @@ struct SkinnedMaterial {
     float     metallic  = 0.0f;
     float     roughness = 0.5f;
     bool      twoSided  = false;
+    // Draw this material with alpha blending, alpha coming from the albedo texture.
+    // PMX/MMD has no per-material blend flag that survives import, yet its face
+    // models put blush, eyeliner and the mouth line into one mostly-transparent
+    // "facial" sheet composited over the head - so that sheet MUST be blended or it
+    // paints as solid paint. The loader sets this for PMX; a generic glTF/FBX
+    // material is left alone because there alpha=1 legitimately means "opaque,
+    // ignore the map's alpha channel" (see the PMX branch in ModelLoader.cpp).
+    bool      blended   = false;
+    // Do not draw this material at all.
+    //
+    // MMD/PMX models carry optional parts (boots, bra, blush) in the same mesh and the
+    // author switches them off by setting the material's diffuse alpha to 0. Honouring
+    // that is what makes the render match the file's own default appearance; drawing
+    // them puts white boots on a barefoot character. Skinning/geometry stay loaded, so
+    // a caller can still decide to show them.
+    bool      hidden    = false;
     int       albedoTexture    = -1;
     int       normalTexture    = -1;
     int       metallicTexture  = -1;

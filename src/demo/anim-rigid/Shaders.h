@@ -91,6 +91,12 @@ uniform int   uHasRoughness;
 uniform vec4  uBaseColor;
 uniform float uMetallicFactor;
 uniform float uRoughnessFactor;
+// 1 when this mesh is drawn alpha-blended. MMD face models composite blush,
+// eyeliner and the mouth line onto the skin as ONE mostly-transparent image, and
+// the drawing code alone cannot express that: it turns GL_BLEND on, but the blend
+// equation multiplies by the FRAGMENT alpha, which was hard-coded to 1.0 - so
+// blending was "on" and the sheet still painted solid.
+uniform int   uBlended;
 
 out vec4 FragColor;
 
@@ -183,7 +189,16 @@ void main() {
     // No PostProcessChain in this demo, so the linear->display encode happens
     // here. Skipping it is the classic "colours are right but the image is dull"
     // bug, and it is invisible in an isolated shader review.
-    FragColor = vec4(pow(color, vec3(1.0 / 2.2)), 1.0);
+    //
+    // Alpha: the albedo's own channel, but only for meshes the caller declared
+    // blended. A plain mesh reports 1.0 no matter what its map's alpha says, so a
+    // material that happens to carry an unused alpha channel cannot punch holes in
+    // itself when blending is off - that was the failure mode this flag prevents.
+    float alpha = 1.0;
+    if (uBlended != 0) {
+        alpha = texture(uAlbedo, vUv).a * uBaseColor.a;
+    }
+    FragColor = vec4(pow(color, vec3(1.0 / 2.2)), alpha);
 }
 )GLSL";
 
