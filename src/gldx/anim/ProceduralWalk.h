@@ -99,10 +99,17 @@ struct WalkTuning {
     // 踝抵消小腿的世界倾角 `-(hip + knee)`，脚掌才平。漏掉时只有鞋跟着地，地面
     // 解算会把整具踮起的角色抬起来——实测 0.24 m，"怎么调都不蹲"就是这么来的。
     //
-    // 每次循环在地上铺的那一段，相对站立行走的比例。蹲行 0.5——步子小一半。
-    // 调用方要拿它同步"喂给 Sample 的相位"和"地面滚动量"，否则脚会滑（见
-    // ProceduralWalk::strideScale）。
-    [[nodiscard]] float strideScale() const noexcept { return 1.0f - 0.50f * crouch; }
+    // 每次循环在地上铺的那一段，相对站立行走的比例。调用方要拿它同步"喂给 Sample
+    // 的相位"和"地面滚动量"，否则脚会滑（见 ProceduralWalk::strideScale）。
+    //
+    // 0.33 不是估计值，是从姿态本身量出来的：髋 0.72 rad 前屈、膝 1.44 rad 折回后，
+    // 脚相对身体的水平可达跨度只剩站立的约三分之一（实测 foot 列 0.242 m，站立是
+    // 0.735 m）。之前写 0.5，地面比脚多铺三成，报告里 crouchwalk 的 `stride` 列
+    // 一直打 `<- SKATES`——那不是判据太严，是这两个数真的差了三成。
+    //
+    // 判据要能自己校核：改 `crouchHip`/`crouchKnee` 之后必须重新量一次脚掌跨度，
+    // 否则这个数会悄悄变成"地面滚得比脚快"。
+    [[nodiscard]] float strideScale() const noexcept { return 1.0f - 0.67f * crouch; }
 };
 
 /**

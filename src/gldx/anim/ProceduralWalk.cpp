@@ -136,10 +136,16 @@ void ProceduralWalk::SampleAtPhase(float phase, std::vector<glm::mat4>& outPose)
 
     // 躯干前倾。绕 side 的**正**向是往前（与腿相反：腿朝下，躯干朝上）。蹲得越深
     // 上身前倾越多，头再反向抬回来，眼睛才看着前方而不是看着地面。
+    //
+    // 但前倾必须**远小于**髋前屈。原来这两条系数是 0.45 / 0.22，等于把 0.72 rad 的
+    // 髋弯曲几乎原样搬到躯干上：脊柱 0.32 + 胸 0.16 再叠 `tune.lean`，正视看是蹲着，
+    // 侧视看是弯腰鞠躬——头几乎顶到膝盖，重心跑到脚前面。正视截图里这条被裙摆挡住
+    // 了，只有把人转 90° 才看得出来。髋已经把重心降下去了，躯干只需要一点点前倾去
+    // 平衡，不是跟着髋一起折。
     const float leanIn = -crouch.hip;    // 0..0.72 的正量
-    rotate(rig_.spine, rig_.side, tune.lean + leanIn * 0.45f);
-    rotate(rig_.chest, rig_.side, tune.lean * 0.5f + leanIn * 0.22f);
-    rotate(rig_.head, rig_.side, -leanIn * 0.55f);
+    rotate(rig_.spine, rig_.side, tune.lean + leanIn * 0.22f);
+    rotate(rig_.chest, rig_.side, tune.lean * 0.5f + leanIn * 0.10f);
+    rotate(rig_.head, rig_.side, -leanIn * 0.26f);
 
     // 这具骨架的 bind pose 是 T-pose：手臂沿侧向轴笔直伸出，所以绕那根轴转等于
     // 让整条手臂绕自身长轴自转——看不见。先把手臂放成 A-pose 是这个动作的一部分

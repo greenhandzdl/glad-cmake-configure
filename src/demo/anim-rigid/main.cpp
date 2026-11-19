@@ -275,6 +275,21 @@ struct Character {
     // head at -0.60 m). Sitting needs `seatedHip` slightly ABOVE the standing hip
     // height so the pelvis drops by the right amount and no more.
     float seatedHip  = 0.295f;
+    // Is `seatedHip` an authored constant, or a fraction of this rig's own leg length?
+    //
+    // It was a constant, and a constant cannot serve two rigs: 0.295 m is the right
+    // seated pelvis height for the 1.68 m reference character (thigh + shin ~0.79 m)
+    // and the wrong one for this 2.10 m MMD rig, where it drove the soles 90 mm
+    // through the floor and the report said `sit <- SINKS`.
+    //
+    // Seated height is a RATIO of the leg: fold the shin back and the pelvis comes to
+    // rest about a thigh's thickness above the floor, which scales with the body.
+    // Deriving it keeps `--action sit` correct on any rig the naming family binds,
+    // while the constant stays as the reference value this demo was tuned against -
+    // kSeatedHipRatio is the ratio that reproduces 0.295 on a 0.79 m leg
+    // (0.295 / 0.79 = 0.373).
+    static constexpr float kSeatedHipRatio = 0.373f;
+    bool seatedHipDerived = false;
     NamingChannel namingChannel = NamingChannel::Auto;
 
     // One solver per chain kind. They hold per-joint angular state across frames, so
@@ -1054,6 +1069,11 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         // is nullptr and dereferencing it is what produced EXC_BAD_ACCESS at 0x4c;
         // the demo must still run, just without a believable seated height.
         if (character.rig.hips >= 0) {
+            // Scale the seated height to this rig before it is used. Without this the
+            // authored 0.295 m is applied verbatim to a 2.10 m MMD body whose folded
+            // legs are far taller, and the soles end up under the floor.
+            character.seatedHip = model.legLengthMetres() * Character::kSeatedHipRatio;
+            character.seatedHipDerived = true;
             const glm::vec4 hips =
                 restPalette[(std::size_t)character.rig.hips] *
                 glm::vec4(-glm::vec3(skeleton.bone(character.rig.hips)->inverseBind[3]), 1.0f);
