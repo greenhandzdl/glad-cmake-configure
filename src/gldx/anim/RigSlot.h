@@ -68,10 +68,16 @@ inline constexpr int kRigSlotCount = static_cast<int>(RigSlot::ClavicleRight) + 
  * 关节，而是**一条长度因资产而异的链**：这条裙子 8 节、那条 12 节，尾巴有的 4 节有的
  * 7 节。所以可选部分用 `RigChain` 表示，而不是往 RigSlot 枚举里加固定槽位。
  *
- * 16 是"够用且不浪费"的折中：这个 demo 的裙摆是 12 节，尾巴是 5 节。超出就截断并在
- * BindingReport 里点名，而不是静默丢弃——截断会让链尾明显不跟手，必须让人看见。
+ * 64 是"按最长的那类链"定的：单条链本身不会很长（裙摆 16 节、尾巴 12 节都进来了），
+ * 但**长发资产会把整头头发摊平成一条链**——本仓这份 MMD 资产光是 `後ろ髪` 就有 42 节，
+ * 加上 `横髪`/`前髪`/`まとめ髪` 共 56 节。原来取 16，于是第 2 组以后全被丢掉，
+ * `GLDX_CHAINS` 报的 `kind=2 count=4` 就是这么来的：看起来"头发有解算"，实际只驱动了
+ * 最前面一小束，其余头发焊在 bind pose 上。
+ *
+ * 超出的部分仍然截断，但**必须在 BindingReport 里点名**（见 RigProfile::Classify）——
+ * 静默截断的症状只是"头发有点僵"，没人会想到是容量。
  */
-inline constexpr int kRigChainMax = 16;
+inline constexpr int kRigChainMax = 64;
 
 /**
  * 一条可选骨骼链的语义名字。

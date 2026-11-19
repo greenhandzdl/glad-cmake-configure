@@ -985,6 +985,17 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
             std::fprintf(stderr, "[chain] kind=%d count=%d\n", ci, character.rig.chains[ci].count);
         }
     }
+    // `GLDX_BONES=sub`: every bone whose name contains `sub`, in skeleton order.
+    // The chain lookups build names by concatenation, so "why did this bone not match"
+    // is only answerable by printing the names the skeleton actually holds - assimp is
+    // free to rewrite them, and a mismatch looks identical to a missing bone.
+    if (const char* sub = std::getenv("GLDX_BONES")) {
+        for (std::size_t i = 0; i < data.skeleton.bones().size(); ++i) {
+            const std::string& nm = data.skeleton.bones()[i].name;
+            if (nm.find(sub) != std::string::npos)
+                std::fprintf(stderr, "[bone] %3zu %s\n", i, nm.c_str());
+        }
+    }
     if (std::getenv("GLDX_DUMP_JOINTS")) {
         auto show = [&](const char* label, int bone) {
             if (bone < 0) { std::fprintf(stderr, "[joint] %-10s <unbound>\n", label); return; }

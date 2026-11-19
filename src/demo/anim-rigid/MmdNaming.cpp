@@ -81,35 +81,33 @@ int MmdNaming::Detect(const gldx::Skeleton& skeleton) const {
 int MmdNaming::FindChain(const gldx::Skeleton& skeleton, gldx::RigChainKind kind,
                          int* out, int maxOut) const {
     if (kind == gldx::RigChainKind::Hair) {
-        // Hair is per-strand chains named 後ろ髪<n>-<seg> / 横髪<n>-<seg>. Same
-        // panel-major flattening as the skirt.
+        // Hair is many short strands, and **the names are not what the .blend shows**.
+        //
+        // Blender's MMD importer keeps the PMX panel names verbatim (`後ろ髪２-１.L`),
+        // but assimp hands this engine the MMD-native form instead:
+        //     右後ろ髪６-１ / 左後ろ髪６-１      (side PREFIX, full-width digits)
+        //     左横髪１ / 右横髪１ / 前髪２       (side prefix, no segment suffix)
+        // Building `後ろ髪{n}-{seg}` therefore matched exactly one bone per group and the
+        // chain came back as `count=4` - non-zero, which reads as "hair is solved" while
+        // 52 of the 56 strand bones sat welded in bind pose. Printing the skeleton's own
+        // names (`GLDX_BONES=後ろ髪`) is what settled it; guessing at the pattern twice
+        // had produced two different wrong answers.
+        //
+        // So: ENUMERATE the skeleton and match by shape, instead of synthesising names
+        // and hoping. Order matters for the spring solver (it wants base -> tip along a
+        // strand), and the skeleton already stores those strands contiguously, so the
+        // scan below emits them in skeleton order.
         int written = 0;
-        for (const char* group : {"後ろ髪", "横髪"}) {
-            for (int strand = 1; written < maxOut; ++strand) {
-                bool any = false;
-                for (int seg = 1; seg <= 6 && written < maxOut; ++seg) {
-                    char name[64];
-                    std::size_t pos = 0;
-                    for (const char* p = group; *p && pos + 1 < sizeof(name); ++p) name[pos++] = *p;
-                    name[pos] = '\0';
-                    AppendFullWidthDigits(name, sizeof(name), pos, strand);
-                    if (pos + 1 < sizeof(name)) name[pos++] = '-';
-                    name[pos] = '\0';
-                    AppendFullWidthDigits(name, sizeof(name), pos, seg);
-                    int b = skeleton.Find(name);
-                    if (b < 0) {
-                        char sided[80];
-                        std::snprintf(sided, sizeof(sided), "%s.L", name);
-                        b = skeleton.Find(sided);
-                        if (b < 0) {
-                            std::snprintf(sided, sizeof(sided), "%s.R", name);
-                            b = skeleton.Find(sided);
-                        }
-                    }
-                    if (b >= 0) { out[written++] = b; any = true; }
-                }
-                if (!any) break;
-            }
+        for (std::size_t i = 0; i < skeleton.bones().size() && written < maxOut; ++i) {
+            const std::string& nm = skeleton.bones()[i].name;
+            // Any of the long-hair groups, with or without a side prefix. `前髪`
+            // (fringe) is included: it is short but it does move, and leaving it out
+            // is the same mistake in miniature.
+            const bool isHair = nm.find("後ろ髪") != std::string::npos ||
+                                nm.find("横髪") != std::string::npos ||
+                                nm.find("前髪") != std::string::npos ||
+                                nm.find("まとめ髪") != std::string::npos;
+            if (isHair) out[written++] = static_cast<int>(i);
         }
         return written;
     }
