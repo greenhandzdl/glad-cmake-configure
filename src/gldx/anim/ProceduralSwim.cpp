@@ -289,6 +289,19 @@ void ProceduralSwim::Sample(float t, std::vector<glm::mat4>& outPose) const {
         }
         const glm::vec3 rest = restArmDir(boneUp, boneLow);
 
+        // ---- 侧向分量：让两条手臂各走各的那一侧 ----
+        //
+        // `keys[]` 里的方向全部落在 forward×up 平面内（`want.x` 恒为 0），于是一对手
+        // 臂被塞进**同一个**矢状面：相位差 0.5 让它们一前一后，但它们仍贴在同一条中
+        // 线上，俯视看就是"两臂并拢朝前伸"。自由泳的手臂是**各自贴着自己那一侧**划
+        // 的——入水时手在肩的外侧、推水时沿体侧走，两臂之间始终隔着一个躯干。
+        //
+        // 加一个与本侧同号的侧向偏置就够了：它把每只手臂推离中线，但不动前后分量，
+        // 所以矢状面那圈划水轨迹的形状不变（trace 的 wFwd 列仍应扫满 ±0.7）。
+        // 0.35 取"肩宽的一半再留点余量"——这一档两臂不再互相穿过，手也没有甩到身体
+        // 外面去。
+        want = glm::normalize(want + S * (0.35f * glm::length(want)));
+
         // 方向对齐：把上臂从 rest 转到 want。轴与角由两个单位向量唯一确定，
         // 与骨架手性无关——这正是"靠符号猜"反复失败之后剩下的唯一稳妥做法。
         const float dotv = std::clamp(glm::dot(rest, want), -1.0f, 1.0f);
