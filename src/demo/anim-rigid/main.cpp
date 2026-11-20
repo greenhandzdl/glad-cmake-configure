@@ -98,6 +98,7 @@ import gldxwin;
 import gldxcli;
 
 #include "MmdNaming.h"
+#include "Tunings.h"
 
 #include "Shaders.h"
 
@@ -1135,8 +1136,25 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // (Rebuilding the source on a speed change would be the alternative, but speed is
     // a view parameter and the source only needs its Duration to agree; passing the
     // matching time is enough, as below.)
+    // ---- per-asset numbers, actually wired ----
+    //
+    // `TuningsFor()` decided which asset family this is and returned the matching
+    // tuple, but nothing ever CALLED it: every source below was constructed with a
+    // default-constructed `*Tuning{}`, so the whole per-asset layer in Tunings.h was
+    // dead code and the engine's defaults - tuned on the reference skirt character -
+    // drove every rig. That is why "MMD looks wrong and re-tuning did nothing".
+    // Which tuple: ask whose naming family classified this skeleton. Comparing the
+    // family NAME (rather than its first letter, or bone count, or any other proxy) is
+    // the only version that cannot silently pick wrong for the next asset - the string
+    // is what the report line prints, so the two can never disagree.
+    const bool mmdFamily =
+        std::string_view(character.rig.namingFamily()) == animrigid::MmdNaming::Instance().family();
+    const animrigid::PoseTunings tunings = animrigid::TuningsFor(
+        mmdFamily ? animrigid::NamingChannelForTunings::Rigid
+                  : animrigid::NamingChannelForTunings::Coarse);
+    character.tune = tunings.walk;
     character.idleSource = std::make_unique<gldx::ProceduralIdle>(
-        skeleton, character.rig, model.restWorld(), gldx::IdleTuning{});
+        skeleton, character.rig, model.restWorld(), tunings.idle);
     character.walkSource = std::make_unique<gldx::ProceduralWalk>(
         skeleton, character.rig, model.restWorld(), character.tune,
         character.cycleSeconds(1.0f));
@@ -1145,7 +1163,7 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // this demo, and the run's own cadence is fixed), and jump/attack are events
     // with a fixed length.
     character.runSource = std::make_unique<gldx::ProceduralRun>(
-        skeleton, character.rig, model.restWorld(), gldx::RunTuning{}, 0.72f);
+        skeleton, character.rig, model.restWorld(), tunings.run, 0.72f);
     // Crouch-walking is walk's own curve with `crouch = 1`, not a separate action:
     // same gait, narrower stride, knees held bent. Making it a second set of curves
     // is how the two drift apart. The pelvis drop is still solved from ground contact,
@@ -1161,15 +1179,15 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // the two actions cannot drift apart because there is only one curve. `report`
     // prints the byte-level delta between them so "same pose" stays a measurement.
     character.crouchSource = std::make_unique<gldx::ProceduralCrouch>(
-        skeleton, character.rig, model.restWorld(), gldx::CrouchTuning{}, character.tune);
+        skeleton, character.rig, model.restWorld(), tunings.crouch, character.tune);
     character.attackSource = std::make_unique<gldx::ProceduralAttack>(
-        skeleton, character.rig, model.restWorld(), gldx::AttackTuning{});
+        skeleton, character.rig, model.restWorld(), tunings.attack);
     character.jumpSource = std::make_unique<gldx::ProceduralJump>(
-        skeleton, character.rig, model.restWorld(), gldx::JumpTuning{});
+        skeleton, character.rig, model.restWorld(), tunings.jump);
     character.sitSource = std::make_unique<gldx::ProceduralSit>(
-        skeleton, character.rig, model.restWorld(), gldx::SitTuning{});
+        skeleton, character.rig, model.restWorld(), tunings.sit);
     character.swimSource = std::make_unique<gldx::ProceduralSwim>(
-        skeleton, character.rig, model.restWorld(), gldx::SwimTuning{});
+        skeleton, character.rig, model.restWorld(), tunings.swim);
     // Face down. The sign is the difference between freestyle and backstroke, and it
     // now lives in the pose source so it shares a frame with the arm targets.
     character.swimSource->SetProneAngle(1.55f);
@@ -1305,6 +1323,46 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
             {"sit", Action::Sit, character.sitSource.get()},
             {"swim", Action::Swim, character.swimSource.get()},
         };
+        // `GLDX_ARMCHK=1`: how far each wrist sits from the body's centre line.
+        //
+        // "The arms are inside the skirt" is a claim about a distance, and the
+        // silhouette cannot separate "arm tucked against the torso" from "arm hidden
+        // behind the hem" - both read as no arm. This prints what the picture cannot.
+        if (std::getenv("GLDX_ARMCHK")) {
+            for (const Probe& pr : probes) {
+                std::vector<glm::mat4> pose, palette;
+                pr.src->Sample(0.0f, pose);
+                skeleton.ComputeSkinning(pose, model.Mat4(), palette);
+                auto pos = [&](int b) {
+                    return b < 0 ? glm::vec3(0.0f) : glm::vec3(palette[(std::size_t)b][3]);
+                };
+                const glm::vec3 hips = pos(character.rig.hips);
+                // Already METRES: `palette` comes out of ComputeSkinning with Mat4(),
+                // which folds unitScale in. Multiplying by unitScale again - which an
+                // earlier version did - reports 0.13 m for a hand that is 1.3 cm from
+                // the centre line, i.e. it turns "the arm is inside the body" into
+                // "the arm is fine".
+                if (&pr == &probes[0])
+                    std::fprintf(stderr, "[armchk] unitScale=%.4f hipsWorld=(%.2f,%.2f,%.2f) "
+                                         "handWorld=(%.2f,%.2f,%.2f)\n",
+                                 (double)model.unitScale(), (double)hips.x, (double)hips.y,
+                                 (double)hips.z,
+                                 (double)pos(character.rig.hand[gldx::kRigLeft]).x,
+                                 (double)pos(character.rig.hand[gldx::kRigLeft]).y,
+                                 (double)pos(character.rig.hand[gldx::kRigLeft]).z);
+                std::fprintf(stderr, "[armchk] %-11s handL.side=%+.3fm handR.side=%+.3fm\n",
+                             pr.name,
+                             // `palette` is in RIG units (Mat4's scale does not reach
+                             // the bone positions), so convert once here rather than
+                             // leave a number labelled "m" that is 10x too big.
+                             (double)(model.unitScale() *
+                                      glm::dot(pos(character.rig.hand[gldx::kRigLeft]) - hips,
+                                               character.rig.side)),
+                             (double)(model.unitScale() *
+                                      glm::dot(pos(character.rig.hand[gldx::kRigRight]) - hips,
+                                               character.rig.side)));
+            }
+        }
         std::fprintf(stderr, "[anim-rigid] pose check: %-11s %8s %8s %8s %7s %8s %8s %8s\n",
                      "action", "hip", "sole", "head", "fly", "fwd", "foot", "stride");
         for (const Probe& pr : probes) {
@@ -1693,6 +1751,39 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // clavicle silently unbound.
     std::fprintf(stderr, "[anim-rigid] rig: %s (naming family: %s)\n",
                  character.rig.BindingReport().c_str(), character.rig.namingFamily());
+
+    // `GLDX_PROPS=1`: the skeleton's own proportions.
+    //
+    // Every number in a *Tuning struct is a fraction of one of these - a hip swing of
+    // 0.33 rad only means a given stride because of the thigh:calf ratio it was measured
+    // on. Copying the angles to a rig with a different ratio is how "the same walk"
+    // turns into a skate, or into knees that bend twice as far as the mesh allows.
+    // Printing the ratios is what makes "re-derive the defaults for this asset" a
+    // measurement instead of a guess.
+    if (std::getenv("GLDX_PROPS")) {
+        const auto& sk = model.skeleton();
+        auto dist = [&](int a, int b) {
+            if (a < 0 || b < 0) return 0.0f;
+            return glm::length(glm::vec3(sk.RestWorld(a)[3]) - glm::vec3(sk.RestWorld(b)[3])) *
+                   model.unitScale();
+        };
+        const float thighL = dist(character.rig.legUp[gldx::kRigLeft], character.rig.legLow[gldx::kRigLeft]);
+        const float shinL  = dist(character.rig.legLow[gldx::kRigLeft], character.rig.foot[gldx::kRigLeft]);
+        const float upperA = dist(character.rig.armUp[gldx::kRigLeft], character.rig.armLow[gldx::kRigLeft]);
+        const float foreA  = dist(character.rig.armLow[gldx::kRigLeft], character.rig.hand[gldx::kRigLeft]);
+        const float shoulderW = dist(character.rig.clavicle[gldx::kRigLeft], character.rig.clavicle[gldx::kRigRight]);
+        const float hipW = 2.0f * std::abs(glm::dot(
+            glm::vec3(sk.RestWorld(character.rig.legUp[gldx::kRigLeft])[3]) -
+                glm::vec3(sk.RestWorld(character.rig.hips)[3]), character.rig.side));
+        std::fprintf(stderr,
+                     "[props] height=%.3fm leg=%.3fm thigh=%.3f calf=%.3f (calf/thigh=%.3f) "
+                     "upperArm=%.3f forearm=%.3f shoulderW=%.3f hipW=%.3f armDown=%.3frad\n",
+                     (double)model.heightMetres(), (double)model.legLengthMetres(),
+                     (double)thighL, (double)shinL,
+                     (double)(thighL > 1e-4f ? shinL / thighL : 0.0f),
+                     (double)upperA, (double)foreA, (double)shoulderW, (double)hipW,
+                     (double)character.tune.armDown);
+    }
 }
 
 } // namespace
