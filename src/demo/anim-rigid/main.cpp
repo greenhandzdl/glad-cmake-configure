@@ -1156,9 +1156,49 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // needs its own before/after, not a side effect of making a dead function live.
     const bool mmdFamily =
         std::string_view(character.rig.namingFamily()) == animrigid::MmdNaming::Instance().family();
-    const animrigid::PoseTunings tunings =
+    animrigid::PoseTunings tunings =
         mmdFamily ? animrigid::TuningsFor(animrigid::NamingChannelForTunings::Rigid)
                   : animrigid::PoseTunings{};
+
+    // ---- `armDown` is a property of the BIND POSE, not a style choice ----
+    //
+    // The engine's `armDown` values (1.05 / 1.10 / 0.75 rad) assume the bind pose is a
+    // T-pose: arms along +side, so rotating about `forward` swings them straight down
+    // into an A-pose. That is true of the reference rig and false of this one.
+    //
+    // Measured here (`GLDX_ARMREST`), the MMD upper arm in bind pose points
+    //     fwd +0.024, up -1.851, side +1.867
+    // i.e. already 44.8 deg below horizontal - the author built it in an A-pose. Adding
+    // the engine's 1.05 rad (60.2 deg) swings it to 105 deg, PAST vertical and back up
+    // the other side of the body, which is why sweeping the parameter changed the
+    // wrist's lateral offset by only 2.7 cm: the arm was rotating through the target
+    // and out again, not failing to reach it.
+    //
+    // So derive it: whatever angle brings the arm from its measured bind direction to
+    // straight down. This is not a magic number for one asset - it reads the rig and
+    // answers "how far is there left to go", which is the only formulation that stays
+    // correct when an asset arrives in a different bind pose.
+    if (mmdFamily) {
+        const int bu = character.rig.armUp[gldx::kRigLeft];
+        const int bl = character.rig.armLow[gldx::kRigLeft];
+        if (bu >= 0 && bl >= 0) {
+            const glm::vec3 d = glm::vec3(skeleton.RestWorld(bl)[3]) -
+                                glm::vec3(skeleton.RestWorld(bu)[3]);
+            const float lateral = glm::dot(d, character.rig.side);
+            const float vertical = glm::dot(d, character.rig.up);
+            // Angle below horizontal, positive when the arm hangs downward.
+            const float bindBelow = std::atan2(-vertical, std::abs(lateral));
+            // Straight down is 90 deg below horizontal; the remainder is what is left.
+            const float toDown = std::max(0.5f * kPi - bindBelow, 0.0f);
+            tunings.walk.armDown = toDown;
+            tunings.idle.armDown = toDown;
+            tunings.run.armDown = toDown;
+            std::fprintf(stderr,
+                         "[anim-rigid] bind pose arms sit %.1f deg below horizontal; "
+                         "armDown derived as %.3f rad (engine default 1.05)\n",
+                         (double)(bindBelow * 180.0f / kPi), (double)toDown);
+        }
+    }
     character.tune = tunings.walk;
     // Recompute the cycle length AFTER the per-asset numbers land. It derives from
     // `tune.hipSwing`, so computing it before that assignment measures the engine
@@ -1342,6 +1382,33 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         // "The arms are inside the skirt" is a claim about a distance, and the
         // silhouette cannot separate "arm tucked against the torso" from "arm hidden
         // behind the hem" - both read as no arm. This prints what the picture cannot.
+        // `GLDX_ARMREST=1`: where the upper arm points in BIND pose, in rig units,
+        // resolved onto the rig's own forward/up/side. Every arm rotation in every
+        // pose source assumes a specific bind direction (the code says "T-pose: arms
+        // point along +side"), and if this asset's arms point somewhere else the
+        // rotation about `forward` stops meaning "lower the arm" - it becomes a twist.
+        // That is unfixable by sweeping angles, so it has to be printed.
+        if (std::getenv("GLDX_ARMREST")) {
+            for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+                const int bu = character.rig.armUp[sd];
+                const int bl = character.rig.armLow[sd];
+                const int hd = character.rig.hand[sd];
+                if (bu < 0 || bl < 0) continue;
+                auto rp = [&](int b) { return glm::vec3(skeleton.RestWorld(b)[3]); };
+                const glm::vec3 d1 = rp(bl) - rp(bu);
+                const glm::vec3 d2 = (hd >= 0) ? rp(hd) - rp(bl) : glm::vec3(0.0f);
+                auto dump = [&](const char* lbl, const glm::vec3& v) {
+                    std::fprintf(stderr,
+                                 "[armrest] %s.%s len=%.3f fwd=%+.3f up=%+.3f side=%+.3f\n",
+                                 lbl, sd == 0 ? "L" : "R", (double)glm::length(v),
+                                 (double)glm::dot(v, character.rig.forward),
+                                 (double)glm::dot(v, character.rig.up),
+                                 (double)glm::dot(v, character.rig.side));
+                };
+                dump("upperArm", d1);
+                if (hd >= 0) dump("forearm", d2);
+            }
+        }
         if (std::getenv("GLDX_ARMCHK")) {
             for (const Probe& pr : probes) {
                 std::vector<glm::mat4> pose, palette;
