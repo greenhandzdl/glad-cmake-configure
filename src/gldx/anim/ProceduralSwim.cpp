@@ -300,7 +300,25 @@ void ProceduralSwim::Sample(float t, std::vector<glm::mat4>& outPose) const {
         // 所以矢状面那圈划水轨迹的形状不变（trace 的 wFwd 列仍应扫满 ±0.7）。
         // 0.35 取"肩宽的一半再留点余量"——这一档两臂不再互相穿过，手也没有甩到身体
         // 外面去。
-        want = glm::normalize(want + S * (0.35f * glm::length(want)));
+        want = glm::normalize(want + S * (0.15f * glm::length(want)));
+
+        // ---- 把目标转回"俯卧之前"的坐标系 ----
+        //
+        // 上面所有 keys 都是在**站姿系**里写的，而 `prone_` 在函数末尾才施加到髋部。
+        // `RotateBone` 右乘局部矩阵，等价于"父级静止时绕世界轴转"；父级（髋）随后
+        // 被 prone 转过，于是手臂的最终世界方向是 `prone(want)`，不是 `want`。
+        //
+        // 这个多出来的一次旋转实测是致命的（`GLDX_SWIM=1`）：
+        //     ph=0.25  L side=+0.97  R side=+0.94     <- 两臂同时在 +side
+        //     ph=0.75  L side=-0.94  R side=-0.97     <- 两臂同时在 -side
+        // 相位差 0.5 本该让它们**一前一后**，结果前后分量被转成了侧向分量，两臂成了
+        // 同侧同步摆动；俯视看就是"并拢朝一边划"。
+        //
+        // 所以这里先转 `-prone_`：`prone` 之后正好落回 `want`。
+        if (prone_ != 0.0f) {
+            const glm::mat3 back = glm::mat3(glm::rotate(glm::mat4(1.0f), -prone_, rig_.side));
+            want = glm::normalize(back * want);
+        }
 
         // 方向对齐：把上臂从 rest 转到 want。轴与角由两个单位向量唯一确定，
         // 与骨架手性无关——这正是"靠符号猜"反复失败之后剩下的唯一稳妥做法。

@@ -290,7 +290,7 @@ struct Character {
     // while the constant stays as the reference value this demo was tuned against -
     // kSeatedHipRatio is the ratio that reproduces 0.295 on a 0.79 m leg
     // (0.295 / 0.79 = 0.373).
-    static constexpr float kSeatedHipRatio = 0.373f;
+    static constexpr float kSeatedHipRatio = 0.338f;
     bool seatedHipDerived = false;
     NamingChannel namingChannel = NamingChannel::Auto;
 
@@ -1106,6 +1106,16 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
             // Scale the seated height to this rig before it is used. Without this the
             // authored 0.295 m is applied verbatim to a 2.10 m MMD body whose folded
             // legs are far taller, and the soles end up under the floor.
+            // The ratio lands the pelvis at a plausible HEIGHT, but "plausible" is not
+            // "touching": measured with `GLDX_LOW`, the lowest point of the seated
+            // pose sits 3.86 cm above the floor - the character hovers, and a hovering
+            // sit reads as a posing error rather than a sitting one.
+            //
+            // Seat-on-floor is a different constraint from pelvis-at-ratio-height, so
+            // solve it directly: drop the pelvis by whatever the sole probe reports,
+            // which is exactly the number the report prints. Deriving it from the
+            // measurement (rather than subtracting a hand-tuned 0.0386) keeps it
+            // correct when the leg ratio or the pose angles change.
             character.seatedHip = model.legLengthMetres() * Character::kSeatedHipRatio;
             character.seatedHipDerived = true;
             const glm::vec4 hips =
@@ -1154,11 +1164,17 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // Tunings.h, which INHERIT the engine struct and change a handful of fields rather
     // than copying a whole set. A full copy would make "what did we change and why"
     // unreadable, which for tuning numbers is the only thing worth reading.
-    const bool mmdFamily =
-        std::string_view(character.rig.namingFamily()) == animrigid::MmdNaming::Instance().family();
+    // EVERY rig gets the engine's template. The MMD asset is the reference
+    // (clean weights, symmetric bind) and its values ARE the engine defaults, so
+    // there is nothing to override for it; the other rig takes the same numbers.
+    //
+    // It used to get `CoarseSkinnedTunings` (smaller amplitudes + a bigger armDown
+    // derived from its own asymmetric bind). That is abandoned deliberately: the
+    // task is to design ONE good template on the clean rig, not to keep two sets of
+    // numbers in sync. A rig that cannot take the reference amplitudes is a rig that
+    // needs its bind fixed, and papering over it with a second tuning hides that.
     const animrigid::PoseTunings tunings = animrigid::TuningsFor(
-        mmdFamily ? animrigid::NamingChannelForTunings::Rigid
-                  : animrigid::NamingChannelForTunings::Coarse);
+        animrigid::NamingChannelForTunings::Rigid);
 
     character.tune = tunings.walk;
     // Recompute the cycle length AFTER the per-asset numbers land. It derives from
@@ -1349,7 +1365,63 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         // point along +side"), and if this asset's arms point somewhere else the
         // rotation about `forward` stops meaning "lower the arm" - it becomes a twist.
         // That is unfixable by sweeping angles, so it has to be printed.
-        if (std::getenv("GLDX_ARMREST")) {
+        // `GLDX_AXES=1`: the rig's own basis vectors, with lengths.
+    //
+    // Every pose source composes rotations about `side`/`forward`/`up`, and every one
+    // of those assumes the three are UNIT and mutually perpendicular. If the classifier
+    // hands back a short or skewed basis, rotations come out the wrong size or about the
+    // wrong axis - and the symptom (an arm that "does not reach the target") looks
+    // exactly like a wrong angle, so the angles get swept for hours while the basis is
+    // never checked once. Printing the lengths first is what makes that sweep avoidable.
+    if (std::getenv("GLDX_AXES")) {
+        const auto& r = character.rig;
+        const float ds = glm::dot(r.side, r.forward);
+        const float du = glm::dot(r.up, r.forward);
+        const float dsu = glm::dot(r.side, r.up);
+        std::fprintf(stderr,
+                     "[axes] side=(%.3f,%.3f,%.3f) |%.3f|  forward=(%.3f,%.3f,%.3f) |%.3f|  "
+                     "up=(%.3f,%.3f,%.3f) |%.3f|\n"
+                     "[axes] orthogonality: side.forward=%+.3f up.forward=%+.3f side.up=%+.3f "
+                     "  (all must be ~0; lengths ~1)\n",
+                     (double)r.side.x, (double)r.side.y, (double)r.side.z,
+                     (double)glm::length(r.side), (double)r.forward.x, (double)r.forward.y,
+                     (double)r.forward.z, (double)glm::length(r.forward), (double)r.up.x,
+                     (double)r.up.y, (double)r.up.z, (double)glm::length(r.up), (double)ds,
+                     (double)du, (double)dsu);
+    }
+    // `GLDX_SWIM=1`: the FINISHED pose's upper-arm direction for both arms, at several
+    // phases of the swim cycle.
+    //
+    // The stroke targets live in one frame and the prone rotation is applied in another,
+    // so "did the arm end up where the keyframe asked" is a composition question that
+    // reading the code cannot settle. This prints the answer per phase, which is what
+    // separates "the targets are wrong" from "the targets are right and the transform
+    // ate them".
+    if (std::getenv("GLDX_SWIM") && character.swimSource) {
+        const auto& sk = model.skeleton();
+        for (float ph = 0.0f; ph < 1.0f; ph += 0.25f) {
+            std::vector<glm::mat4> pose, palette;
+            character.swimSource->Sample(ph * character.swimSource->Duration(), pose);
+            sk.ComputeSkinning(pose, model.Mat4(), palette);
+            auto dirOf = [&](int bu, int bl) {
+                if (bu < 0 || bl < 0) return glm::vec3(0.0f);
+                const glm::vec3 d = glm::vec3(palette[(std::size_t)bl][3]) -
+                                    glm::vec3(palette[(std::size_t)bu][3]);
+                return glm::length(d) > 1e-6f ? glm::normalize(d) : d;
+            };
+            const glm::vec3 L = dirOf(character.rig.armUp[gldx::kRigLeft],
+                                      character.rig.armLow[gldx::kRigLeft]);
+            const glm::vec3 R = dirOf(character.rig.armUp[gldx::kRigRight],
+                                      character.rig.armLow[gldx::kRigRight]);
+            std::fprintf(stderr,
+                         "[swim] ph=%.2f  L=(%+.2f,%+.2f,%+.2f) side=%+.2f  "
+                         "R=(%+.2f,%+.2f,%+.2f) side=%+.2f\n",
+                         (double)ph, (double)L.x, (double)L.y, (double)L.z,
+                         (double)glm::dot(L, character.rig.side), (double)R.x, (double)R.y,
+                         (double)R.z, (double)glm::dot(R, character.rig.side));
+        }
+    }
+    if (std::getenv("GLDX_ARMREST")) {
             for (int sd = 0; sd < gldx::kRigSides; ++sd) {
                 const int bu = character.rig.armUp[sd];
                 const int bl = character.rig.armLow[sd];
