@@ -52,7 +52,19 @@ struct AttackTuning {
     //   **抬** = 绕竖直轴（绕 forward 只会让它绕自身长轴自旋，实测画面上纹丝不动）；
     //   **扫** = 抬起之后绕 forward，把手臂从前扫到后。
     // 数值按"相对 A-pose"给，符号见 ProceduralAttack.cpp 的 rotate() 顺序。
-    float armDown       = 1.02f;   // rad，A-pose 基准（常驻）
+    // 手臂从 bind pose 放到身侧的**剩余角度**，不是"从 T-pose 放下来多少"。
+    //
+    // 0.790 是在本仓的参考资产（MMD/PMX，240 骨）上量出来的：它的 bind pose 是
+    // A-pose，上臂已经有 fwd +0.02 / up -1.85 / side +1.87，即水平下方 44.8°；
+    // 到垂直还剩 45.2° = 0.790 rad。
+    //
+    // 这里曾经是 1.05（为另一具 T-pose 骨架定的）。那是把 A-pose 的手臂再转 60°，
+    // 结果为水平下方 105°——**越过垂直线又绕回身体另一侧**。症状很迷惑：参数确实
+    // 生效了，但把值从 0.85 扫到 1.30，手腕到中线的横向距离只变了 2.7 cm，看起来
+    // 像"参数没接上"。所以这个数必须按 bind pose 实际朝向算，不能跨资产照抄。
+    //
+    // bind pose 不是 A-pose 的资产，应当在自己的 tuning 里覆盖这一项。
+    float armDown       = 0.790f;   // rad，A-pose 基准（常驻）
     float windupArmUp   = 2.3f;   // rad，蓄力时上臂抬到侧上方（约 72°，手臂举起来）
     float windupArmBack = 0.35f;   // rad，同时向后拉（绕竖直轴）
     float windupElbow   = 1.85f;   // rad，屈肘把"剑"收到肩后

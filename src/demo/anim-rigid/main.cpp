@@ -1145,60 +1145,21 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // family NAME (rather than its first letter, or bone count, or any other proxy) is
     // the only version that cannot silently pick wrong for the next asset - the string
     // is what the report line prints, so the two can never disagree.
-    // ONLY the MMD family gets a tuple. Everything else keeps the engine defaults,
-    // which is exactly what it ran before this wiring existed.
+    // ---- which numbers this rig gets ----
     //
-    // `CoarseSkinnedTunings()` is deliberately NOT applied to the other rigs. Those
-    // numbers were written for one asset and never called - so that asset's rendered
-    // frames were produced with the engine defaults, and switching it over now would
-    // silently rewrite a baseline that other work is verified against (measured: the
-    // frozen frame moved bbf2e477 -> 4d4691cc). Re-tuning an asset is a decision that
-    // needs its own before/after, not a side effect of making a dead function live.
+    // The engine's defaults ARE the MMD/PMX template: that rig is the one with clean
+    // weights, so its numbers are what "a correct rig" looks like, and the engine is
+    // the right place for them. Every other asset starts from that template and
+    // overrides only what its skeleton cannot take - see CoarseWalkTuning & co. in
+    // Tunings.h, which INHERIT the engine struct and change a handful of fields rather
+    // than copying a whole set. A full copy would make "what did we change and why"
+    // unreadable, which for tuning numbers is the only thing worth reading.
     const bool mmdFamily =
         std::string_view(character.rig.namingFamily()) == animrigid::MmdNaming::Instance().family();
-    animrigid::PoseTunings tunings =
-        mmdFamily ? animrigid::TuningsFor(animrigid::NamingChannelForTunings::Rigid)
-                  : animrigid::PoseTunings{};
+    const animrigid::PoseTunings tunings = animrigid::TuningsFor(
+        mmdFamily ? animrigid::NamingChannelForTunings::Rigid
+                  : animrigid::NamingChannelForTunings::Coarse);
 
-    // ---- `armDown` is a property of the BIND POSE, not a style choice ----
-    //
-    // The engine's `armDown` values (1.05 / 1.10 / 0.75 rad) assume the bind pose is a
-    // T-pose: arms along +side, so rotating about `forward` swings them straight down
-    // into an A-pose. That is true of the reference rig and false of this one.
-    //
-    // Measured here (`GLDX_ARMREST`), the MMD upper arm in bind pose points
-    //     fwd +0.024, up -1.851, side +1.867
-    // i.e. already 44.8 deg below horizontal - the author built it in an A-pose. Adding
-    // the engine's 1.05 rad (60.2 deg) swings it to 105 deg, PAST vertical and back up
-    // the other side of the body, which is why sweeping the parameter changed the
-    // wrist's lateral offset by only 2.7 cm: the arm was rotating through the target
-    // and out again, not failing to reach it.
-    //
-    // So derive it: whatever angle brings the arm from its measured bind direction to
-    // straight down. This is not a magic number for one asset - it reads the rig and
-    // answers "how far is there left to go", which is the only formulation that stays
-    // correct when an asset arrives in a different bind pose.
-    if (mmdFamily) {
-        const int bu = character.rig.armUp[gldx::kRigLeft];
-        const int bl = character.rig.armLow[gldx::kRigLeft];
-        if (bu >= 0 && bl >= 0) {
-            const glm::vec3 d = glm::vec3(skeleton.RestWorld(bl)[3]) -
-                                glm::vec3(skeleton.RestWorld(bu)[3]);
-            const float lateral = glm::dot(d, character.rig.side);
-            const float vertical = glm::dot(d, character.rig.up);
-            // Angle below horizontal, positive when the arm hangs downward.
-            const float bindBelow = std::atan2(-vertical, std::abs(lateral));
-            // Straight down is 90 deg below horizontal; the remainder is what is left.
-            const float toDown = std::max(0.5f * kPi - bindBelow, 0.0f);
-            tunings.walk.armDown = toDown;
-            tunings.idle.armDown = toDown;
-            tunings.run.armDown = toDown;
-            std::fprintf(stderr,
-                         "[anim-rigid] bind pose arms sit %.1f deg below horizontal; "
-                         "armDown derived as %.3f rad (engine default 1.05)\n",
-                         (double)(bindBelow * 180.0f / kPi), (double)toDown);
-        }
-    }
     character.tune = tunings.walk;
     // Recompute the cycle length AFTER the per-asset numbers land. It derives from
     // `tune.hipSwing`, so computing it before that assignment measures the engine

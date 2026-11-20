@@ -39,7 +39,16 @@ namespace animrigid {
  */
 enum class NamingChannelForTunings { Rigid, Coarse };
 
-/** 一份资产的全部动作参数。 */
+/**
+ * 一份资产的全部动作参数。
+ *
+ * 默认值 = 引擎里的值 = **在 MMD/PMX 这具骨架（240 骨、权重刷得规范）上量出来的**。
+ * 也就是说引擎持有的就是"标准模板"，它不是中立的占位值。
+ *
+ * 其他资产的做法是**继承再覆盖**（见下面的 CoarseWalkTuning）：派生 struct 从引擎
+ * 基类继承，只改真正不同的那几个字段。这样"这份资产改了哪些数"在代码里是可读的，
+ * 而复制一整份 struct 会让读者看不出哪一项是有意为之、哪一项是抄漏了。
+ */
 struct PoseTunings {
     gldx::WalkTuning   walk{};
     gldx::IdleTuning   idle{};
@@ -49,6 +58,49 @@ struct PoseTunings {
     gldx::JumpTuning   jump{};
     gldx::SitTuning    sit{};
     gldx::SwimTuning   swim{};
+};
+
+/**
+ * 权重粗糙 + 骨骼没绑好的资产（hunyuan）：从引擎的 MMD 模板**继承**，只覆盖幅度。
+ *
+ * 为什么必须收小：那具骨架的下摆顶点被单根大腿骨全权重带走，髋一摆就把它们当作
+ * 刚体三角拖出裙锥，画面读作"裙子裂开"；膝屈大了小腿离开大腿、没有过渡权重就会
+ * 折出棱角；手臂摆动则让袖子和躯干互穿。这三处都不是"动作错了"，是"这具骨架承受
+ * 不了这么大的幅度"。
+ *
+ * 收的是**幅度**不是形状：支撑相比例、相位关系、髋膝踝的配比全部原样继承，所以
+ * 两者读起来是同一个动作，只是小的那个更保守。
+ *
+ * `armDown` 是这里唯一的"不是幅度"的覆盖，因为它是**几何量**而不是风格量：引擎那个
+ * 0.790 rad 是从 MMD 的 A-pose bind 算出来的（上臂已在水平下 44.8°，只剩 45.2°），
+ * 而这具骨架的 bind 接近 T-pose（上臂 up -1.49 / side +9.71，只在水平下 8.7°），
+ * 到垂直需要 81°=1.42 rad。同一个动作参数套在绑法不同的骨架上，就是这一步先错。
+ */
+struct CoarseWalkTuning : gldx::WalkTuning {
+    CoarseWalkTuning() {
+        hipSwing      = 0.22f;   // 基类 0.33
+        kneeSwingFlex = 0.52f;   // 基类 0.72
+        armSwing      = 0.26f;   // 基类 0.38
+        hipYaw        = 0.06f;   // 基类 0.10 - 骨盆旋转会剪切下摆
+        chestYaw      = 0.09f;   // 基类 0.15
+        armDown       = 1.40f;   // 基类 0.790（MMD 的 A-pose）
+    }
+};
+
+struct CoarseRunTuning : gldx::RunTuning {
+    CoarseRunTuning() {
+        hipSwing      = 0.30f;
+        kneeSwingFlex = 0.62f;
+        armDown       = 1.40f;   // 基类 0.790
+    }
+};
+
+struct CoarseIdleTuning : gldx::IdleTuning {
+    CoarseIdleTuning() {
+        breathChest   = 0.010f;  // 基类 0.018 - 躯干权重成块
+        swayAmplitude = 0.007f;  // 基类 0.010
+        armDown       = 1.40f;   // 基类 0.790
+    }
 };
 
 /**
