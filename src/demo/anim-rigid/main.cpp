@@ -974,11 +974,32 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // the *measured* up axis, hand those to the model, and only then move the data.
     // The naming family is chosen **here, in the demo** - the engine only knows the
     // interface. `--naming mmd` forces the MMD/PMX family; anything else (default
-    // "auto") lets RigProfile::Detect() pick among the built-in general-purpose
-    // families. This is the "channel" the task asks for: the same pose sources drive
-    // a Mixamo-named rig and an MMD-named one, and only this line differs.
+    // "auto") lets the families compete by their own `Detect()` score. This is the
+    // "channel" the task asks for: the same pose sources drive a Mixamo-named rig and
+    // an MMD-named one, and only this line differs.
+    //
+    // `auto` used to pass nullptr, i.e. the ENGINE's built-in families only - so the
+    // demo-side MMD family could never win an auto-detect, and the channel was really
+    // a two-way switch: "auto (everything except MMD)" vs "MMD". The visible cost: the
+    // same 240-bone character bound 20/20 as a .pmx and 0/20 as a .fbx, because the
+    // extension test only recognises `.pmx` and the caller had to know to pass
+    // `--naming mmd` by hand. A family that owns `Detect()` should be allowed to answer
+    // it; the extension test below stays as a cheap hint, not as the only path.
     const gldx::RigNaming* naming = nullptr;
-    if (character.namingChannel == NamingChannel::Mmd) naming = &animrigid::MmdNaming::Instance();
+    if (character.namingChannel == NamingChannel::Mmd) {
+        naming = &animrigid::MmdNaming::Instance();
+    } else {
+        // Ask the demo family how well it recognises this skeleton and take it when the
+        // match is near-total. 15/20 is deliberately not "any match wins": a rig that
+        // shares a handful of names is more likely to be a different convention, and
+        // binding one wrongly is silent (a wrong bone still animates something).
+        const int mmdScore = animrigid::MmdNaming::Instance().Detect(data.skeleton);
+        if (mmdScore >= 15) {
+            naming = &animrigid::MmdNaming::Instance();
+            std::fprintf(stderr,
+                         "[anim-rigid] naming: auto-detected MMD/PMX (%d/20 slots)\n", mmdScore);
+        }
+    }
     character.rig = gldx::RigProfile::Classify(data.skeleton, naming);
     if (std::getenv("GLDX_CHAINS")) {
         for (int ci = 0; ci < gldx::RigChainKindCount; ++ci) {
