@@ -1119,8 +1119,6 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // foot covers between its extremes: 2 * legLength * sin(hipSwing). The floor
     // scroll and the cadence both come from this, which is what keeps the feet
     // from skating.
-    character.cycleMetres =
-        std::max(4.0f * model.legLengthMetres() * std::sin(character.tune.hipSwing), 0.1f);
 
     // The action source needs the skeleton and the rest-world cache, so it can only
     // be built here - after Upload has taken ownership of `data` and the model is
@@ -1147,12 +1145,28 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // family NAME (rather than its first letter, or bone count, or any other proxy) is
     // the only version that cannot silently pick wrong for the next asset - the string
     // is what the report line prints, so the two can never disagree.
+    // ONLY the MMD family gets a tuple. Everything else keeps the engine defaults,
+    // which is exactly what it ran before this wiring existed.
+    //
+    // `CoarseSkinnedTunings()` is deliberately NOT applied to the other rigs. Those
+    // numbers were written for one asset and never called - so that asset's rendered
+    // frames were produced with the engine defaults, and switching it over now would
+    // silently rewrite a baseline that other work is verified against (measured: the
+    // frozen frame moved bbf2e477 -> 4d4691cc). Re-tuning an asset is a decision that
+    // needs its own before/after, not a side effect of making a dead function live.
     const bool mmdFamily =
         std::string_view(character.rig.namingFamily()) == animrigid::MmdNaming::Instance().family();
-    const animrigid::PoseTunings tunings = animrigid::TuningsFor(
-        mmdFamily ? animrigid::NamingChannelForTunings::Rigid
-                  : animrigid::NamingChannelForTunings::Coarse);
+    const animrigid::PoseTunings tunings =
+        mmdFamily ? animrigid::TuningsFor(animrigid::NamingChannelForTunings::Rigid)
+                  : animrigid::PoseTunings{};
     character.tune = tunings.walk;
+    // Recompute the cycle length AFTER the per-asset numbers land. It derives from
+    // `tune.hipSwing`, so computing it before that assignment measures the engine
+    // default while the gait then runs with the asset's own swing - the floor scrolls
+    // for a stride the legs are no longer taking, and the report says `walk <- SKATES`
+    // (measured on the coarse-weight rig: foot 0.415 vs expected 0.583).
+    character.cycleMetres =
+        std::max(4.0f * model.legLengthMetres() * std::sin(character.tune.hipSwing), 0.1f);
     character.idleSource = std::make_unique<gldx::ProceduralIdle>(
         skeleton, character.rig, model.restWorld(), tunings.idle);
     character.walkSource = std::make_unique<gldx::ProceduralWalk>(
