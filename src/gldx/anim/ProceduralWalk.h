@@ -44,11 +44,11 @@ struct WalkTuning {
     // 像跑步的原因。调到 0.5 会得到一个没有过渡、每一步都像换脚的怪步态。
     float stanceEnd = 0.60f;
 
-    float hipSwing        = 0.33f;   // 大腿从最前到最后
-    float kneeStanceFlex  = 0.14f;   // 刚落地那一下的缓冲
-    float kneeSwingFlex   = 0.72f;   // 摆动相峰值屈膝（决定脚抬多高）
-    float ankleHeelStrike = -0.18f;  // 落地时背屈（脚尖朝上）
-    float ankleToeOff     = 0.34f;   // 蹬离时跖屈（脚尖朝下）
+    float hipSwing        = 0.45f;   // 大腿从最前到最后（真人 25-28 deg）
+    float kneeStanceFlex  = 0.30f;   // 刚落地那一下的缓冲（真人 15-20 deg）
+    float kneeSwingFlex   = 1.10f;   // 摆动相峰值屈膝（真人 60-70 deg）
+    float ankleHeelStrike = -0.22f;  // 落地时背屈（脚尖朝上）
+    float ankleToeOff     = 0.45f;   // 蹬离时跖屈（脚尖朝下，真人 20-25 deg）
     float toeOffBend      = 0.34f;   // 脚跟离地、只剩脚尖着地时趾关节的背屈
 
     // T-pose -> A-pose。1.05 是渲染特写逐步试出来的：1.45（83°）时腕子明显陷进
@@ -67,7 +67,7 @@ struct WalkTuning {
     //
     // bind pose 不是 A-pose 的资产，应当在自己的 tuning 里覆盖这一项。
     float armDown   = 0.790f;        // rad
-    float armSwing  = 0.38f;
+    float armSwing  = 0.55f;
     float elbowBase = 0.55f;         // 两个摆动相都保留的屈肘
     float elbowSwing = 0.22f;        // 手臂前摆时额外加的
     float armOut    = 0.05f;         // 前臂外展：靠它把小臂拿出裙摆，而不是靠更屈肘
