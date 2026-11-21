@@ -2394,7 +2394,22 @@ int main(int argc, char** argv) {
             // Real seconds since the previous frame, clamped: the first frame after the
             // model loads blocks for seconds, and integrating a spring over that whole
             // interval would fling every chain.
-            character.secondaryDt = std::clamp(static_cast<float>(info.dt), 0.0f, 0.05f);
+            // `--freeze-at` must freeze the SECONDARY MOTION too, not just the pose.
+            //
+            // The chains are the only stage that carries state across frames: the solver
+            // integrates a spring from the previous frame's angular velocity. Feeding it
+            // the wall-clock dt means the frozen frame still depends on how many frames
+            // happened to run before the freeze - so two identical command lines produce
+            // different pictures (measured: 55800 differing pixels, max channel delta
+            // 205; A/A byte equality is the baseline every other comparison rests on).
+            //
+            // Once the clock is frozen the pose is a pure function of time, so the
+            // chains have nothing new to react to; stepping them is the bug. dt = 0
+            // leaves the solver's state exactly where the last live frame left it,
+            // which is deterministic because that frame count is driven by the clock.
+            character.secondaryDt = view.freezeAt > 0.0f
+                                        ? 0.0f
+                                        : std::clamp(static_cast<float>(info.dt), 0.0f, 0.05f);
 
             // ---- secondary motion: tail / skirt / hair / ears ----
             //
