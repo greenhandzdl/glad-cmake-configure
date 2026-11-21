@@ -63,12 +63,21 @@ inline constexpr const char* const kChest[] = {"上半身2", "上半身3"};
 inline constexpr const char* const kHead[]  = {"頭", "首"};
 inline constexpr const char* const kNeck[]  = {"首"};
 
-inline constexpr const char* const kLegUpL[]  = {"足.L", "左足", "脚.L"};
-inline constexpr const char* const kLegUpR[]  = {"足.R", "右足", "脚.R"};
-inline constexpr const char* const kLegLowL[] = {"ひざ.L", "左ひざ", "膝.L"};
-inline constexpr const char* const kLegLowR[] = {"ひざ.R", "右ひざ", "膝.R"};
-inline constexpr const char* const kFootL[]   = {"足首.L", "左足首", "足首D.L"};
-inline constexpr const char* const kFootR[]   = {"足首.R", "右足首", "足首D.R"};
+// ---- `D` 副本优先 ----
+//
+// MMD 导出的腿骨分两套：`左足` 带 IK（旋转它只会移动 IK 目标），而真正挂蒙皮权重
+// 的是 `左足D` / `左ひざD` / `左足首D`（D = 変形用）。绑定表原来先匹配 `左足`，
+// 结果**整条腿的旋转落在了一根没有一个顶点的骨头上**——实测 `左足/左ひざ/左足首`
+// 各带 0 个顶点，权重全在 `足首D`(40055) / `足先EX`(31362) 这些副本骨上。
+//
+// 症状极难定位：pose 矩阵是对的、palette 是对的、姿态偏离静止 1.24 rad 也能读到，
+// 但画面一动不动。只有把"这根骨头上挂了几个顶点"打出来才看得出来。
+inline constexpr const char* const kLegUpL[]  = {"左足D", "足D.L", "足.L", "左足", "脚.L"};
+inline constexpr const char* const kLegUpR[]  = {"右足D", "足D.R", "足.R", "右足", "脚.R"};
+inline constexpr const char* const kLegLowL[] = {"左ひざD", "ひざD.L", "ひざ.L", "左ひざ", "膝.L"};
+inline constexpr const char* const kLegLowR[] = {"右ひざD", "ひざD.R", "ひざ.R", "右ひざ", "膝.R"};
+inline constexpr const char* const kFootL[]   = {"左足首D", "足首D.L", "足首.L", "左足首"};
+inline constexpr const char* const kFootR[]   = {"右足首D", "足首D.R", "足首.R", "右足首"};
 inline constexpr const char* const kToeL[]    = {"つま先.L", "左つま先"};
 inline constexpr const char* const kToeR[]    = {"つま先.R", "右つま先"};
 inline constexpr const char* const kArmUpL[]  = {"腕.L", "左腕", "腕捩.L"};

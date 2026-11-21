@@ -31,6 +31,10 @@ void ProceduralSit::Sample(float t, std::vector<glm::mat4>& outPose) const {
     };
 
     const SitTuning& tune = tuning_;
+    if (std::getenv("GLDX_SITDBG"))
+        std::fprintf(stderr, "[sitdbg] Sample t=%.2f hip=%.3f knee=%.3f out=%.3f thigh=%.1fdeg\n",
+                     (double)t, (double)tune.hip, (double)tune.knee, (double)tune.out,
+                     (double)(tune.hip * 180.0f / 3.14159265f));
 
     // ---- 呼吸相位（循环） ----
     const float period = std::max(tune.breathSeconds, 1e-3f);

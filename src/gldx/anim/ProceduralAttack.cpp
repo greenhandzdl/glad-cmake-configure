@@ -127,14 +127,22 @@ void ProceduralAttack::Sample(float t, std::vector<glm::mat4>& outPose) const {
     const float wrist     = (drive < 0.0f) ? 0.0f : tune.swingWrist * drive;
 
     rotate(rig_.armUp[kRigRight], rig_.forward, +tune.armDown);
-    // 抬：绕**竖直轴**。上臂的静止方向就是 +side（T-pose 时手臂指向侧面），所以
-    // 只有绕竖直轴转才会把它从"侧平举"抬到"上举"——绕 forward 转等于让它绕自身
-    // 长轴自旋（实测：armDown 之后只剩 0.13 rad 的投影，画面上就是手臂纹丝不动，
-    // 而角度明明写了 1.25 rad）。
-    rotate(rig_.armUp[kRigRight], rig_.up, armRaised);
-    // 扫：绕**竖直轴的前后分量**已经用掉了，横扫改成绕 FORWARD：手臂举起来之后
-    // 绕前向轴转就是把它从身前扫到身后（或反过来），这正是"挥"的那一维。
-    rotate(rig_.armUp[kRigRight], rig_.forward, -armSweep * 0.5f);
+    // ---- 抬臂绕 SIDE 转，不是绕 UP ----
+    //
+    // 这段原来绕 `up`，理由是"支架是 T-pose，上臂静止方向就是 +side，绕竖直轴才
+    // 抬得起来"。那条前提对参考资产成立，对本资产**不成立**：它的 bind 是 A-pose
+    // （上臂 up -1.85 / side +1.87，已在水平下 44.8°），而 `armDown = 0.790` 正好
+    // 把剩下的 45.2° 补满，手臂垂到**完全垂直**。垂直的手臂绕 `up` 转 = 绕自身长轴
+    // 自旋，侧向投影为 0——实测截图四帧一模一样，`armRaised` 写了 2.3 rad 也没用。
+    //
+    // 轴的选择是几何决定的，不是约定：`armDown` 之后上臂已经**垂直向下**，要把它
+    // 抬向 +side，旋转轴必须是 `v0 x v1 = (0,-1,0) x (1,0,0) = (0,0,1)`，也就是
+    // FORWARD。绕 `side` 会与手臂长轴平行，等于自旋（改错过一次，画面纹丝不动）；
+    // 绕 `up` 只对 T-pose 成立。
+    //
+    // 横扫（前后）才是绕 `side`：手臂抬平之后，绕侧轴转就是把它从身前扫到身后。
+    rotate(rig_.armUp[kRigRight], rig_.forward, -armRaised);
+    rotate(rig_.armUp[kRigRight], rig_.side, -armSweep * 0.5f);
     rotate(rig_.armLow[kRigRight], rig_.side, -elbow);
     rotate(rig_.hand[kRigRight], rig_.side, wrist);
 
