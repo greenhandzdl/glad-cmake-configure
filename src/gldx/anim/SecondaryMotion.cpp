@@ -56,7 +56,18 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
     // hair simply has count == 0 here and pays nothing.
     if (!chain.present()) return;
     if (angle_.size() != static_cast<std::size_t>(chain.count)) Reset(chain);
-    if (!(dt > 0.0f)) return;
+    // `dt == 0` means "do not advance", NOT "do nothing".
+    //
+    // The frame loop rebuilds the pose from the source every frame, then re-applies the
+    // chains. Returning early here left the already-simulated angles un-written, so the
+    // pose fell back to the source's rest shape and the cloth/hair/tail snapped to
+    // zero deflection - measured as `maxDevFromRest 0.30 -> 0.000` between two
+    // consecutive frames, and from outside as "identical to --off secondary" (0 differing
+    // pixels). The settle pass was correct; the next frame undid it.
+    //
+    // A frozen clock is exactly this situation, so the apply path has to keep running
+    // while the integrate path stops.
+    const bool advance = dt > 0.0f;
 
     const int count = chain.count;
 
@@ -108,9 +119,11 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
         target.z = -liftAmount * gain * 6.0f;          // roll: flare on vertical motion
         target += glm::vec3(tuning.gravity * gain, 0.0f, 0.0f);   // hang under gravity
 
-        StepSpring(angle_[j].x, omega_[j].x, target.x, tuning.stiffness, tuning.damping, dt);
-        StepSpring(angle_[j].y, omega_[j].y, target.y, tuning.stiffness, tuning.damping, dt);
-        StepSpring(angle_[j].z, omega_[j].z, target.z, tuning.stiffness, tuning.damping, dt);
+        if (advance) {
+            StepSpring(angle_[j].x, omega_[j].x, target.x, tuning.stiffness, tuning.damping, dt);
+            StepSpring(angle_[j].y, omega_[j].y, target.y, tuning.stiffness, tuning.damping, dt);
+            StepSpring(angle_[j].z, omega_[j].z, target.z, tuning.stiffness, tuning.damping, dt);
+        }
 
         // Apply as three small rotations in the joint's local frame. Composing small
         // angles is order-dependent in principle; at the 0.6 rad clamp the error is

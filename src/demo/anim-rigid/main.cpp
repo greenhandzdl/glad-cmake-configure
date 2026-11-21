@@ -305,6 +305,11 @@ struct Character {
     // that whole interval.
     float secondaryDt = 1.0f / 60.0f;
     bool  secondaryPrimed = false;
+    // One-shot settle budget for `--freeze-at` (see the frame loop): the cloth is run
+    // to steady state exactly once, so the frozen picture depends on the instant the
+    // clock stopped rather than on the frame rate.
+    bool  secondarySettled = false;
+    int   secondarySettleSteps = 0;
 
     // Per-kind chain parameters. Values are asset properties (how many panels, how
     // soft), so they live here rather than in the engine - same rule as WalkTuning.
@@ -2441,22 +2446,80 @@ int main(int argc, char** argv) {
             // Real seconds since the previous frame, clamped: the first frame after the
             // model loads blocks for seconds, and integrating a spring over that whole
             // interval would fling every chain.
-            // `--freeze-at` must freeze the SECONDARY MOTION too, not just the pose.
+            // ---- secondary motion: stepped by the CLOCK, not by the wall clock ----
             //
-            // The chains are the only stage that carries state across frames: the solver
-            // integrates a spring from the previous frame's angular velocity. Feeding it
-            // the wall-clock dt means the frozen frame still depends on how many frames
-            // happened to run before the freeze - so two identical command lines produce
-            // different pictures (measured: 55800 differing pixels, max channel delta
-            // 205; A/A byte equality is the baseline every other comparison rests on).
+            // The chains are the only stage that carries state across frames (the solver
+            // integrates a spring from the previous frame's angular velocity), which
+            // makes them the only place `--freeze-at` can break A/A byte equality: with
+            // `info.dt` the frozen frame still depends on how many frames happened to
+            // run before the freeze.
             //
-            // Once the clock is frozen the pose is a pure function of time, so the
-            // chains have nothing new to react to; stepping them is the bug. dt = 0
-            // leaves the solver's state exactly where the last live frame left it,
-            // which is deterministic because that frame count is driven by the clock.
-            character.secondaryDt = view.freezeAt > 0.0f
-                                        ? 0.0f
-                                        : std::clamp(static_cast<float>(info.dt), 0.0f, 0.05f);
+            // The first fix was `dt = 0` when frozen. That did make A/A exact, and it
+            // also froze the cloth, hair and tail SOLID - measured against
+            // `GLDX_NO_SECONDARY`: 0 differing pixels at t=0.5 and t=0.8, i.e. the
+            // exact "clothes do not move" failure this whole layer exists to avoid. A
+            // regression test that passes by disabling the feature is not a pass.
+            //
+            // The honest fix is a FIXED step tied to the same clock the pose uses: the
+            // chains advance by `kSecondaryStep` per frame while the clock runs, so
+            // their state is a function of elapsed time rather than of frame count.
+            // Freezing then means "stop advancing", and the accumulated state at the
+            // frozen instant is the same on every run.
+            constexpr float kSecondaryStep = 1.0f / 60.0f;
+            // While the clock runs: advance by the real frame time, capped so a stall
+            // cannot fling the springs. While frozen: keep advancing at the FIXED step,
+            // because "frozen" means the POSE stopped, not that the cloth stopped.
+            //
+            // A frozen pose is a steady state, and the chains must be given time to
+            // settle INTO it - a skirt that was mid-swing when the clock stopped would
+            // otherwise be photographed mid-flight and every frozen frame would show a
+            // different amount of fabric lag. Settling at a fixed step makes the frozen
+            // picture a property of "how long has it been frozen", and the snapshot is
+            // taken at a fixed GLDX_SNAPSHOT_AT, so the answer is the same every run.
+            // ---- frozen means: settle the cloth ONCE, then stop ----
+            //
+            // Writing the obvious "keep advancing with a fixed step" trades one bug for
+            // another: the step count is frames, the frame count is wall-clock, and
+            // three runs produced three different md5s. The chain state has to become a
+            // function of the frozen INSTANT, not of how long the process kept drawing.
+            //
+            // So the settle happens exactly once, the first frame after the clock stops:
+            // run the solver for a fixed `kSettleSteps` at the fixed step, which is
+            // enough for these spring constants to reach steady state (stiffness 0.22-0.30
+            // per step ⇒ under 1 % of the initial offset remains after ~1 s of steps).
+            // Every later frame passes dt = 0, which is a no-op for the solver.
+            constexpr int kSettleSteps = 600;
+            if (view.freezeAt > 0.0f) {
+                if (!character.secondarySettled) {
+                    character.secondarySettled = true;
+                    character.secondarySettleSteps = kSettleSteps;
+                }
+                // Spend the WHOLE budget in this one frame. Advancing one step per
+                // frame made "has the cloth settled yet" a function of the frame rate
+                // (measured: three runs, three different md5s), because the snapshot
+                // arrives after a variable number of frames.
+                if (character.secondarySettleSteps > 0) {
+                    for (int si = 0; si < character.secondarySettleSteps; ++si) {
+                        std::vector<glm::mat4> smWorldSettle;
+                        model.skeleton().ComputeWorld(character.pose, model.Mat4(), smWorldSettle);
+                        for (int ci = 0; ci < gldx::RigChainKindCount; ++ci) {
+                            const auto kind = static_cast<gldx::RigChainKind>(ci);
+                            if (!character.rig.hasChain(kind)) continue;
+                            if (std::getenv("GLDX_NO_SECONDARY")) continue;
+                            character.chainSolvers[ci].Solve(
+                                character.rig.chains[ci], character.pose, smWorldSettle,
+                                model.restWorld(), character.chainTune[ci], kSecondaryStep);
+                        }
+                    }
+                    character.secondarySettleSteps = 0;
+                }
+                character.secondaryDt = 0.0f;
+            } else {
+                character.secondarySettled = false;
+                character.secondarySettleSteps = 0;
+                character.secondaryDt =
+                    std::min(std::clamp(static_cast<float>(info.dt), 0.0f, 0.05f), kSecondaryStep);
+            }
 
             // ---- secondary motion: tail / skirt / hair / ears ----
             //
@@ -2478,6 +2541,35 @@ int main(int argc, char** argv) {
                     character.chainSolvers[ci].Solve(character.rig.chains[ci], character.pose,
                                                      smWorld, model.restWorld(), tk,
                                                      character.secondaryDt);
+                }
+                // Burn one step of the frozen settle budget per frame.
+                //
+                // NOTE: the budget must be spent INSIDE one frame (see the loop above);
+                // spreading it across frames makes the settle finish depend on the frame
+                // rate, which is the same non-determinism this whole mechanism exists to
+                // remove.
+                if (character.secondarySettleSteps > 0) --character.secondarySettleSteps;
+                if (std::getenv("GLDX_SMCHK")) {
+                    // How far did the solver actually move the chains? If this is ~0 the
+                    // cloth is not being simulated at all, which is exactly what a
+                    // "0 differing pixels vs --off" measurement looks like from outside.
+                    static int shown = 0;
+                    if (character.secondarySettleSteps == 0 && shown++ < 3) {
+                        for (int ci = 0; ci < gldx::RigChainKindCount; ++ci) {
+                            if (!character.rig.hasChain(static_cast<gldx::RigChainKind>(ci))) continue;
+                            float maxDev = 0.0f;
+                            for (int k = 0; k < character.rig.chains[ci].count; ++k) {
+                                const int b = character.rig.chains[ci].bones[k];
+                                const glm::mat4& a = character.pose[(std::size_t)b];
+                                const glm::mat4& r = model.restWorld()[(std::size_t)b];
+                                const glm::mat3 da(a), dr(r);
+                                for (int c = 0; c < 3; ++c)
+                                    maxDev = std::max(maxDev, glm::length(da[c] - dr[c]));
+                            }
+                            std::fprintf(stderr, "[smchk] chain %d count=%d maxDevFromRest=%.5f\n",
+                                         ci, character.rig.chains[ci].count, (double)maxDev);
+                        }
+                    }
                 }
             }
 
