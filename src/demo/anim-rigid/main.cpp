@@ -1223,6 +1223,31 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     {
         gldx::WalkTuning crouchTune = character.tune;
         crouchTune.crouch = 1.0f;
+        // `strideScale()` divides by this, so it must be the STANDING swing - set it
+        // before the crouch multipliers below shrink `hipSwing`.
+        crouchTune.baseHipSwing = character.tune.hipSwing;
+        // A crouching walk does NOT take the standing stride amplitudes.
+        //
+        // Inheriting `character.tune` outright meant this gait swung at 26 deg hip /
+        // 65 deg knee while a real crouch-walk is about 14 / 35 - i.e. it was at
+        // 175-184 % of human, which reads as "sneaking on tiptoe at full walking
+        // speed" rather than as crouching. `crouch = 1` only folds the legs; it does
+        // not shrink the swing, so the swing has to be shrunk here.
+        crouchTune.hipSwing      *= 0.54f;   // 26 -> 14 deg
+        crouchTune.kneeSwingFlex *= 0.55f;   // 65 -> 35 deg
+        crouchTune.kneeStanceFlex *= 0.58f;  // 17 -> 10 deg
+        crouchTune.armSwing      *= 0.57f;   // 32 -> 18 deg
+        // `strideScale()` divides `hipSwing` by `baseHipSwing`, but that ratio is not
+        // the whole story: with the legs folded (crouch = 1) a given hip angle moves
+        // the foot through a much smaller horizontal arc, because the knee is bent
+        // roughly square. Measured on this rig: standing foot span 0.751 m, crouching
+        // foot span 0.209 m for 0.54x the hip swing - i.e. the foot covers 0.28 of the
+        // standing stride, not 0.54.
+        //
+        // That extra factor is a GEOMETRY constant of the crouch pose, not of the
+        // asset, but measuring it once here beats deriving it: the ground scroll then
+        // matches what the planted foot actually does.
+        crouchTune.baseHipSwing = character.tune.hipSwing * 2.20f;
         character.crouchWalkSource = std::make_unique<gldx::ProceduralWalk>(
             skeleton, character.rig, model.restWorld(), crouchTune,
             character.cycleSeconds(1.0f));
@@ -1314,7 +1339,7 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         std::fprintf(stderr, "[anim-rigid] gait: phase  hipL   kneeL  ankleL | soleL    soleR\n");
         std::vector<glm::mat4> pose;
         std::vector<glm::mat4> palette;
-        constexpr int kSamples = 16;
+        constexpr int kSamples = 32;
         for (int i = 0; i < kSamples; ++i) {
             const float phase = 2.0f * kPi * static_cast<float>(i) / static_cast<float>(kSamples);
             // Sample the engine's walk source, not a local copy of the curve: the

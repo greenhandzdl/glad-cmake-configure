@@ -57,9 +57,9 @@ struct RunTuning {
     // 调到 0.6 就是走路的形状了。
     float stanceEnd = 0.35f;
 
-    float hipSwing        = 0.62f;   // 大腿摆幅，约走路的 1.9 倍
-    float kneeStanceFlex  = 0.35f;   // 触地缓冲，比走路深得多（跑步落地冲击大）
-    float kneeSwingFlex   = 1.45f;   // 摆动相峰值屈膝，脚跟几乎碰到臀部
+    float hipSwing        = 0.79f;   // 真人跑步约 45 deg（原来 0.62 = 35.5，只有 79%）
+    float kneeStanceFlex  = 0.52f;   // 真人约 30 deg（原来 0.35 = 20，只有 67%）
+    float kneeSwingFlex   = 1.92f;   // 真人约 110 deg（原来 1.45 = 83，只有 76%）
     float kneeFlightFlex  = 0.55f;   // 腾空相后腿的收膝（前脚伸出、后脚收起）
     float ankleHeelStrike = -0.10f;  // 跑步多是**中足/前足**落地，背屈比走路小
     float ankleToeOff     = 0.55f;   // 蹬伸更狠
@@ -69,7 +69,7 @@ struct RunTuning {
     float lean = 0.22f;              // rad
 
     // 摆臂：跑步的肘屈曲几乎固定在大约 90°（走路是随摆动变化的），且摆幅更大。
-    float armSwing = 0.75f;
+    float armSwing = 0.96f;   // 真人约 55 deg
     float elbowHold = 1.30f;         // rad，接近 90° 的固定屈肘
 
     float hipYaw   = 0.14f;

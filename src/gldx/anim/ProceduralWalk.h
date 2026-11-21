@@ -88,6 +88,8 @@ struct WalkTuning {
     // 这里只影响**姿态**（腿的弯法）；骨盆实际落多高由调用方从地面接触反解
     // （见 GroundContact）——手写一个高度只会跟其它每一处腿部改动打架。
     float crouch = 0.0f;             // 0..1
+    // 站立时的摆幅，`strideScale` 拿它当分母（构造时由调用方填）
+    float baseHipSwing = 0.45f;
 
     // ---- 蹲行的比例 ----
     //
@@ -119,9 +121,20 @@ struct WalkTuning {
     // 0.735 m）。之前写 0.5，地面比脚多铺三成，报告里 crouchwalk 的 `stride` 列
     // 一直打 `<- SKATES`——那不是判据太严，是这两个数真的差了三成。
     //
-    // 判据要能自己校核：改 `crouchHip`/`crouchKnee` 之后必须重新量一次脚掌跨度，
-    // 否则这个数会悄悄变成"地面滚得比脚快"。
-    [[nodiscard]] float strideScale() const noexcept { return 1.0f - 0.67f * crouch; }
+    // 判据要能自己校核：改 `crouchHip`/`crouchKnee` **或 `hipSwing`** 之后必须重新
+    // 量一次脚掌跨度，否则这个数会悄悄变成"地面滚得比脚快"。
+    //
+    // 所以它不再是一个写死的系数，而是从 `hipSwing` 推出来：地面每个周期该铺的距离
+    // 正比于腿摆过的角度（`4 * leg * sin(hipSwing)`，见 demo 的 cycleMetres），
+    // 蹲姿把 `hipSwing` 收到六成，地面就该跟着收到六成。写死 0.67 时，调用方一旦
+    // 单独收小 `hipSwing`（crouchwalk 就是这么做的），脚铺得只有地面的三分之二，
+    // 报告立刻打 `<- SKATES`——实测 foot 0.209 对 expected 0.326。
+    //
+    // 站立时的 `hipSwing` 从构造参数里拿，蹲姿与它的比值就是缩放量。
+    [[nodiscard]] float strideScale() const noexcept {
+        if (!(baseHipSwing > 1e-4f)) return 1.0f - 0.67f * crouch;
+        return hipSwing / baseHipSwing;
+    }
 };
 
 /**
