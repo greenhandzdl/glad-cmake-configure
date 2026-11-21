@@ -1121,7 +1121,23 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
             const glm::vec4 hips =
                 restPalette[(std::size_t)character.rig.hips] *
                 glm::vec4(-glm::vec3(skeleton.bone(character.rig.hips)->inverseBind[3]), 1.0f);
-            character.sitRise = character.seatedHip - (hips.y + character.restLift);
+            // ---- seated height: solve it, do not scale it ----
+            //
+            // The obvious formulation - `sitRise = seatedHip - hips.y` - hides a unit
+            // assumption that only holds for the rig it was written on. `seatedHip` is
+            // authored in metres; the pelvis position comes out of ComputeSkinning in
+            // whatever space the palette uses. On the PMX export those happen to be
+            // within 1 % (unitScale 0.1, hips at 12.095 -> 1.21 m), so the mistake was
+            // invisible; the FBX export of the SAME character has unitScale 0.01 and
+            // hips at 96.8, and the same line put the soles 0.977 m in the air
+            // (`sit <- FLOATS`).
+            //
+            // Rather than guess which space the palette is in, measure the answer: pose
+            // the sit source at t=0, skin it, and ask GroundContact where the body
+            // actually ended up. Then shift by the difference. That is one solve at
+            // load time - the frame loop keeps using the closed-form `sitRise` - and it
+            // cannot disagree with the rig, because it reads the rig.
+            character.sitRise = 0.0f;   // provisional; corrected below by measurement
         }
     }
 
@@ -1217,6 +1233,34 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         skeleton, character.rig, model.restWorld(), tunings.jump);
     character.sitSource = std::make_unique<gldx::ProceduralSit>(
         skeleton, character.rig, model.restWorld(), tunings.sit);
+    // ---- measure the seated drop instead of computing it ----
+    //
+    // Now that the source exists, ask it: pose the sit at t=0, skin it the way the
+    // frame loop does, and read where the lowest contact point landed with
+    // `sitRise = 0`. Whatever that number is, subtracting it puts the seat on the
+    // floor - in whatever units this rig happens to use, on any asset.
+    //
+    // This runs ONCE at load (the frame loop keeps using the closed-form sitRise), so
+    // it costs one skin pass and removes a whole class of "works on the rig it was
+    // written on" bugs.
+    {
+        std::vector<glm::mat4> sitPose;
+        character.sitSource->Sample(0.0f, sitPose);
+        std::vector<glm::mat4> sitPalette;
+        skeleton.ComputeSkinning(sitPose, model.Mat4(), sitPalette);
+        // `restLift` is 0 here by construction only if it was measured first; it is,
+        // a few lines up. Fold it in so the measurement matches the frame loop's stack.
+        const gldx::GroundContact::Solution seated = character.ground.Solve(sitPalette);
+        const float lift = seated.valid() ? seated.lift : 0.0f;
+        // `lift` IS the correction: GroundContact reports how far to move the palette to
+        // put the lowest contact point on y=0, and sitRise is added on top of restLift
+        // in the frame loop, so the provisional `restLift` has to come back out.
+        character.sitRise = lift - character.restLift;
+        std::fprintf(stderr,
+                     "[anim-rigid] seated drop measured: lift %.4f (rig units) -> sitRise "
+                     "%.4f; seatedHip %.3f m\n",
+                     (double)lift, (double)character.sitRise, (double)character.seatedHip);
+    }
     character.swimSource = std::make_unique<gldx::ProceduralSwim>(
         skeleton, character.rig, model.restWorld(), tunings.swim);
     // Face down. The sign is the difference between freestyle and backstroke, and it
@@ -1889,6 +1933,9 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         const float hipW = 2.0f * std::abs(glm::dot(
             glm::vec3(sk.RestWorld(character.rig.legUp[gldx::kRigLeft])[3]) -
                 glm::vec3(sk.RestWorld(character.rig.hips)[3]), character.rig.side));
+        std::fprintf(stderr, "[props] unitScale=%.4f rigHipsY=%.3f\n",
+                     (double)model.unitScale(),
+                     (double)glm::vec3(sk.RestWorld(character.rig.hips)[3]).y);
         std::fprintf(stderr,
                      "[props] height=%.3fm leg=%.3fm thigh=%.3f calf=%.3f (calf/thigh=%.3f) "
                      "upperArm=%.3f forearm=%.3f shoulderW=%.3f hipW=%.3f armDown=%.3frad\n",

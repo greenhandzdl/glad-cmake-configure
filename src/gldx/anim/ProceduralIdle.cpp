@@ -85,6 +85,17 @@ void ProceduralIdle::Sample(float t, std::vector<glm::mat4>& outPose) const {
 
     // ---- 手臂 ----
     // 先下放到 A-pose。T-pose 不放下手臂的待机读起来像投降，不是放松。
+    //
+    // 肩骨（clavicle）必须先跟着沉下去一小部分。上臂绕 forward 转了 0.79 rad 之后，
+    // 它的**根部**仍在 T-pose 的肩位；锁骨不动，肩关节就吊在原地，腋下于是裂开一道
+    // 能看见内侧的缝——正视、侧视、斜视三个角度都能看到，但只在手臂放下幅度大的
+    // 动作里出现（行走有 `clavicleRoll`，待机这里原来一步都没写）。
+    //
+    // 跟随比例 0.25 而不是 1.0：锁骨本身还能再独立活动，整份搬过去会让人看起来
+    // 耸肩。这一点是"肩带的实际运动学"，不是风格参数。
+    const float shoulderFollow = tune.armDown * 0.25f;
+    rotate(rig_.clavicle[kRigLeft], rig_.forward, -shoulderFollow);
+    rotate(rig_.clavicle[kRigRight], rig_.forward, +shoulderFollow);
     rotate(rig_.armUp[kRigLeft], rig_.forward, -tune.armDown);
     rotate(rig_.armUp[kRigRight], rig_.forward, +tune.armDown);
     // 略微外展，免得手臂穿进躯干/大衣。
