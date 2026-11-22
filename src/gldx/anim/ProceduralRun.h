@@ -93,7 +93,7 @@ struct RunTuning {
     // Upper-arm abduction, same role as WalkTuning::armOut: with the arms hanging
     // straight down the hands sweep through the skirt. 0.40 rad was picked by eye
     // against the reference skirt (0.22 still intersected, 0.55 read as "arms held up").
-    float armOut = 0.45f;
+    float armOut = 0.0f;
 
     // 腾空高度（米）。这是**世界单位**，不在姿态里用——调用方拿 `AirborneWeightAt`
     // 乘在垂直位移上（见 ProceduralRun.h 文件头）。12 cm 是慢跑的量级：抬得再高

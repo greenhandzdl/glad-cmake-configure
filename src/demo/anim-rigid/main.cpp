@@ -1071,15 +1071,45 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // a reference to a moved-from Skeleton, whose bone list is empty while the
     // RigProfile still holds valid-*looking* indices, so the very next RestWorld()
     // reads off the end. That is the crash this comment exists to prevent.)
+    // Sole plane relative to the ankle bone in BIND pose, i.e. how far the skin hangs
+    // below the foot joint. `GroundContact` adds this to the contact point to know where
+    // the floor actually is.
+    //
+    // It used to be "the lowest vertex of the whole model", which is the hem of the
+    // skirt, not the sole - off by tens of centimetres, and the solve then parked the
+    // character at whatever height made THAT point touch the floor. With the legs bound
+    // to the real deform bones the skirt no longer follows the legs, so the error became
+    // visible as a 0.5 m hover in `crouch`.
     bool firstVertex = true;
-    for (const gldx::SkinnedMeshData& mesh : data.meshes) {
-        for (const gldx::SkinnedVertex& v : mesh.vertices) {
-            const float d = glm::dot(v.position, character.rig.up);
-            character.bindLowestOnUp = firstVertex ? d
-                                                    : std::min(character.bindLowestOnUp, d);
-            firstVertex = false;
+    {
+        const int footL = character.rig.foot[gldx::kRigLeft];
+        const glm::vec3 ankle =
+            footL >= 0 ? glm::vec3(data.skeleton.RestWorld(footL)[3]) : glm::vec3(0.0f);
+        for (const gldx::SkinnedMeshData& mesh : data.meshes) {
+            for (const gldx::SkinnedVertex& v : mesh.vertices) {
+                // Only vertices actually weighted to the feet: the skirt hangs below the
+                // ankles too, and including it is the bug above.
+                bool onFoot = false;
+                for (int i = 0; i < 4; ++i) {
+                    if (v.boneWeight[i] <= 0.0f) continue;
+                    const int bi = static_cast<int>(v.boneIndex[i]);
+                    if (bi == character.rig.foot[gldx::kRigLeft] ||
+                        bi == character.rig.foot[gldx::kRigRight] ||
+                        bi == character.rig.toe[gldx::kRigLeft] ||
+                        bi == character.rig.toe[gldx::kRigRight]) {
+                        onFoot = true;
+                        break;
+                    }
+                }
+                if (!onFoot) continue;
+                const float d = glm::dot(v.position - ankle, character.rig.up);
+                character.bindLowestOnUp = firstVertex ? d
+                                                        : std::min(character.bindLowestOnUp, d);
+                firstVertex = false;
+            }
         }
     }
+    if (firstVertex) character.bindLowestOnUp = 0.0f;   // no foot-weighted verts
 
     // ---- keep one vertex per mesh, for the seated solve ----
     //
@@ -2914,10 +2944,25 @@ int main(int argc, char** argv) {
             {
                 std::vector<glm::mat4> smWorld;
                 model.skeleton().ComputeWorld(character.pose, model.Mat4(), smWorld);
+                // Leg sample points for the cloth push: hip, knee and ankle of each
+                // leg, in world space. The skirt only collides with these - a full
+                // capsule chain would be better but the hem is short and the three
+                // points per leg already stop the visible intersection.
+                std::vector<glm::vec3> legPts;
+                for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+                    for (int b : {character.rig.legUp[sd], character.rig.legLow[sd],
+                                  character.rig.foot[sd]}) {
+                        if (b >= 0) legPts.emplace_back(smWorld[(std::size_t)b][3]);
+                    }
+                }
+                const float legRadius = 0.11f * model.unitScale() * 10.0f;   // ~thigh radius
                 for (int ci = 0; ci < gldx::RigChainKindCount; ++ci) {
                     const auto kind = static_cast<gldx::RigChainKind>(ci);
                     if (!character.rig.hasChain(kind)) continue;
                     if (std::getenv("GLDX_NO_SECONDARY")) continue;   // A/B switch
+                    // Only the skirt has legs inside it.
+                    if (kind == gldx::RigChainKind::Skirt)
+                        character.chainSolvers[ci].SetLegProbes(legPts, legRadius);
                     const gldx::ChainTuning& tk = character.chainTune[ci];
                     character.chainSolvers[ci].Solve(character.rig.chains[ci], character.pose,
                                                      smWorld, model.restWorld(), tk,

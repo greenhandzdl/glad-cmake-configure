@@ -120,6 +120,35 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
         target += glm::vec3(tuning.gravity * gain, 0.0f, 0.0f);   // hang under gravity
         target.z += tuning.tuck * gain;                            // static inward tuck
 
+        // ---- cloth-vs-leg push ----
+        //
+        // Each joint is pushed AWAY from the nearest leg point, by how much the leg is
+        // inside it. This is what makes the hem hug the leg when it is close and swing
+        // out when the leg pushes through - without it the cloth only follows the root's
+        // acceleration and a walking leg simply intersects it.
+        //
+        // Applied on the two axes the joint can actually move in (x = pitch, z = roll);
+        // the yaw axis is left to the turn response. The sign comes from the geometry so
+        // no per-asset handedness is assumed.
+        if (!legPoints_.empty() && legRadius_ > 0.0f) {
+            const glm::vec3 jointPos(world[j][3]);
+            glm::vec3 push(0.0f);
+            for (const glm::vec3& lp : legPoints_) {
+                const glm::vec3 away = jointPos - lp;
+                const float dist = glm::length(away);
+                if (dist < 1e-5f || dist >= legRadius_) continue;
+                // How deep the leg is inside this joint, as a 0..1 fraction of the radius.
+                const float depth = (legRadius_ - dist) / legRadius_;
+                push += glm::normalize(away) * depth;
+            }
+            if (glm::length(push) > 1e-5f) {
+                push = glm::normalize(push);
+                const float mag = std::min(glm::length(push) * 2.0f, 1.0f);
+                target.x += push.x * mag * 0.9f;
+                target.z += push.z * mag * 0.9f;
+            }
+        }
+
         if (advance) {
             StepSpring(angle_[j].x, omega_[j].x, target.x, tuning.stiffness, tuning.damping, dt);
             StepSpring(angle_[j].y, omega_[j].y, target.y, tuning.stiffness, tuning.damping, dt);
