@@ -3125,6 +3125,23 @@ int main(int argc, char** argv) {
             // shipping a pass that disagrees with the picture is worse than not having
             // it. Grounding is done per-action from measurement instead: see
             // `character.sitRise` and the `--on report` columns.
+            if (std::getenv("GLDX_TRUEHIGH")) {
+                static int shown = 0;
+                if (shown++ < 2) {
+                    float hi = -1.0e9f;
+                    for (const gldx::SkinnedVertex& v : character.probeVerts) {
+                        glm::vec4 q(0.0f);
+                        for (int i = 0; i < 4; ++i) {
+                            if (v.boneWeight[i] <= 0.0f) continue;
+                            const std::size_t bi = v.boneIndex[i];
+                            if (bi < character.palette.size())
+                                q += v.boneWeight[i] * (character.palette[bi] * glm::vec4(v.position, 1.0f));
+                        }
+                        hi = std::max(hi, q.y);
+                    }
+                    std::fprintf(stderr, "[truehigh] top vertex y = %.4f m  (站直约 1.70)\n", (double)hi);
+                }
+            }
             // Where the lowest sole ended up after the shift: the number that says
             // "planted" (0) or "in the air" (>0). Printed in millimetres because
             // "0.000 m" in a panel is indistinguishable from "not measured".
