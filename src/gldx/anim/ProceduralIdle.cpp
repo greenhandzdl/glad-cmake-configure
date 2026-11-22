@@ -102,8 +102,14 @@ void ProceduralIdle::Sample(float t, std::vector<glm::mat4>& outPose) const {
     rotate(rig_.armUp[kRigLeft], rig_.side, -tune.armOut);
     rotate(rig_.armUp[kRigRight], rig_.side, tune.armOut);
     // 肘几乎伸直，只留一点自然弯（完全锁死在数学上很"直"，但看起来像假肢）。
+    // Elbow bend must be MIRRORED, like everywhere else.
+    //
+    // `side` is one world axis for both arms, so the same signed angle bends one elbow
+    // forward and the other backward. With a small bend it is invisible head-on and
+    // glaring from the side: one forearm folded horizontally across the front of the
+    // skirt while the other hung straight down.
     rotate(rig_.armLow[kRigLeft], rig_.side, -tune.elbowBend);
-    rotate(rig_.armLow[kRigRight], rig_.side, -tune.elbowBend);
+    rotate(rig_.armLow[kRigRight], rig_.side, tune.elbowBend);
     // 手腕跟着重力垂一点。
     rotate(rig_.hand[kRigLeft], rig_.side, -0.10f);
     rotate(rig_.hand[kRigRight], rig_.side, -0.10f);

@@ -1881,6 +1881,22 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
             }
         }
     }
+    if (std::getenv("GLDX_ARMREL")) {
+        const auto& sk = model.skeleton();
+        std::vector<glm::mat4> pose, wm;
+        character.idleSource->Sample(0.0f, pose);
+        sk.ComputeWorld(pose, model.Mat4(), wm);
+        auto P = [&](int b) { return b < 0 ? glm::vec3(0) : glm::vec3(wm[(std::size_t)b][3]); };
+        for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+            const glm::vec3 sh = P(character.rig.armUp[sd]);
+            const glm::vec3 el = P(character.rig.armLow[sd]);
+            const glm::vec3 wr = P(character.rig.hand[sd]);
+            std::fprintf(stderr,
+                         "[armrel] %s shoulder y=%.3f  elbow y=%.3f (d=%+.3f)  wrist y=%.3f (d=%+.3f)\n",
+                         sd == 0 ? "L" : "R", (double)sh.y, (double)el.y, (double)(el.y - sh.y),
+                         (double)wr.y, (double)(wr.y - sh.y));
+        }
+    }
     if (std::getenv("GLDX_ARMREST")) {
             for (int sd = 0; sd < gldx::kRigSides; ++sd) {
                 const int bu = character.rig.armUp[sd];
