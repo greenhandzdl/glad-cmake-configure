@@ -100,12 +100,23 @@ void ProceduralSit::Sample(float t, std::vector<glm::mat4>& outPose) const {
         //   俯视看仍是向前伸的两条腿——用户截图就是这个。
         //   先把腿前屈到水平（绕 side），再绕 **up** 转开，腿才会像扇子一样
         //   在**水平面**里摊到两侧，这才是鸭子坐的 W。
-        rotate(rig_.legUp[s], rig_.side, -(tune.hip + asym));   // 前屈到水平
-        rotate(rig_.legUp[s], rig_.forward, -tune.out * sideSign); // 水平面内向外摊开
-
-        // 膝：腿已经水平摊开，绕 **up** 继续折回 -> 小腿在水平面里收回来，
-        // 落在大腿内侧/尾侧。绕 side 折会让小腿垂到地下（试过）。
-        rotate(rig_.legLow[s], rig_.forward, -tune.knee * sideSign);
+        // ---- W-sit, the simple way: two rotations about ONE axis ----
+        //
+        // A W-sit is "thighs forward and slightly apart, shins folded back so the feet
+        // land beside the hips". Both of those are rotations in the SAGITTAL plane
+        // (about `side`); the small "apart" component is the only thing that is not.
+        //
+        // What was here instead: after laying the thigh down, rotate it about `forward`.
+        // With the thigh already horizontal, `forward` is perpendicular to the body's
+        // midline, so that rotation swings the leg SIDEWAYS - the wireframe showed a
+        // full split, legs straight out to both sides with one of them through the hem.
+        //
+        // `out` is kept as a small splay about the vertical axis instead, which is the
+        // only direction that opens the knees without splaying the legs.
+        rotate(rig_.legUp[s], rig_.side, -(tune.hip + asym));            // thigh forward
+        rotate(rig_.legUp[s], rig_.up, -tune.out * 0.25f * sideSign);    // knees slightly apart
+        // Shin folds back: same axis as the thigh, opposite direction.
+        rotate(rig_.legLow[s], rig_.side, tune.knee);
 
         rotate(rig_.foot[s], rig_.side, tune.ankle);                   // 踝
     }

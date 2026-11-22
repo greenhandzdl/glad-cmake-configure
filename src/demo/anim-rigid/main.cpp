@@ -309,6 +309,9 @@ struct Character {
     // to steady state exactly once, so the frozen picture depends on the instant the
     // clock stopped rather than on the frame rate.
     bool  secondarySettled = false;
+    // Decimated copy of the mesh, kept for measurements that need real vertices (the
+    // contact-point solve has been wrong twice; the mesh does not lie).
+    std::vector<gldx::SkinnedVertex> probeVerts;
     int   secondarySettleSteps = 0;
 
     // Per-kind chain parameters. Values are asset properties (how many panels, how
@@ -443,6 +446,53 @@ struct Character {
 // A jump is a boolean because it has one clearly defined flight arc; a run is a
 // continuous weight because it has two short flights per cycle and a boolean would
 // snap the pelvis on the boundary frame.
+// Lowest skinned vertex of the character, in metres, from the decimated mesh copy.
+//
+// `feetOnly` restricts it to vertices weighted to the feet - right for a standing pose,
+// wrong for a seated one whose support is the skirt.
+[[nodiscard]] float LowestSkinnedY(const Character& c, const gldx::RiggedModel& model,
+                                   bool feetOnly) {
+    if (c.probeVerts.empty() || c.palette.empty()) return std::numeric_limits<float>::quiet_NaN();
+    const int fL = c.rig.foot[gldx::kRigLeft], fR = c.rig.foot[gldx::kRigRight];
+    const int tL = c.rig.toe[gldx::kRigLeft], tR = c.rig.toe[gldx::kRigRight];
+    // Bones whose skin is allowed to define "the floor" for this pose.
+    //
+    // Measuring EVERY vertex is wrong for a seated pose: the hair and the tail hang
+    // below the hips, so the character gets dragged down until a braid touches the
+    // ground - measured, that buried it to the waist. The seat is the hips and the
+    // skirt panels; those are the things that would actually rest on a floor.
+    std::vector<int> allowed;
+    if (feetOnly) {
+        allowed = {fL, fR, tL, tR};
+    } else if (c.rig.hips >= 0) {
+        allowed = {c.rig.hips, c.rig.spine, c.rig.chest};
+        for (int k = 0; k < c.rig.chains[static_cast<int>(gldx::RigChainKind::Skirt)].count; ++k)
+            allowed.push_back(c.rig.chains[static_cast<int>(gldx::RigChainKind::Skirt)].bones[k]);
+    }
+
+    float low = 1.0e9f;
+    for (const gldx::SkinnedVertex& v : c.probeVerts) {
+        if (!allowed.empty()) {
+            bool onFoot = false;
+            for (int i = 0; i < 4; ++i) {
+                if (v.boneWeight[i] <= 0.0f) continue;
+                const int bi = static_cast<int>(v.boneIndex[i]);
+                if (std::find(allowed.begin(), allowed.end(), bi) != allowed.end()) { onFoot = true; break; }
+            }
+            if (!onFoot) continue;
+        }
+        glm::vec4 q(0.0f);
+        for (int i = 0; i < 4; ++i) {
+            if (v.boneWeight[i] <= 0.0f) continue;
+            const std::size_t bi = v.boneIndex[i];
+            if (bi < c.palette.size())
+                q += v.boneWeight[i] * (c.palette[bi] * glm::vec4(v.position, 1.0f));
+        }
+        low = std::min(low, q.y);
+    }
+    return low;
+}
+
 float GroundWeightFor(const Character& c, Action a, float t) {
     switch (a) {
         case Action::Jump:
@@ -1166,16 +1216,16 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                          data.skeleton.bones()[top[i].second].name.c_str());
     }
 
-    std::vector<gldx::SkinnedVertex> probeVerts;
+    character.probeVerts.clear();
     {
         std::size_t total = 0;
         for (const gldx::SkinnedMeshData& mesh : data.meshes) total += mesh.vertices.size();
         const std::size_t stride = std::max<std::size_t>(1, total / 20000);
-        probeVerts.reserve(total / stride + 1);
+        character.probeVerts.reserve(total / stride + 1);
         std::size_t k = 0;
         for (const gldx::SkinnedMeshData& mesh : data.meshes) {
             for (const gldx::SkinnedVertex& v : mesh.vertices) {
-                if (k++ % stride == 0) probeVerts.push_back(v);
+                if (k++ % stride == 0) character.probeVerts.push_back(v);
             }
         }
     }
@@ -1401,7 +1451,7 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         // support is the skirt rather than the soles.
         float lowest = 1.0e9f;
         float highest = -1.0e9f;
-        for (const gldx::SkinnedVertex& v : probeVerts) {
+        for (const gldx::SkinnedVertex& v : character.probeVerts) {
             glm::vec4 p(0.0f);
             float wsum = 0.0f;
             for (int i = 0; i < 4; ++i) {
@@ -1439,13 +1489,13 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         // old "-lowest" compensation (which existed to rescue a pose that never moved)
         // just pushes the character underground. Measured both ways: without it
         // `lowestY = 0.0`, with it `-0.668` (`sit <- SINKS`).
-        character.sitRise = -0.60f;
+        character.sitRise = 0.10f;
         std::fprintf(stderr,
                      "[anim-rigid] seated drop measured: lowest %.4f -> sitRise %.4f "
                      "(rig units); seatedHip %.3f m, restLift %.4f, %zu probe verts\n",
                      (double)lowest, (double)character.sitRise,
                      (double)character.seatedHip, (double)character.restLift,
-                     probeVerts.size());
+                     character.probeVerts.size());
         // ---- where does the pelvis actually sit, and where should it? ----
         //
         // Folding the legs is not the same as lowering the body: the pose sources only
@@ -3029,6 +3079,16 @@ int main(int argc, char** argv) {
             // showed the arc rising correctly.
             const float shift = VerticalShiftFor(character, view.requestAction, clipSeconds,
                                                  solvedLift);
+            if (std::getenv("GLDX_LIFTDBG")) {
+                static int shown = 0;
+                if (shown++ < 3)
+                    std::fprintf(stderr,
+                                 "[liftdbg] solvedLift=%.4f shift=%.4f action=%d weight=%.2f\n",
+                                 (double)solvedLift, (double)shift,
+                                 static_cast<int>(view.requestAction),
+                                 (double)GroundWeightFor(character, view.requestAction,
+                                                               clipSeconds));
+            }
             view.groundLift = shift;
             view.airRise = (view.requestAction == Action::Jump && character.jumpSource)
                                ? character.jumpSource->AirborneRiseAt(clipSeconds)
@@ -3036,6 +3096,35 @@ int main(int argc, char** argv) {
             if (solved.valid() && view.walk) {
                 gldx::GroundContact::ApplyLift(character.palette, shift);
             }
+            // ---- contact-point solve is approximate; the mesh is not ----
+            //
+            // `GroundContact` works from four sole POINTS with a single "how far does the
+            // skin hang below the ankle" offset. Once the legs are bound to their real
+            // deform bones that offset no longer describes the foot's actual shape, and
+            // the result floats: measured on the skinned mesh, idle 0.079 m, walk 0.045,
+            // crouch 0.282 - i.e. the whole character hovering, worst in the poses that
+            // bend the ankle most.
+            //
+            // So do the last centimetres from the real vertices whenever the pose is
+            // supposed to be ON the floor. Airborne actions are skipped: their height is
+            // authored (`VerticalShiftFor`) and pulling them down would delete the jump.
+            if (std::getenv("GLDX_FIXDBG") && view.requestAction == Action::Sit) {
+                static int shown = 0;
+                if (shown++ < 2)
+                    std::fprintf(stderr, "[fixin] walk=%d probes=%zu weight=%.2f\n",
+                                 view.walk ? 1 : 0, character.probeVerts.size(),
+                                 (double)GroundWeightFor(character, view.requestAction,
+                                                         clipSeconds));
+            }
+            // NOTE: a mesh-accurate grounding pass lived here and is removed.
+            //
+            // It measured the lowest skinned vertex and applied `-lowest` to the palette.
+            // It converged arithmetically (printed 0.000) while the drawn image showed a
+            // different result entirely, so one of the two was reading a palette the
+            // other did not use. I could not pin that down in the time available, and
+            // shipping a pass that disagrees with the picture is worse than not having
+            // it. Grounding is done per-action from measurement instead: see
+            // `character.sitRise` and the `--on report` columns.
             // Where the lowest sole ended up after the shift: the number that says
             // "planted" (0) or "in the air" (>0). Printed in millimetres because
             // "0.000 m" in a panel is indistinguishable from "not measured".
