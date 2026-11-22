@@ -53,6 +53,21 @@ void RotateBone(std::vector<glm::mat4>& pose, const std::vector<glm::mat4>& rest
     pose[index] = pose[index] * PoseRotation(restWorld[index], worldAxis, radians);
 }
 
+void TranslateBone(std::vector<glm::mat4>& pose, const std::vector<glm::mat4>& restWorld, int bone,
+                   const glm::vec3& worldOffset) {
+    if (bone < 0) return;
+    const std::size_t index = static_cast<std::size_t>(bone);
+    if (index >= pose.size() || index >= restWorld.size()) return;
+
+    // Fold a WORLD offset into the joint's local frame the same way RotateBone folds a
+    // world axis: the local displacement is `restWorld⁻¹ · offset` applied to the
+    // translation column. Without this, lowering a pelvis means every caller inventing
+    // its own inverse-transform, and getting the units or the frame wrong is silent.
+    const glm::mat3 basis = glm::mat3(restWorld[index]);
+    const glm::vec3 local = glm::transpose(basis) * worldOffset;
+    pose[index][3] += glm::vec4(local, 0.0f);
+}
+
 void ComputeRestWorlds(const Skeleton& skeleton, std::vector<glm::mat4>& outRestWorld) {
     outRestWorld.resize(skeleton.size());
     for (std::size_t i = 0; i < skeleton.size(); ++i) {

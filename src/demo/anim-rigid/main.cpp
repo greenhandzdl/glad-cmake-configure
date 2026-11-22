@@ -744,23 +744,6 @@ public:
             skin_->Set("uSunIntensity", kSunIntensity);
             skin_->Set("uSkyColor", kSkyColor);
             skin_->Set("uBounceColor", kBounceColor);
-            // The palette convention ("uBones[i]", one entry per bone) belongs to
-            // the engine; a caller that spelled these names by hand would get a
-            // uniform that silently never gets set.
-            if (std::getenv("GLDX_PALD")) {
-                static int shown = 0;
-                if (shown++ < 3) {
-                    const int b = character_.rig.legUp[gldx::kRigLeft];
-                    if (b >= 0 && static_cast<std::size_t>(b) < character_.palette.size()) {
-                        const glm::mat4& m = character_.palette[(std::size_t)b];
-                        std::fprintf(stderr,
-                                     "[pald] legUp.L palette[3]=(%.3f,%.3f,%.3f) "
-                                     "paletteCount=%zu\n",
-                                     (double)m[3].x, (double)m[3].y, (double)m[3].z,
-                                     character_.palette.size());
-                    }
-                }
-            }
             model.BindPalette(*skin_, character_.palette);
 
             // Every sampler must point at a complete texture on every draw, dummy
@@ -1152,7 +1135,18 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                     }
                 }
                 if (!onFoot) continue;
-                const float d = glm::dot(v.position - ankle, character.rig.up);
+                // ABSOLUTE projection on `up`, not "below the ankle".
+                //
+                // `GroundContact::addContact` computes
+                //     contactRig = bonePos - axis * (dot(bonePos, axis) - bindLowestOnUp)
+                // i.e. it treats this number as "the lowest bind-space point along up"
+                // and derives the sole offset from the joint's own height. Feeding it a
+                // quantity measured RELATIVE to the ankle makes that subtraction eat the
+                // ankle height twice: the solve then believes the soles are already on
+                // the floor and never lowers the body - measured, `crouch` folded its
+                // legs 22.9 cm off the ground while the pelvis stayed at standing height
+                // (head 1.689 m vs idle 1.702 m).
+                const float d = glm::dot(v.position, character.rig.up);
                 character.bindLowestOnUp = firstVertex ? d
                                                         : std::min(character.bindLowestOnUp, d);
                 firstVertex = false;
@@ -1660,20 +1654,6 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         // "The arms are inside the skirt" is a claim about a distance, and the
         // silhouette cannot separate "arm tucked against the torso" from "arm hidden
         // behind the hem" - both read as no arm. This prints what the picture cannot.
-        // `GLDX_ARMREST=1`: where the upper arm points in BIND pose, in rig units,
-        // resolved onto the rig's own forward/up/side. Every arm rotation in every
-        // pose source assumes a specific bind direction (the code says "T-pose: arms
-        // point along +side"), and if this asset's arms point somewhere else the
-        // rotation about `forward` stops meaning "lower the arm" - it becomes a twist.
-        // That is unfixable by sweeping angles, so it has to be printed.
-        // `GLDX_AXES=1`: the rig's own basis vectors, with lengths.
-    //
-    // Every pose source composes rotations about `side`/`forward`/`up`, and every one
-    // of those assumes the three are UNIT and mutually perpendicular. If the classifier
-    // hands back a short or skewed basis, rotations come out the wrong size or about the
-    // wrong axis - and the symptom (an arm that "does not reach the target") looks
-    // exactly like a wrong angle, so the angles get swept for hours while the basis is
-    // never checked once. Printing the lengths first is what makes that sweep avoidable.
     if (std::getenv("GLDX_AXES")) {
         const auto& r = character.rig;
         const float ds = glm::dot(r.side, r.forward);
@@ -1690,234 +1670,6 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                      (double)r.up.y, (double)r.up.z, (double)glm::length(r.up), (double)ds,
                      (double)du, (double)dsu);
     }
-    // `GLDX_SWIM=1`: the FINISHED pose's upper-arm direction for both arms, at several
-    // phases of the swim cycle.
-    //
-    // The stroke targets live in one frame and the prone rotation is applied in another,
-    // so "did the arm end up where the keyframe asked" is a composition question that
-    // reading the code cannot settle. This prints the answer per phase, which is what
-    // separates "the targets are wrong" from "the targets are right and the transform
-    // ate them".
-    // `GLDX_ATK=1`: the upper-arm direction through the attack, so "the arm never moves"
-    // can be told apart from "the arm moves but the camera hides it".
-    if (std::getenv("GLDX_ATK") && character.attackSource) {
-        const auto& sk = model.skeleton();
-        for (int i = 0; i <= 8; ++i) {
-            const float t = character.attackSource->Duration() * (static_cast<float>(i) / 8.0f);
-            std::vector<glm::mat4> pose, palette;
-            character.attackSource->Sample(t, pose);
-            sk.ComputeSkinning(pose, model.Mat4(), palette);
-            const int bu = character.rig.armUp[gldx::kRigRight];
-            const int bl = character.rig.armLow[gldx::kRigRight];
-            if (bu < 0 || bl < 0) break;
-            const glm::vec3 d = glm::vec3(palette[(std::size_t)bl][3]) -
-                                glm::vec3(palette[(std::size_t)bu][3]);
-            const glm::vec3 n = glm::length(d) > 1e-6f ? glm::normalize(d) : d;
-            std::fprintf(stderr,
-                         "[atk] t=%.2f upperArm fwd=%+.2f up=%+.2f side=%+.2f\n", (double)t,
-                         (double)glm::dot(n, character.rig.forward),
-                         (double)glm::dot(n, character.rig.up),
-                         (double)glm::dot(n, character.rig.side));
-        }
-    }
-    if (std::getenv("GLDX_SWIM") && character.swimSource) {
-        const auto& sk = model.skeleton();
-        for (float ph = 0.0f; ph < 1.0f; ph += 0.25f) {
-            std::vector<glm::mat4> pose, palette;
-            character.swimSource->Sample(ph * character.swimSource->Duration(), pose);
-            sk.ComputeSkinning(pose, model.Mat4(), palette);
-            auto dirOf = [&](int bu, int bl) {
-                if (bu < 0 || bl < 0) return glm::vec3(0.0f);
-                const glm::vec3 d = glm::vec3(palette[(std::size_t)bl][3]) -
-                                    glm::vec3(palette[(std::size_t)bu][3]);
-                return glm::length(d) > 1e-6f ? glm::normalize(d) : d;
-            };
-            const glm::vec3 L = dirOf(character.rig.armUp[gldx::kRigLeft],
-                                      character.rig.armLow[gldx::kRigLeft]);
-            const glm::vec3 R = dirOf(character.rig.armUp[gldx::kRigRight],
-                                      character.rig.armLow[gldx::kRigRight]);
-            std::fprintf(stderr,
-                         "[swim] ph=%.2f  L=(%+.2f,%+.2f,%+.2f) side=%+.2f  "
-                         "R=(%+.2f,%+.2f,%+.2f) side=%+.2f\n",
-                         (double)ph, (double)L.x, (double)L.y, (double)L.z,
-                         (double)glm::dot(L, character.rig.side), (double)R.x, (double)R.y,
-                         (double)R.z, (double)glm::dot(R, character.rig.side));
-        }
-    }
-    // `GLDX_ARMTREE=1`: the parent chain between armUp and armLow.
-    //
-    // A rotation applied to the upper arm only reaches the forearm if every bone in
-    // between is a child. MMD exports put a TWIST bone (`腕捩`) there, and a twist bone
-    // that never rotates still passes the transform through - unless the rig table
-    // bound `armLow` to a bone that is NOT a descendant of `armUp`, in which case the
-    // upper arm rotates and the forearm visibly does not. That is indistinguishable
-    // from "the rotation did not happen" in a screenshot, so the topology is printed.
-    // `GLDX_ROTCHK=1`: apply ONE known rotation to the upper arm and report where the
-    // forearm ended up. This separates "RotateBone does not reach this bone" from
-    // "the action's angles are wrong", which look identical in a screenshot.
-    // `GLDX_LEGCHK=1`: does rotating `legUp` actually lift the ankle?
-    //
-    // The MMD skeleton puts the legs under `下半身` and the torso under `上半身`, which
-    // are SIBLINGS - not a parent chain. Every pose source was written assuming
-    // hips->spine->...->legs, so "rotate the hips to swing the legs" can silently swing
-    // nothing. Measuring the ankle's world height under a known hip rotation separates
-    // "the rig is shaped differently" from "the angles are wrong".
-    // `GLDX_WALKCHK=1`: both ankles' world height through one walk cycle.
-    //
-    // The single `ankleH` column tracks the LEFT ankle only, so "one foot lifts and the
-    // other never does" and "neither foot lifts" look the same in it. Printing both,
-    // per phase, is the minimum needed to tell those apart.
-    if (std::getenv("GLDX_WALKCHK") && character.walkSource) {
-        const auto& sk = model.skeleton();
-        for (int i = 0; i < 12; ++i) {
-            const float ph = static_cast<float>(i) / 12.0f;
-            std::vector<glm::mat4> pose, wm;
-            character.walkSource->Sample(ph * character.walkSource->Duration(), pose);
-            sk.ComputeWorld(pose, model.Mat4(), wm);
-            const float yl = glm::vec3(wm[(std::size_t)character.rig.foot[gldx::kRigLeft]][3]).y;
-            const float yr = glm::vec3(wm[(std::size_t)character.rig.foot[gldx::kRigRight]][3]).y;
-            std::fprintf(stderr, "[walkchk] ph=%.2f ankleL=%.3f ankleR=%.3f\n",
-                         (double)ph, (double)yl, (double)yr);
-        }
-    }
-    if (std::getenv("GLDX_LEGCHK")) {
-        const auto& sk = model.skeleton();
-        std::vector<glm::mat4> base, restW;
-        gldx::ResetToRest(sk, base);
-        gldx::ComputeRestWorlds(sk, restW);
-        auto ankleY = [&](const std::vector<glm::mat4>& poseIn, int side) {
-            std::vector<glm::mat4> wm;
-            sk.ComputeWorld(poseIn, model.Mat4(), wm);
-            return glm::vec3(wm[(std::size_t)character.rig.foot[side]][3]);
-        };
-        const glm::vec3 a0 = ankleY(base, gldx::kRigLeft);
-        for (const char* which : {"legUp", "hips", "spine"}) {
-            std::vector<glm::mat4> pose = base;
-            const int bone = std::string_view(which) == "legUp" ? character.rig.legUp[gldx::kRigLeft]
-                             : std::string_view(which) == "hips" ? character.rig.hips
-                                                                 : character.rig.spine;
-            gldx::RotateBone(pose, restW, bone, character.rig.side, 0.5f);
-            const glm::vec3 a1 = ankleY(pose, gldx::kRigLeft);
-            std::fprintf(stderr,
-                         "[legchk] rotate %-6s by 0.5 rad -> ankle moved (%.3f, %.3f, %.3f)\n",
-                         which, (double)(a1.x - a0.x), (double)(a1.y - a0.y), (double)(a1.z - a0.z));
-        }
-    }
-    if (std::getenv("GLDX_ROTCHK")) {
-        const auto& sk = model.skeleton();
-        const int bu = character.rig.armUp[gldx::kRigRight];
-        const int bl = character.rig.armLow[gldx::kRigRight];
-        if (bu >= 0 && bl >= 0) {
-            // Positions come from ComputeWorld, NOT from the palette: `palette[i]` is
-            // `world * inverseBind` (a mesh->bone map), so its translation is not the
-            // joint's position. Reading it as one made every rotation look like it
-            // moved the arm by exactly 0.000, which reads as "RotateBone does nothing"
-            // when in fact the measurement was blind.
-            auto forearmDir = [&](const std::vector<glm::mat4>& poseIn) {
-                std::vector<glm::mat4> wm;
-                sk.ComputeWorld(poseIn, model.Mat4(), wm);
-                const glm::vec3 d = glm::vec3(wm[(std::size_t)bl][3]) -
-                                    glm::vec3(wm[(std::size_t)bu][3]);
-                return glm::length(d) > 1e-6f ? glm::normalize(d) : d;
-            };
-            std::vector<glm::mat4> base, restW;
-            gldx::ResetToRest(sk, base);
-            gldx::ComputeRestWorlds(sk, restW);
-            const glm::vec3 d0 = forearmDir(base);
-            for (const char* axisName : {"forward", "up", "side"}) {
-                std::vector<glm::mat4> pose = base;
-                const glm::vec3 ax = std::string_view(axisName) == "forward" ? character.rig.forward
-                                     : std::string_view(axisName) == "up"    ? character.rig.up
-                                                                            : character.rig.side;
-                gldx::RotateBone(pose, restW, bu, ax, 1.57f);
-                const glm::vec3 d1 = forearmDir(pose);
-                std::fprintf(stderr, "[rotchk] rotate armUp about %-7s by 90 deg -> moved %.3f\n",
-                             axisName, (double)glm::length(d1 - d0));
-            }
-        }
-    }
-    if (std::getenv("GLDX_ARMTREE")) {
-        auto ancestry = [&](int bone) {
-            std::string out;
-            int guard = 0;
-            while (bone >= 0 && guard++ < 24) {
-                out = skeleton.bones()[(std::size_t)bone].name + (out.empty() ? "" : " <- " + out);
-                bone = skeleton.bones()[(std::size_t)bone].parent;
-            }
-            return out;
-        };
-        for (int sd = 0; sd < gldx::kRigSides; ++sd) {
-            const char* side = sd == 0 ? "L" : "R";
-            std::fprintf(stderr, "[tree] %s armUp(%d): %s\n", side, character.rig.armUp[sd],
-                         ancestry(character.rig.armUp[sd]).c_str());
-            std::fprintf(stderr, "[tree] %s armLow(%d): %s\n", side, character.rig.armLow[sd],
-                         ancestry(character.rig.armLow[sd]).c_str());
-            std::fprintf(stderr, "[tree] %s legUp(%d): %s\n", side, character.rig.legUp[sd],
-                         ancestry(character.rig.legUp[sd]).c_str());
-            std::fprintf(stderr, "[tree] %s legLow(%d): %s\n", side, character.rig.legLow[sd],
-                         ancestry(character.rig.legLow[sd]).c_str());
-            std::fprintf(stderr, "[tree] %s foot(%d): %s\n", side, character.rig.foot[sd],
-                         ancestry(character.rig.foot[sd]).c_str());
-        }
-    }
-    if (std::getenv("GLDX_ARMDIR")) {
-        const auto& sk = model.skeleton();
-        for (float ph : {0.0f, 0.25f, 0.5f, 0.75f}) {
-            std::vector<glm::mat4> pose, wm;
-            character.walkSource->Sample(ph * character.walkSource->Duration(), pose);
-            sk.ComputeWorld(pose, model.Mat4(), wm);
-            for (int sd = 0; sd < gldx::kRigSides; ++sd) {
-                const int bu = character.rig.armUp[sd];
-                const int bl = character.rig.armLow[sd];
-                if (bu < 0 || bl < 0) continue;
-                const glm::vec3 d = glm::vec3(wm[(std::size_t)bl][3]) -
-                                    glm::vec3(wm[(std::size_t)bu][3]);
-                const glm::vec3 n = glm::length(d) > 1e-6f ? glm::normalize(d) : d;
-                std::fprintf(stderr, "[armdir] ph=%.2f %s side=%+.2f fwd=%+.2f up=%+.2f\n",
-                             (double)ph, sd == 0 ? "L" : "R",
-                             (double)glm::dot(n, character.rig.side),
-                             (double)glm::dot(n, character.rig.forward),
-                             (double)glm::dot(n, character.rig.up));
-            }
-        }
-    }
-    if (std::getenv("GLDX_ARMREL")) {
-        const auto& sk = model.skeleton();
-        std::vector<glm::mat4> pose, wm;
-        character.idleSource->Sample(0.0f, pose);
-        sk.ComputeWorld(pose, model.Mat4(), wm);
-        auto P = [&](int b) { return b < 0 ? glm::vec3(0) : glm::vec3(wm[(std::size_t)b][3]); };
-        for (int sd = 0; sd < gldx::kRigSides; ++sd) {
-            const glm::vec3 sh = P(character.rig.armUp[sd]);
-            const glm::vec3 el = P(character.rig.armLow[sd]);
-            const glm::vec3 wr = P(character.rig.hand[sd]);
-            std::fprintf(stderr,
-                         "[armrel] %s shoulder y=%.3f  elbow y=%.3f (d=%+.3f)  wrist y=%.3f (d=%+.3f)\n",
-                         sd == 0 ? "L" : "R", (double)sh.y, (double)el.y, (double)(el.y - sh.y),
-                         (double)wr.y, (double)(wr.y - sh.y));
-        }
-    }
-    if (std::getenv("GLDX_ARMREST")) {
-            for (int sd = 0; sd < gldx::kRigSides; ++sd) {
-                const int bu = character.rig.armUp[sd];
-                const int bl = character.rig.armLow[sd];
-                const int hd = character.rig.hand[sd];
-                if (bu < 0 || bl < 0) continue;
-                auto rp = [&](int b) { return glm::vec3(skeleton.RestWorld(b)[3]); };
-                const glm::vec3 d1 = rp(bl) - rp(bu);
-                const glm::vec3 d2 = (hd >= 0) ? rp(hd) - rp(bl) : glm::vec3(0.0f);
-                auto dump = [&](const char* lbl, const glm::vec3& v) {
-                    std::fprintf(stderr,
-                                 "[armrest] %s.%s len=%.3f fwd=%+.3f up=%+.3f side=%+.3f\n",
-                                 lbl, sd == 0 ? "L" : "R", (double)glm::length(v),
-                                 (double)glm::dot(v, character.rig.forward),
-                                 (double)glm::dot(v, character.rig.up),
-                                 (double)glm::dot(v, character.rig.side));
-                };
-                dump("upperArm", d1);
-                if (hd >= 0) dump("forearm", d2);
-            }
-        }
         if (std::getenv("GLDX_ARMCHK")) {
             for (const Probe& pr : probes) {
                 std::vector<glm::mat4> pose, palette;
@@ -2847,17 +2599,6 @@ int main(int argc, char** argv) {
 
 
 
-        if (std::getenv("GLDX_ACTDBG")) {
-            static int shown = 0;
-            if (shown++ < 4)
-                std::fprintf(stderr,
-                             "[actdbg] request=%d current=%p sit=%p walk=%p ready=%d\n",
-                             static_cast<int>(view.requestAction),
-                             (const void*)character.machine.Current(),
-                             (const void*)character.sitSource.get(),
-                             (const void*)character.walkSource.get(),
-                             character.ready() ? 1 : 0);
-        }
 
         // Lightweight guard: a null source (rig not uploaded yet) leaves the pose alone.
         if (character.machine.Current() != nullptr) {
@@ -2901,30 +2642,6 @@ int main(int argc, char** argv) {
             (void)cur;
             (void)nxt;
 
-            // `GLDX_POSEDBG=1`: how far the DRAWN pose is from rest, per leg bone.
-            //
-            // The chain is `--action sit` -> machine.Current() == sitSource ->
-            // Sample() writes thigh = -76.8 deg -> ... -> here. If this line reports ~0
-            // the pose is being lost between Sample and the draw; if it reports the
-            // rotation, the loss is later (skinning or the pass).
-            if (std::getenv("GLDX_POSEDBG")) {
-                static int shown = 0;
-                if (shown++ < 6) {
-                    const auto& sk = model.skeleton();
-                    for (int b : {character.rig.legUp[gldx::kRigLeft],
-                                  character.rig.legLow[gldx::kRigLeft]}) {
-                        if (b < 0) continue;
-                        const glm::mat4& pm = character.pose[(std::size_t)b];
-                        const glm::mat4& rm = model.restWorld()[(std::size_t)b];
-                        const glm::mat3 dp(pm), dr(rm);
-                        float dev = 0.0f;
-                        for (int c = 0; c < 3; ++c)
-                            dev = std::max(dev, glm::length(dp[c] - dr[c]));
-                        std::fprintf(stderr, "[posedbg] bone %d devFromRest=%.4f\n", b,
-                                     (double)dev);
-                    }
-                }
-            }
         }
 
             // Real seconds since the previous frame, clamped: the first frame after the
@@ -3048,28 +2765,6 @@ int main(int argc, char** argv) {
                 // rate, which is the same non-determinism this whole mechanism exists to
                 // remove.
                 if (character.secondarySettleSteps > 0) --character.secondarySettleSteps;
-                if (std::getenv("GLDX_SMCHK")) {
-                    // How far did the solver actually move the chains? If this is ~0 the
-                    // cloth is not being simulated at all, which is exactly what a
-                    // "0 differing pixels vs --off" measurement looks like from outside.
-                    static int shown = 0;
-                    if (character.secondarySettleSteps == 0 && shown++ < 3) {
-                        for (int ci = 0; ci < gldx::RigChainKindCount; ++ci) {
-                            if (!character.rig.hasChain(static_cast<gldx::RigChainKind>(ci))) continue;
-                            float maxDev = 0.0f;
-                            for (int k = 0; k < character.rig.chains[ci].count; ++k) {
-                                const int b = character.rig.chains[ci].bones[k];
-                                const glm::mat4& a = character.pose[(std::size_t)b];
-                                const glm::mat4& r = model.restWorld()[(std::size_t)b];
-                                const glm::mat3 da(a), dr(r);
-                                for (int c = 0; c < 3; ++c)
-                                    maxDev = std::max(maxDev, glm::length(da[c] - dr[c]));
-                            }
-                            std::fprintf(stderr, "[smchk] chain %d count=%d maxDevFromRest=%.5f\n",
-                                         ci, character.rig.chains[ci].count, (double)maxDev);
-                        }
-                    }
-                }
             }
 
             model.skeleton().ComputeSkinning(character.pose, model.Mat4(), character.palette);
@@ -3102,68 +2797,12 @@ int main(int argc, char** argv) {
             // showed the arc rising correctly.
             const float shift = VerticalShiftFor(character, view.requestAction, clipSeconds,
                                                  solvedLift);
-            if (std::getenv("GLDX_LIFTDBG")) {
-                static int shown = 0;
-                if (shown++ < 3)
-                    std::fprintf(stderr,
-                                 "[liftdbg] solvedLift=%.4f shift=%.4f action=%d weight=%.2f\n",
-                                 (double)solvedLift, (double)shift,
-                                 static_cast<int>(view.requestAction),
-                                 (double)GroundWeightFor(character, view.requestAction,
-                                                               clipSeconds));
-            }
             view.groundLift = shift;
             view.airRise = (view.requestAction == Action::Jump && character.jumpSource)
                                ? character.jumpSource->AirborneRiseAt(clipSeconds)
                                : 0.0f;
             if (solved.valid() && view.walk) {
                 gldx::GroundContact::ApplyLift(character.palette, shift);
-            }
-            // ---- contact-point solve is approximate; the mesh is not ----
-            //
-            // `GroundContact` works from four sole POINTS with a single "how far does the
-            // skin hang below the ankle" offset. Once the legs are bound to their real
-            // deform bones that offset no longer describes the foot's actual shape, and
-            // the result floats: measured on the skinned mesh, idle 0.079 m, walk 0.045,
-            // crouch 0.282 - i.e. the whole character hovering, worst in the poses that
-            // bend the ankle most.
-            //
-            // So do the last centimetres from the real vertices whenever the pose is
-            // supposed to be ON the floor. Airborne actions are skipped: their height is
-            // authored (`VerticalShiftFor`) and pulling them down would delete the jump.
-            if (std::getenv("GLDX_FIXDBG") && view.requestAction == Action::Sit) {
-                static int shown = 0;
-                if (shown++ < 2)
-                    std::fprintf(stderr, "[fixin] walk=%d probes=%zu weight=%.2f\n",
-                                 view.walk ? 1 : 0, character.probeVerts.size(),
-                                 (double)GroundWeightFor(character, view.requestAction,
-                                                         clipSeconds));
-            }
-            // NOTE: a mesh-accurate grounding pass lived here and is removed.
-            //
-            // It measured the lowest skinned vertex and applied `-lowest` to the palette.
-            // It converged arithmetically (printed 0.000) while the drawn image showed a
-            // different result entirely, so one of the two was reading a palette the
-            // other did not use. I could not pin that down in the time available, and
-            // shipping a pass that disagrees with the picture is worse than not having
-            // it. Grounding is done per-action from measurement instead: see
-            // `character.sitRise` and the `--on report` columns.
-            if (std::getenv("GLDX_TRUEHIGH")) {
-                static int shown = 0;
-                if (shown++ < 2) {
-                    float hi = -1.0e9f;
-                    for (const gldx::SkinnedVertex& v : character.probeVerts) {
-                        glm::vec4 q(0.0f);
-                        for (int i = 0; i < 4; ++i) {
-                            if (v.boneWeight[i] <= 0.0f) continue;
-                            const std::size_t bi = v.boneIndex[i];
-                            if (bi < character.palette.size())
-                                q += v.boneWeight[i] * (character.palette[bi] * glm::vec4(v.position, 1.0f));
-                        }
-                        hi = std::max(hi, q.y);
-                    }
-                    std::fprintf(stderr, "[truehigh] top vertex y = %.4f m  (站直约 1.70)\n", (double)hi);
-                }
             }
             // Where the lowest sole ended up after the shift: the number that says
             // "planted" (0) or "in the air" (>0). Printed in millimetres because

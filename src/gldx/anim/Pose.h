@@ -115,6 +115,21 @@ void RotateBone(std::vector<glm::mat4>& pose, const std::vector<glm::mat4>& rest
                 const glm::vec3& worldAxis, float radians);
 
 /**
+ * Translate one bone by a WORLD-space offset, folding it into the joint's local frame.
+ *
+ * Needed because some rigs do not let a rotation move the body at all. MMD is one: its
+ * `下半身` (the legs' parent) and `上半身` (the spine) are SIBLINGS, so folding the knees
+ * leaves the pelvis at standing height and "crouch" only bends the legs in place.
+ * Lowering the pelvis therefore has to be an explicit translation of the common parent,
+ * and it has to be applied in the same frame the pose is built in.
+ *
+ * Same silent-guard policy as RotateBone: `bone < 0` and an out-of-range index are
+ * no-ops, because an unbound slot is a normal rig property, not an error.
+ */
+void TranslateBone(std::vector<glm::mat4>& pose, const std::vector<glm::mat4>& restWorld, int bone,
+                   const glm::vec3& worldOffset);
+
+/**
  * @p restWorld 缓存：`out[i] = skeleton.RestWorld(i)`，长度 = 骨骼数。
  *
  * 为什么让调用方自己缓存而不是每次 RotateBone 内部去调 `Skeleton::RestWorld`：后者每次调用
