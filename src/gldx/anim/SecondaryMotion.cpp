@@ -15,9 +15,24 @@ namespace {
 // How much of the root's motion a joint at this depth should feel. The tip of a chain
 // moves MORE than its root for the same body motion (that is what makes a skirt flare
 // when you turn), so the drive grows along the chain.
-inline float DepthGain(int index, int count) {
+/**
+ * How strongly a joint responds, by how DEEP it is along its own strand.
+ *
+ * This used to be `index / (count - 1)` over the FLATTENED chain. For the skirt that
+ * chain is 8 panels x 3 joints concatenated, so the flattened index mixes two different
+ * things: the panel number and the depth. Measured effect: panel 1 got gain 0.45-0.52
+ * and panel 8 got 0.94-1.00 - the hem was visibly puffy on one side of the body and
+ * skin-tight on the other, and it never converged because the two sides were being
+ * driven by different strengths.
+ *
+ * `strandLength` is how many joints one strand has (3 for the skirt, 1 when the chain
+ * is a single rope like the tail), so the gain now depends only on depth.
+ */
+inline float DepthGain(int index, int count, int strandLength) {
     if (count <= 1) return 1.0f;
-    const float u = static_cast<float>(index) / static_cast<float>(count - 1);
+    const int strand = (strandLength > 0) ? strandLength : count;
+    if (strand <= 1) return 1.0f;
+    const float u = static_cast<float>(index % strand) / static_cast<float>(strand - 1);
     return 0.45f + 0.55f * u;
 }
 
@@ -108,7 +123,7 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
         const int bone = chain[i];
         if (bone < 0 || bone >= static_cast<int>(local.size())) continue;
 
-        const float gain = DepthGain(i, count);
+        const float gain = DepthGain(i, count, tuning.strandLength);
 
         // Targets are expressed in the joint's own frame: `PoseRotation` takes a
         // world-space axis and folds it into the rest-local frame, so passing the

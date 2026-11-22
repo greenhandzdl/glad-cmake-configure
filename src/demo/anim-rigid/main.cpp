@@ -1521,7 +1521,14 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         // slightly. Real fabric keeps swinging for most of a stride, so damping comes
         // down and stiffness with it (a stiff spring with low damping rings; a soft one
         // with low damping swings).
-        t[static_cast<int>(RigChainKind::Skirt)] = gldx::ChainTuning{0.10f, 0.975f, 0.30f, /*tuck*/-0.16f};
+        // `strandLength = 3`: the skirt is 8 panels x 3 joints flattened into one chain,
+        // and the response must depend on depth ALONG a panel, not on which panel it is.
+        // With the old flattened-index gain, panel 1 moved at 0.45 and panel 8 at 1.0 -
+        // one side of the hem puffed out while the other stayed skin-tight, and it never
+        // evened out because the two sides were being driven at different strengths.
+        gldx::ChainTuning skirtTune{0.10f, 0.975f, 0.30f, /*tuck*/-0.16f};
+        skirtTune.strandLength = 3;
+        t[static_cast<int>(RigChainKind::Skirt)] = skirtTune;
         t[static_cast<int>(RigChainKind::Hair)]  = gldx::ChainTuning{0.13f, 0.970f, 0.18f};
         t[static_cast<int>(RigChainKind::Tail)]  = gldx::ChainTuning{0.12f, 0.965f, 0.12f};
         t[static_cast<int>(RigChainKind::Ear)]   = gldx::ChainTuning{0.45f, 0.80f, -0.10f};
