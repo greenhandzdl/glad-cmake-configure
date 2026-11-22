@@ -1433,9 +1433,17 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     {
         using gldx::RigChainKind;
         auto& t = character.chainTune;
-        t[static_cast<int>(RigChainKind::Skirt)] = gldx::ChainTuning{0.22f, 0.88f, 0.30f};
-        t[static_cast<int>(RigChainKind::Hair)]  = gldx::ChainTuning{0.30f, 0.85f, 0.18f};
-        t[static_cast<int>(RigChainKind::Tail)]  = gldx::ChainTuning{0.28f, 0.86f, 0.12f};
+        // {stiffness, damping, gravity}
+        //
+        // `damping` is the per-step velocity retention, so 0.88 means the spring is
+        // almost dead after ~8 frames: measured, the hem's shape across four run phases
+        // was nearly identical, i.e. the cloth read as a rigid cone that only leaned
+        // slightly. Real fabric keeps swinging for most of a stride, so damping comes
+        // down and stiffness with it (a stiff spring with low damping rings; a soft one
+        // with low damping swings).
+        t[static_cast<int>(RigChainKind::Skirt)] = gldx::ChainTuning{0.10f, 0.975f, 0.30f, /*tuck*/-0.16f};
+        t[static_cast<int>(RigChainKind::Hair)]  = gldx::ChainTuning{0.13f, 0.970f, 0.18f};
+        t[static_cast<int>(RigChainKind::Tail)]  = gldx::ChainTuning{0.12f, 0.965f, 0.12f};
         t[static_cast<int>(RigChainKind::Ear)]   = gldx::ChainTuning{0.45f, 0.80f, -0.10f};
     }
 
@@ -1763,6 +1771,27 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                          ancestry(character.rig.legLow[sd]).c_str());
             std::fprintf(stderr, "[tree] %s foot(%d): %s\n", side, character.rig.foot[sd],
                          ancestry(character.rig.foot[sd]).c_str());
+        }
+    }
+    if (std::getenv("GLDX_ARMDIR")) {
+        const auto& sk = model.skeleton();
+        for (float ph : {0.0f, 0.25f, 0.5f, 0.75f}) {
+            std::vector<glm::mat4> pose, wm;
+            character.walkSource->Sample(ph * character.walkSource->Duration(), pose);
+            sk.ComputeWorld(pose, model.Mat4(), wm);
+            for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+                const int bu = character.rig.armUp[sd];
+                const int bl = character.rig.armLow[sd];
+                if (bu < 0 || bl < 0) continue;
+                const glm::vec3 d = glm::vec3(wm[(std::size_t)bl][3]) -
+                                    glm::vec3(wm[(std::size_t)bu][3]);
+                const glm::vec3 n = glm::length(d) > 1e-6f ? glm::normalize(d) : d;
+                std::fprintf(stderr, "[armdir] ph=%.2f %s side=%+.2f fwd=%+.2f up=%+.2f\n",
+                             (double)ph, sd == 0 ? "L" : "R",
+                             (double)glm::dot(n, character.rig.side),
+                             (double)glm::dot(n, character.rig.forward),
+                             (double)glm::dot(n, character.rig.up));
+            }
         }
     }
     if (std::getenv("GLDX_ARMREST")) {

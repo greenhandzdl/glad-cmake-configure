@@ -70,7 +70,15 @@ struct WalkTuning {
     float armSwing  = 0.55f;
     float elbowBase = 0.55f;         // 两个摆动相都保留的屈肘
     float elbowSwing = 0.22f;        // 手臂前摆时额外加的
-    float armOut    = 0.05f;         // 前臂外展：靠它把小臂拿出裙摆，而不是靠更屈肘
+    // 上臂抬高（绕 **forward**，不是 side）。
+    //
+    // 绕 `side` 对这个资产是错的：手臂垂直时 side 就是它自己的长轴，转了只是自旋，
+    // 画面表现为**手心朝天**、手臂位置没变。绕 `forward` 与下垂的手臂垂直，才是真正
+    // 把它抬离裙摆，而且不改变手掌朝向。
+    //
+    // 0.45 rad 是对着参照裙摆眼睛挑的：0.25 仍会插进裙面，0.60 以上手臂开始像"被举
+    // 着走"。
+    float armOut    = 0.45f;         // rad，上臂抬高（绕 forward，~26 deg）
     float wristBase = 0.14f;
     float wristSwing = 0.16f;
     float wristDeviate = 0.07f;

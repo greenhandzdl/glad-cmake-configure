@@ -118,6 +118,7 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
         target.y = -leanSide * gain * 8.0f;            // yaw: swing to the outside of a turn
         target.z = -liftAmount * gain * 6.0f;          // roll: flare on vertical motion
         target += glm::vec3(tuning.gravity * gain, 0.0f, 0.0f);   // hang under gravity
+        target.z += tuning.tuck * gain;                            // static inward tuck
 
         if (advance) {
             StepSpring(angle_[j].x, omega_[j].x, target.x, tuning.stiffness, tuning.damping, dt);

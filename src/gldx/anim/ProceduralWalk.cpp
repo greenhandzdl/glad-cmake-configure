@@ -152,6 +152,14 @@ void ProceduralWalk::SampleAtPhase(float phase, std::vector<glm::mat4>& outPose)
     // （这具骨架没有可继承的 A-pose），之后绕侧向轴的旋转才是前后摆。
     rotate(rig_.armUp[kRigLeft], rig_.forward, -tune.armDown);
     rotate(rig_.armUp[kRigRight], rig_.forward, +tune.armDown);
+    // Clear the skirt by raising the arms slightly, NOT by abducting them.
+    //
+    // The first attempt rotated about `side`, which for a hanging arm is its own long
+    // axis: the arm spun instead of moving out, and the visible result was a palm facing
+    // the sky. `forward` is perpendicular to a hanging arm, so this actually lifts it
+    // away from the hem - and leaves the hand's own orientation alone.
+    rotate(rig_.armUp[kRigLeft], rig_.forward, -tune.armOut);
+    rotate(rig_.armUp[kRigRight], rig_.forward, +tune.armOut);
 
     // 骨盆与肩反向转，头抵掉大部分，角色才会朝着它走的方向看。
     const float yawDriver = left.hip / std::max(tune.hipSwing, 1e-4f);   // -1 = 左腿在前
@@ -184,10 +192,19 @@ void ProceduralWalk::SampleAtPhase(float phase, std::vector<glm::mat4>& outPose)
         // 肩胛不是刚性支架：它跟着手臂前后动。三度就够让轮廓不再读成"方块上装着
         // 一条铰接的棍子"。
         rotate(rig_.clavicle[s], rig_.up, -tune.clavicleRoll * swingN);
-        rotate(rig_.armLow[s], rig_.side, elbow - 0.30f * tune.crouch);
-        // ……再加一个恒定的前臂外展。这是把手拿出裙摆的那一环：肱骨没法在不把姿态
-        // 摆得又僵又 A 形的前提下离躯干够远，所以间隙在前臂这一级换。
-        rotate(rig_.armLow[s], rig_.up, tune.armOut * (s == 0 ? 1.0f : -1.0f));
+        // Elbow bend must be MIRRORED between the sides.
+        //
+        // `side` points the same way for both arms, so a single signed angle bends one
+        // elbow forward and the other backward - the right hand ended up tucked toward
+        // the body (measured wrist offset +0.067 m on the right vs -0.135 m on the
+        // left) and went straight into the skirt. Mirroring the angle is what makes the
+        // two elbows bend the same way in body terms.
+        const float sideSign2 = (s == 0) ? 1.0f : -1.0f;
+        rotate(rig_.armLow[s], rig_.side, (elbow - 0.30f * tune.crouch) * sideSign2);
+        // (The clearance used to be applied here as a forearm rotation about `up`, and
+        // on top of the new upper-arm lift it pulled the two sides apart: measured wrist
+        // offsets -0.130 / +0.054 m, i.e. one hand clear and one still inside the hem.
+        // Clearance belongs at the shoulder only.)
         // ……以及腕关节，眼睛在肢体末端真正追踪的就是它。没有它整条手臂就是刚性
         // 摆锤：肩和肘在动、手的朝向一直不变，即使手臂在摆也读作"手是冻住的"。
         const float wrist = -(tune.wristBase + tune.wristSwing * (0.5f - 0.5f * swingN));
