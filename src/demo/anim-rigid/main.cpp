@@ -1793,6 +1793,26 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                      (double)du, (double)dsu);
     }
 
+    if (std::getenv("GLDX_ARMTRACE") && character.swimSource) {
+        const auto& sk8 = model.skeleton();
+        for (float ph : {0.0f, 0.25f, 0.5f, 0.75f}) {
+            std::vector<glm::mat4> pose, wm;
+            character.swimSource->Sample(ph * character.swimSource->Duration(), pose);
+            sk8.ComputeWorld(pose, model.Mat4(), wm);
+            auto P = [&](int b) { return b < 0 ? glm::vec3(0) : glm::vec3(wm[(std::size_t)b][3]); };
+            const glm::vec3 bodyDir = glm::normalize(P(character.rig.head) - P(character.rig.hips));
+            for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+                const glm::vec3 arm = P(character.rig.hand[sd]) - P(character.rig.armUp[sd]);
+                const glm::vec3 n = glm::normalize(arm);
+                std::fprintf(stderr,
+                             "[armtr] ph=%.2f %s  alongBody=%+.2f up=%+.2f side=%+.2f\n",
+                             (double)ph, sd == 0 ? "L" : "R",
+                             (double)glm::dot(n, bodyDir),
+                             (double)glm::dot(n, character.rig.up),
+                             (double)glm::dot(n, character.rig.side));
+            }
+        }
+    }
     if (std::getenv("GLDX_SWIMKICK") && character.swimSource) {
         const auto& sk7 = model.skeleton();
         // Sample at 1/8 intervals: `sin` is ZERO at 0, 0.25, 0.5, 0.75 of the kick
