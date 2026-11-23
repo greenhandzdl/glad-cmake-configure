@@ -82,6 +82,17 @@ inline constexpr const char* const kToeL[]    = {"つま先.L", "左つま先"};
 inline constexpr const char* const kToeR[]    = {"つま先.R", "右つま先"};
 inline constexpr const char* const kArmUpL[]  = {"腕.L", "左腕", "腕捩.L"};
 inline constexpr const char* const kArmUpR[]  = {"腕.R", "右腕", "腕捩.R"};
+// ---- `捩`（twist）骨必须跟着肘一起转 ----
+//
+// MMD 的手臂有两套 twist 骨，位置不同：
+//     左腕捩  -> 挂在 `左腕`(上臂) 下，`左ひじ` 的父级
+//     左手捩  -> 挂在 `左ひじ` 下
+//     右腕捩1 -> **直接挂在 `右腕` 下**，是 `右腕捩` 的兄弟，不在 `右ひじ` 之下
+//
+// 手套/袖套的网格主导骨骼是 `左手捩` 和 `右腕捩1`。pose 代码只旋转 `armUp`/`armLow`，
+// 所以 `右腕捩1` 跟着上臂走、却**不跟着肘弯曲**——绑在它上面的袖套就留在上臂延长线
+// 上，画面上看起来"袖套挂在腰侧、手臂从它中间穿过去"。这不是穿模，是那块几何根本
+// 没有参与肘关节的旋转。
 inline constexpr const char* const kArmLowL[] = {"ひじ.L", "左ひじ", "肘.L"};
 inline constexpr const char* const kArmLowR[] = {"ひじ.R", "右ひじ", "肘.R"};
 inline constexpr const char* const kHandL[]   = {"手首.L", "左手首"};

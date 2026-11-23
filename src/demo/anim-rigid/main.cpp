@@ -318,6 +318,13 @@ struct Character {
     // soft), so they live here rather than in the engine - same rule as WalkTuning.
     gldx::ChainTuning chainTune[gldx::RigChainKindCount];
     float sitRise    = 0.0f;
+    // MMD `捩`（twist）bones that sit directly under the UPPER arm instead of the
+    // forearm. Gloves and cuffs are weighted to them, so unless they are rotated with
+    // the elbow those pieces stay on the upper arm's line while the forearm swings away
+    // - visually "the cuff hangs at the waist and the arm passes through it".
+    //
+    // Found by name at load (this is demo-side, MMD-specific knowledge).
+    std::vector<int> twistBones;
     // Bind-space corner box of the pelvis, measured once at load. The SEATED solve uses
     // it (see GroundContact::AddBodyContact): sitting puts the weight on the seat, and
     // the four sole points cannot see the seat.
@@ -1226,6 +1233,40 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
 
     // Hand the classification in rather than letting Upload redo it: we already
     // have one, and Upload's leg-length measurement needs exactly this answer.
+    if (std::getenv("GLDX_TWISTTREE")) {
+        auto ancestry = [&](int bone) {
+            std::string out;
+            int guard = 0;
+            while (bone >= 0 && guard++ < 30) {
+                out = data.skeleton.bones()[(std::size_t)bone].name + (out.empty() ? "" : " <- " + out);
+                bone = data.skeleton.bones()[(std::size_t)bone].parent;
+            }
+            return out;
+        };
+        for (int b : {96, 118, 122, 123}) {
+            if (b < 0 || static_cast<std::size_t>(b) >= data.skeleton.size()) continue;
+            std::fprintf(stderr, "[twist] %d: %s\n", b, ancestry(b).c_str());
+        }
+    }
+    if (std::getenv("GLDX_MESHDOM")) {
+        for (std::size_t mi = 0; mi < data.meshes.size(); ++mi) {
+            const gldx::SkinnedMeshData& mesh = data.meshes[mi];
+            std::vector<std::size_t> cnt(data.skeleton.size(), 0);
+            for (const gldx::SkinnedVertex& v : mesh.vertices)
+                for (int k = 0; k < 4; ++k)
+                    if (v.boneWeight[k] > 0.5f) {
+                        const std::size_t bi = v.boneIndex[k];
+                        if (bi < cnt.size()) ++cnt[bi];
+                    }
+            std::size_t best = 0, bestN = 0;
+            for (std::size_t b = 0; b < cnt.size(); ++b)
+                if (cnt[b] > bestN) { bestN = cnt[b]; best = b; }
+            if (bestN > 0)
+                std::fprintf(stderr, "[meshdom] mesh %2zu mat=%d verts=%6zu -> bone %zu '%s' (%zu)\n",
+                             mi, data.meshMaterial[mi], mesh.vertices.size(), best,
+                             data.skeleton.bones()[best].name.c_str(), bestN);
+        }
+    }
     character.model.Upload(std::move(data), &character.rig);
     const gldx::RiggedModel& model = character.model;
     if (!model.ready()) {
@@ -1240,6 +1281,31 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // draw, but this is the one place that has a RigProfile to give it.
     character.model.SetOrientation(character.rig.side, character.rig.up, character.rig.forward);
 
+
+    // ---- collect MMD twist bones that hang directly under the upper arm ----
+    //
+    // The naming family cannot express this: a twist bone is not a slot, it is extra
+    // geometry bone the exporter inserted. Matching by the `捩` character and checking
+    // that its PARENT is the upper arm keeps this honest - a twist bone under the
+    // forearm already inherits the elbow and needs nothing.
+    {
+        const auto& bones = skeleton.bones();
+        for (std::size_t i = 0; i < bones.size(); ++i) {
+            if (bones[i].name.find("捩") == std::string::npos) continue;
+            const int parent = bones[i].parent;
+            for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+                if (parent >= 0 && parent == character.rig.armUp[sd])
+                    character.twistBones.push_back(static_cast<int>(i));
+            }
+        }
+        if (!character.twistBones.empty()) {
+            std::string names;
+            for (int b : character.twistBones)
+                names += (names.empty() ? "" : ", ") + skeleton.bones()[(std::size_t)b].name;
+            std::fprintf(stderr, "[anim-rigid] twist bones under the upper arm: %s\n",
+                         names.c_str());
+        }
+    }
 
     character.ground = gldx::GroundContact(
         skeleton, character.rig.up,
@@ -1671,6 +1737,25 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                      (double)du, (double)dsu);
     }
 
+    if (std::getenv("GLDX_FOREARM") && character.walkSource) {
+        const auto& sk4 = model.skeleton();
+        for (float ph : {0.0f, 0.5f}) {
+            std::vector<glm::mat4> pose, wm;
+            character.walkSource->Sample(ph * character.walkSource->Duration(), pose);
+            sk4.ComputeWorld(pose, model.Mat4(), wm);
+            for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+                const int bl = character.rig.armLow[sd], hd = character.rig.hand[sd];
+                if (bl < 0 || hd < 0) continue;
+                const glm::vec3 d = glm::vec3(wm[(std::size_t)hd][3]) -
+                                    glm::vec3(wm[(std::size_t)bl][3]);
+                const glm::vec3 n = glm::length(d) > 1e-6f ? glm::normalize(d) : d;
+                std::fprintf(stderr, "[farm] ph=%.1f %s side=%+.2f fwd=%+.2f up=%+.2f\n",
+                             (double)ph, sd == 0 ? "L" : "R", (double)glm::dot(n, character.rig.side),
+                             (double)glm::dot(n, character.rig.forward),
+                             (double)glm::dot(n, character.rig.up));
+            }
+        }
+    }
     if (std::getenv("GLDX_UPPERARM") && character.walkSource) {
         const auto& sk3 = model.skeleton();
         for (float ph : {0.0f, 0.25f, 0.5f, 0.75f}) {
@@ -2684,6 +2769,33 @@ int main(int argc, char** argv) {
             (void)cur;
             (void)nxt;
 
+            // ---- carry the elbow rotation onto twist bones hung under the upper arm ----
+            //
+            // `捩` bones that are children of `armUp` do not inherit the elbow: the pose
+            // sources rotate `armLow`, and those bones are its siblings, not its
+            // children. Gloves and cuffs are weighted to them, so without this the cuff
+            // stays on the upper arm's line while the forearm swings away - measured as
+            // "the cuff hangs beside the waist and the arm passes through it".
+            //
+            // Copying `armLow`'s local rotation is the correct amount: a twist bone is
+            // the same segment of the arm, so it must bend with the same joint.
+            for (int tb : character.twistBones) {
+                int sd = 0;
+                for (; sd < gldx::kRigSides; ++sd)
+                    if (character.rig.armUp[sd] >= 0 &&
+                        model.skeleton().bones()[(std::size_t)tb].parent == character.rig.armUp[sd])
+                        break;
+                if (sd >= gldx::kRigSides) continue;
+                const int low = character.rig.armLow[sd];
+                if (low < 0) continue;
+                // Relative rotation of the elbow w.r.t. its parent, in the upper arm's
+                // frame; applying it to the twist bone makes both bend together.
+                const glm::mat4 rel = character.pose[(std::size_t)low];
+                const glm::mat4 restLow = model.skeleton().bones()[(std::size_t)low].restLocal;
+                const glm::mat4 delta = rel * glm::inverse(restLow);
+                character.pose[(std::size_t)tb] =
+                    model.skeleton().bones()[(std::size_t)tb].restLocal * delta;
+            }
         }
 
             // Real seconds since the previous frame, clamped: the first frame after the
