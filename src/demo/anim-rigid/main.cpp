@@ -1269,37 +1269,6 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         }
     }
 
-    // Hand the classification in rather than letting Upload redo it: we already
-    // have one, and Upload's leg-length measurement needs exactly this answer.
-    if (std::getenv("GLDX_HIPTREE")) {
-        auto ancestry = [&](int bone) {
-            std::string out;
-            int guard = 0;
-            while (bone >= 0 && guard++ < 30) {
-                out = data.skeleton.bones()[(std::size_t)bone].name + (out.empty() ? "" : " <- " + out);
-                bone = data.skeleton.bones()[(std::size_t)bone].parent;
-            }
-            return out;
-        };
-        std::fprintf(stderr, "[hip] hips(%d): %s\n", character.rig.hips, ancestry(character.rig.hips).c_str());
-        std::fprintf(stderr, "[hip] spine(%d): %s\n", character.rig.spine, ancestry(character.rig.spine).c_str());
-        std::fprintf(stderr, "[hip] legUp.L(%d): %s\n", character.rig.legUp[0], ancestry(character.rig.legUp[0]).c_str());
-    }
-    if (std::getenv("GLDX_TWISTTREE")) {
-        auto ancestry = [&](int bone) {
-            std::string out;
-            int guard = 0;
-            while (bone >= 0 && guard++ < 30) {
-                out = data.skeleton.bones()[(std::size_t)bone].name + (out.empty() ? "" : " <- " + out);
-                bone = data.skeleton.bones()[(std::size_t)bone].parent;
-            }
-            return out;
-        };
-        for (int b : {96, 118, 122, 123}) {
-            if (b < 0 || static_cast<std::size_t>(b) >= data.skeleton.size()) continue;
-            std::fprintf(stderr, "[twist] %d: %s\n", b, ancestry(b).c_str());
-        }
-    }
     if (std::getenv("GLDX_MESHDOM")) {
         for (std::size_t mi = 0; mi < data.meshes.size(); ++mi) {
             const gldx::SkinnedMeshData& mesh = data.meshes[mi];
@@ -1850,45 +1819,6 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                                   glm::dot(up, character.rig.forward)),
                          (glm::dot(lo, character.rig.forward) > glm::dot(up, character.rig.forward))
                              ? "(forward, ok)" : "(BACKWARD - wrong)");
-        }
-    }
-    if (std::getenv("GLDX_FOREARM") && character.walkSource) {
-        const auto& sk4 = model.skeleton();
-        for (float ph : {0.0f, 0.5f}) {
-            std::vector<glm::mat4> pose, wm;
-            character.walkSource->Sample(ph * character.walkSource->Duration(), pose);
-            sk4.ComputeWorld(pose, model.Mat4(), wm);
-            for (int sd = 0; sd < gldx::kRigSides; ++sd) {
-                const int bl = character.rig.armLow[sd], hd = character.rig.hand[sd];
-                if (bl < 0 || hd < 0) continue;
-                const glm::vec3 d = glm::vec3(wm[(std::size_t)hd][3]) -
-                                    glm::vec3(wm[(std::size_t)bl][3]);
-                const glm::vec3 n = glm::length(d) > 1e-6f ? glm::normalize(d) : d;
-                std::fprintf(stderr, "[farm] ph=%.1f %s side=%+.2f fwd=%+.2f up=%+.2f\n",
-                             (double)ph, sd == 0 ? "L" : "R", (double)glm::dot(n, character.rig.side),
-                             (double)glm::dot(n, character.rig.forward),
-                             (double)glm::dot(n, character.rig.up));
-            }
-        }
-    }
-    if (std::getenv("GLDX_UPPERARM") && character.walkSource) {
-        const auto& sk3 = model.skeleton();
-        for (float ph : {0.0f, 0.25f, 0.5f, 0.75f}) {
-            std::vector<glm::mat4> pose, wm;
-            character.walkSource->Sample(ph * character.walkSource->Duration(), pose);
-            sk3.ComputeWorld(pose, model.Mat4(), wm);
-            for (int sd = 0; sd < gldx::kRigSides; ++sd) {
-                const int bu = character.rig.armUp[sd], bl = character.rig.armLow[sd];
-                if (bu < 0 || bl < 0) continue;
-                const glm::vec3 d = glm::vec3(wm[(std::size_t)bl][3]) -
-                                    glm::vec3(wm[(std::size_t)bu][3]);
-                const glm::vec3 n = glm::length(d) > 1e-6f ? glm::normalize(d) : d;
-                std::fprintf(stderr,
-                             "[uarm] ph=%.2f %s side=%+.2f fwd=%+.2f up=%+.2f\n", (double)ph,
-                             sd == 0 ? "L" : "R", (double)glm::dot(n, character.rig.side),
-                             (double)glm::dot(n, character.rig.forward),
-                             (double)glm::dot(n, character.rig.up));
-            }
         }
     }
     if (std::getenv("GLDX_ARMPHASE") && character.walkSource) {
@@ -2936,21 +2866,6 @@ int main(int argc, char** argv) {
                 for (const Move& mv : moves)
                     character.pose[(std::size_t)mv.bone] = mv.invParent * mv.target;
 
-                if (std::getenv("GLDX_TWEAKDBG")) {
-                    static int n = 0;
-                    if (n++ < 2) {
-                        std::vector<glm::mat4> after;
-                        character.model.skeleton().ComputeWorld(character.pose,
-                                                               character.model.Mat4(), after);
-                        for (int sd = 0; sd < gldx::kRigSides; ++sd) {
-                            const int el = character.rig.armLow[sd];
-                            if (el < 0) continue;
-                            std::fprintf(stderr, "[tweak4] %s elbow(%d) y=%.3f\n",
-                                         sd == 0 ? "L" : "R", el,
-                                         (double)glm::vec3(after[(std::size_t)el][3]).y);
-                        }
-                    }
-                }
             }
 
             // Swim is the one action that needs a ROOT rotation, and it cannot live in
@@ -2994,19 +2909,6 @@ int main(int argc, char** argv) {
                 const glm::mat4 delta = rel * glm::inverse(restLow);
                 character.pose[(std::size_t)tb] =
                     model.skeleton().bones()[(std::size_t)tb].restLocal * delta;
-                // Rotation alone is not enough: the twist bone's ORIGIN is still up at
-                // the shoulder because that is where the exporter put it. Cuffs weighted
-                // to it therefore sit at mid-upper-arm while the forearm swings below -
-                // measured, `右腕捱1` at y=1.474 vs the left side's `左手捱` at 1.105, a
-                // 37 cm gap that shows up as "the cuff hangs at the waist on one side".
-                //
-                // Moving it to the forearm's joint is what makes the two sides behave the
-                // same: the left one already hangs there by construction.
-                if (std::getenv("GLDX_TWEAKDBG")) {
-                    static int n = 0;
-                    if (n++ < 4)
-                        std::fprintf(stderr, "[tweak] tb=%d sd=%d low=%d\n", tb, sd, low);
-                }
                 {
                     std::vector<glm::mat4> wcheck;
                     model.skeleton().ComputeWorld(character.pose, model.Mat4(), wcheck);
@@ -3211,12 +3113,6 @@ int main(int argc, char** argv) {
                 if (drop > 1e-4f) {
                     gldx::TranslateBone(character.pose, model.restWorld(), character.bodyRoot,
                                         -character.rig.up * drop);
-                    if (std::getenv("GLDX_DROPDBG")) {
-                        static int shown = 0;
-                        if (shown++ < 3)
-                            std::fprintf(stderr, "[dropdbg] action=%d drop=%.4f m\n",
-                                         static_cast<int>(view.requestAction), (double)drop);
-                    }
                 }
             }
 
