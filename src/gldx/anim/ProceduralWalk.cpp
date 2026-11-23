@@ -152,15 +152,6 @@ void ProceduralWalk::SampleAtPhase(float phase, std::vector<glm::mat4>& outPose)
     // （这具骨架没有可继承的 A-pose），之后绕侧向轴的旋转才是前后摆。
     rotate(rig_.armUp[kRigLeft], rig_.forward, -tune.armDown);
     rotate(rig_.armUp[kRigRight], rig_.forward, +tune.armDown);
-    // Clear the skirt by raising the arms slightly, NOT by abducting them.
-    //
-    // The first attempt rotated about `side`, which for a hanging arm is its own long
-    // axis: the arm spun instead of moving out, and the visible result was a palm facing
-    // the sky. `forward` is perpendicular to a hanging arm, so this actually lifts it
-    // away from the hem - and leaves the hand's own orientation alone.
-    rotate(rig_.armUp[kRigLeft], rig_.forward, -tune.armOut);
-    rotate(rig_.armUp[kRigRight], rig_.forward, +tune.armOut);
-
     // 骨盆与肩反向转，头抵掉大部分，角色才会朝着它走的方向看。
     const float yawDriver = left.hip / std::max(tune.hipSwing, 1e-4f);   // -1 = 左腿在前
     rotate(rig_.hips, rig_.up, tune.hipYaw * yawDriver);
@@ -189,6 +180,17 @@ void ProceduralWalk::SampleAtPhase(float phase, std::vector<glm::mat4>& outPose)
         // 蹲着时手臂前伸一点、肘更弯：垂手会扫到裙摆。
         const float armReach = -0.30f * tune.crouch;
         rotate(rig_.armUp[s], rig_.side, arm + armReach);
+        // Splay AFTER the swing, not before.
+        //
+        // Order matters here: `armOut` about `forward` changes the arm's lateral offset,
+        // and the swing about `side` moves it again. Applying the splay first let the
+        // swing cancel it unevenly between the two sides - measured wrist offsets
+        // -0.127 / +0.065 m on a walk, i.e. one hand clear of the hem and one inside it.
+        // SAME sign both sides: `forward` is one world axis, so a single signed angle
+        // already mirrors in body terms (exactly like the elbow fix). Using opposite
+        // signs pushed both arms the same way in world space, which is why the two sides
+        // stayed 0.19 m apart (measured -0.123 / +0.072).
+        rotate(rig_.armUp[s], rig_.forward, -tune.armOut);
         // 肩胛不是刚性支架：它跟着手臂前后动。三度就够让轮廓不再读成"方块上装着
         // 一条铰接的棍子"。
         rotate(rig_.clavicle[s], rig_.up, -tune.clavicleRoll * swingN);
