@@ -199,8 +199,15 @@ void ProceduralWalk::SampleAtPhase(float phase, std::vector<glm::mat4>& outPose)
         // the body (measured wrist offset +0.067 m on the right vs -0.135 m on the
         // left) and went straight into the skirt. Mirroring the angle is what makes the
         // two elbows bend the same way in body terms.
-        const float sideSign2 = (s == 0) ? 1.0f : -1.0f;
-        rotate(rig_.armLow[s], rig_.side, (elbow - 0.30f * tune.crouch) * sideSign2);
+        // NO mirroring here. `side` is one world axis, so the SAME signed angle already
+        // bends both elbows the same way in body terms: a negative angle about +side
+        // rotates a downward-pointing bone forward for either arm.
+        //
+        // A previous "fix" multiplied by a per-side sign to mirror it, which is exactly
+        // backwards - measured with GLDX_ELBOWDIR, the left forearm gained +0.38 of
+        // forward component while the right LOST 0.44, i.e. the right elbow folded
+        // BACKWARD, which no human elbow does.
+        rotate(rig_.armLow[s], rig_.side, elbow - 0.30f * tune.crouch);
         // (The clearance used to be applied here as a forearm rotation about `up`, and
         // on top of the new upper-arm lift it pulled the two sides apart: measured wrist
         // offsets -0.130 / +0.054 m, i.e. one hand clear and one still inside the hem.

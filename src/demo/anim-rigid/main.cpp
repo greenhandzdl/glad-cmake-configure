@@ -325,6 +325,15 @@ struct Character {
     //
     // Found by name at load (this is demo-side, MMD-specific knowledge).
     std::vector<int> twistBones;
+    // The bone that carries BOTH the legs and the torso: the lowest common ancestor of
+    // `hips` and `spine`.
+    //
+    // On MMD rigs those two are SIBLINGS (`下半身` and `上半身`, both under `腰`), so
+    // rotating `hips` moves only the legs and the pelvis never comes down - which is why
+    // crouch/sit looked like "standing with bent knees". Translating the LCA moves the
+    // whole body, and it is derived from the tree rather than hard-coded, so a rig where
+    // hips really is the spine's parent still works (the LCA is then hips itself).
+    int bodyRoot = -1;
     // Bind-space corner box of the pelvis, measured once at load. The SEATED solve uses
     // it (see GroundContact::AddBodyContact): sitting puts the weight on the seat, and
     // the four sole points cannot see the seat.
@@ -1233,6 +1242,20 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
 
     // Hand the classification in rather than letting Upload redo it: we already
     // have one, and Upload's leg-length measurement needs exactly this answer.
+    if (std::getenv("GLDX_HIPTREE")) {
+        auto ancestry = [&](int bone) {
+            std::string out;
+            int guard = 0;
+            while (bone >= 0 && guard++ < 30) {
+                out = data.skeleton.bones()[(std::size_t)bone].name + (out.empty() ? "" : " <- " + out);
+                bone = data.skeleton.bones()[(std::size_t)bone].parent;
+            }
+            return out;
+        };
+        std::fprintf(stderr, "[hip] hips(%d): %s\n", character.rig.hips, ancestry(character.rig.hips).c_str());
+        std::fprintf(stderr, "[hip] spine(%d): %s\n", character.rig.spine, ancestry(character.rig.spine).c_str());
+        std::fprintf(stderr, "[hip] legUp.L(%d): %s\n", character.rig.legUp[0], ancestry(character.rig.legUp[0]).c_str());
+    }
     if (std::getenv("GLDX_TWISTTREE")) {
         auto ancestry = [&](int bone) {
             std::string out;
@@ -1305,6 +1328,23 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
             std::fprintf(stderr, "[anim-rigid] twist bones under the upper arm: %s\n",
                          names.c_str());
         }
+    }
+
+    // ---- common ancestor of hips and spine ----
+    if (character.rig.hips >= 0 && character.rig.spine >= 0) {
+        auto lineage = [&](int b) {
+            std::vector<int> out;
+            while (b >= 0) { out.push_back(b); b = skeleton.bones()[(std::size_t)b].parent; }
+            return out;
+        };
+        const std::vector<int> a = lineage(character.rig.hips);
+        const std::vector<int> b = lineage(character.rig.spine);
+        for (int x : a)
+            if (std::find(b.begin(), b.end(), x) != b.end()) { character.bodyRoot = x; break; }
+        if (character.bodyRoot >= 0)
+            std::fprintf(stderr, "[anim-rigid] body root (hips+spine LCA) = %d '%s'\n",
+                         character.bodyRoot,
+                         skeleton.bones()[(std::size_t)character.bodyRoot].name.c_str());
     }
 
     character.ground = gldx::GroundContact(
@@ -1737,6 +1777,30 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                      (double)du, (double)dsu);
     }
 
+    if (std::getenv("GLDX_ELBOWDIR") && character.walkSource) {
+        const auto& sk5 = model.skeleton();
+        std::vector<glm::mat4> pose, wm;
+        character.walkSource->Sample(0.0f, pose);
+        sk5.ComputeWorld(pose, model.Mat4(), wm);
+        for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+            const int bu = character.rig.armUp[sd], bl = character.rig.armLow[sd];
+            const int hd = character.rig.hand[sd];
+            if (bu < 0 || bl < 0 || hd < 0) continue;
+            const glm::vec3 up = glm::normalize(glm::vec3(wm[(std::size_t)bl][3]) -
+                                                glm::vec3(wm[(std::size_t)bu][3]));
+            const glm::vec3 lo = glm::normalize(glm::vec3(wm[(std::size_t)hd][3]) -
+                                                glm::vec3(wm[(std::size_t)bl][3]));
+            // Elbow bends FORWARD: the forearm must gain forward component vs the upper arm.
+            std::fprintf(stderr, "[elbowdir] %s upper.fwd=%+.2f fore.fwd=%+.2f  delta=%+.2f %s\n",
+                         sd == 0 ? "L" : "R",
+                         (double)glm::dot(up, character.rig.forward),
+                         (double)glm::dot(lo, character.rig.forward),
+                         (double)(glm::dot(lo, character.rig.forward) -
+                                  glm::dot(up, character.rig.forward)),
+                         (glm::dot(lo, character.rig.forward) > glm::dot(up, character.rig.forward))
+                             ? "(forward, ok)" : "(BACKWARD - wrong)");
+        }
+    }
     if (std::getenv("GLDX_FOREARM") && character.walkSource) {
         const auto& sk4 = model.skeleton();
         for (float ph : {0.0f, 0.5f}) {
@@ -2919,6 +2983,43 @@ int main(int argc, char** argv) {
                 // rate, which is the same non-determinism this whole mechanism exists to
                 // remove.
                 if (character.secondarySettleSteps > 0) --character.secondarySettleSteps;
+            }
+
+            // ---- lower the whole body for poses that fold the legs ----
+            //
+            // Rotating the knees cannot lower the pelvis: the pose sources write joint
+            // angles, and on MMD rigs the legs (`下半身`) and the torso (`上半身`) are
+            // SIBLINGS under `腰`. So a crouch came out as "standing with bent knees"
+            // (head 1.689 m vs idle 1.702 m) and a sit stayed at standing height.
+            //
+            // Translating the common ancestor is the one place that moves both halves.
+            // The amount comes from the geometry: how much shorter the hip-to-ankle
+            // distance is once the legs fold.
+            if (character.bodyRoot >= 0) {
+                float drop = 0.0f;
+                if (view.requestAction == Action::Crouch ||
+                    view.requestAction == Action::CrouchWalk) {
+                    const float hipA = character.tune.crouchHip;
+                    const float kneeA = character.tune.crouchKnee;
+                    // Thigh / shin shares of the leg; shin sees the SUM of both angles
+                    // because it inherits the hip rotation.
+                    constexpr float kThigh = 0.48f, kShin = 0.52f;
+                    const float folded = kThigh * std::cos(hipA) +
+                                         kShin * std::cos(hipA - kneeA);
+                    drop = std::max(1.0f - folded, 0.0f) * model.legLengthMetres();
+                } else if (view.requestAction == Action::Sit) {
+                    drop = -character.sitRise;   // authored seated height, already tuned
+                }
+                if (drop > 1e-4f) {
+                    gldx::TranslateBone(character.pose, model.restWorld(), character.bodyRoot,
+                                        -character.rig.up * drop);
+                    if (std::getenv("GLDX_DROPDBG")) {
+                        static int shown = 0;
+                        if (shown++ < 3)
+                            std::fprintf(stderr, "[dropdbg] action=%d drop=%.4f m\n",
+                                         static_cast<int>(view.requestAction), (double)drop);
+                    }
+                }
             }
 
             model.skeleton().ComputeSkinning(character.pose, model.Mat4(), character.palette);

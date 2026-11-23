@@ -184,9 +184,10 @@ void ProceduralRun::Sample(float t, std::vector<glm::mat4>& outPose) const {
         // 屈伸，跑步时它锁在约 90°，靠肩在摆。这个差别正是"走"与"跑"的辨识点之一。
         const float armSwingNorm = -(leg.hip / std::max(tune.hipSwing, 1e-4f));
         rotate(rig_.armUp[s], rig_.side, tune.armSwing * armSwingNorm);
-        // Mirrored, like the walk's elbow: `side` is the same world axis for both arms,
-        // so one signed angle bends the two elbows in opposite body directions.
-        rotate(rig_.armLow[s], rig_.side, -tune.elbowHold * (s == 0 ? 1.0f : -1.0f));
+        // NOT mirrored: `side` is one world axis, so the same signed angle already bends
+        // both elbows the same way. Multiplying by a per-side sign folds one elbow
+        // backward (measured: right forearm lost 0.44 of forward component).
+        rotate(rig_.armLow[s], rig_.side, -tune.elbowHold);
         // 前臂略微外展，免得手扫到大腿。
         rotate(rig_.armLow[s], rig_.up, 0.06f * (s == 0 ? 1.0f : -1.0f));
         // 腕跟着摆一点点，不锁死。
