@@ -1670,7 +1670,29 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                      (double)r.up.y, (double)r.up.z, (double)glm::length(r.up), (double)ds,
                      (double)du, (double)dsu);
     }
-        if (std::getenv("GLDX_ARMCHK")) {
+
+    if (std::getenv("GLDX_ARMPHASE") && character.walkSource) {
+        const auto& sk = model.skeleton();
+        for (int i = 0; i < 4; ++i) {
+            const float ph = static_cast<float>(i) / 4.0f;
+            std::vector<glm::mat4> pose, wm;
+            character.walkSource->Sample(ph * character.walkSource->Duration(), pose);
+            sk.ComputeWorld(pose, model.Mat4(), wm);
+            auto P = [&](int b) { return b < 0 ? glm::vec3(0) : glm::vec3(wm[(std::size_t)b][3]); };
+            const float handL = glm::dot(P(character.rig.hand[0]) - P(character.rig.chest),
+                                         character.rig.forward);
+            const float handR = glm::dot(P(character.rig.hand[1]) - P(character.rig.chest),
+                                         character.rig.forward);
+            const float footL = glm::dot(P(character.rig.foot[0]) - P(character.rig.hips),
+                                         character.rig.forward);
+            const float footR = glm::dot(P(character.rig.foot[1]) - P(character.rig.hips),
+                                         character.rig.forward);
+            std::fprintf(stderr,
+                         "[armphase] ph=%.2f handL=%+.3f handR=%+.3f | footL=%+.3f footR=%+.3f\n",
+                         (double)ph, (double)handL, (double)handR, (double)footL, (double)footR);
+        }
+    }
+    if (std::getenv("GLDX_ARMCHK")) {
             for (const Probe& pr : probes) {
                 std::vector<glm::mat4> pose, palette;
                 pr.src->Sample(0.0f, pose);
