@@ -3282,9 +3282,26 @@ int main(int argc, char** argv) {
                 const bool airborne = (view.requestAction == Action::Jump) ||
                                       (view.requestAction == Action::Run) ||
                                       (view.requestAction == Action::Swim);
-                if (!airborne && std::isfinite(low) && std::abs(low) > 1e-4f) {
-                    gldx::GroundContact::ApplyLift(character.palette, -low);
+                // Iterate: skinning is not a rigid translation, so moving every bone
+                // by -d does not move the lowest vertex by exactly -d when that vertex
+                // is blended across bones. One pass measured crouch still 20 cm high.
+                for (int pass = 0; !airborne && pass < 4; ++pass) {
+                    float now = 1.0e9f;
+                    for (const gldx::SkinnedVertex& v : character.probeVerts) {
+                        glm::vec4 q(0.0f);
+                        for (int i = 0; i < 4; ++i) {
+                            if (v.boneWeight[i] <= 0.0f) continue;
+                            const std::size_t bi = v.boneIndex[i];
+                            if (bi < character.palette.size())
+                                q += v.boneWeight[i] *
+                                     (character.palette[bi] * glm::vec4(v.position, 1.0f));
+                        }
+                        now = std::min(now, q.y);
+                    }
+                    if (!std::isfinite(now) || std::abs(now) < 1e-4f) break;
+                    gldx::GroundContact::ApplyLift(character.palette, -now);
                 }
+                (void)low;
             }
             }
             // Where the lowest sole ended up after the shift: the number that says
