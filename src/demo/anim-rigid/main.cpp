@@ -1671,6 +1671,26 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                      (double)du, (double)dsu);
     }
 
+    if (std::getenv("GLDX_UPPERARM") && character.walkSource) {
+        const auto& sk3 = model.skeleton();
+        for (float ph : {0.0f, 0.25f, 0.5f, 0.75f}) {
+            std::vector<glm::mat4> pose, wm;
+            character.walkSource->Sample(ph * character.walkSource->Duration(), pose);
+            sk3.ComputeWorld(pose, model.Mat4(), wm);
+            for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+                const int bu = character.rig.armUp[sd], bl = character.rig.armLow[sd];
+                if (bu < 0 || bl < 0) continue;
+                const glm::vec3 d = glm::vec3(wm[(std::size_t)bl][3]) -
+                                    glm::vec3(wm[(std::size_t)bu][3]);
+                const glm::vec3 n = glm::length(d) > 1e-6f ? glm::normalize(d) : d;
+                std::fprintf(stderr,
+                             "[uarm] ph=%.2f %s side=%+.2f fwd=%+.2f up=%+.2f\n", (double)ph,
+                             sd == 0 ? "L" : "R", (double)glm::dot(n, character.rig.side),
+                             (double)glm::dot(n, character.rig.forward),
+                             (double)glm::dot(n, character.rig.up));
+            }
+        }
+    }
     if (std::getenv("GLDX_ARMPHASE") && character.walkSource) {
         const auto& sk = model.skeleton();
         for (int i = 0; i < 4; ++i) {

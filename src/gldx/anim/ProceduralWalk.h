@@ -81,7 +81,7 @@ struct WalkTuning {
     //
     // 真正的问题一直是**肘部没有左右镜像**（见 ProceduralWalk.cpp），那修好之后手
     // 本来就垂在裙外，不需要额外抬高。留着这个参数是为了让下一个人知道这条路试过。
-    float armOut    = 0.0f;         // rad，上臂抬高（绕 forward，~26 deg）
+    float armOut    = 0.28f;         // rad，上臂抬高（绕 forward，~26 deg）
     float wristBase = 0.14f;
     float wristSwing = 0.16f;
     float wristDeviate = 0.07f;
