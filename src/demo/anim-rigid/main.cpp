@@ -766,6 +766,29 @@ public:
             skin_->Set("uSunIntensity", kSunIntensity);
             skin_->Set("uSkyColor", kSkyColor);
             skin_->Set("uBounceColor", kBounceColor);
+            // `GLDX_DRAWLOW`: the lowest skinned vertex computed from the palette that is
+            // ABOUT to be uploaded - not from the one the report measures. Every height
+            // probe so far read `character.palette` at a different moment and disagreed
+            // with the picture; this one is taken at the draw itself.
+            if (std::getenv("GLDX_DRAWLOW") && !character_.probeVerts.empty()) {
+                static int shown = 0;
+                if (shown++ < 2) {
+                    float low = 1.0e9f;
+                    for (const gldx::SkinnedVertex& v : character_.probeVerts) {
+                        glm::vec4 q(0.0f);
+                        for (int i = 0; i < 4; ++i) {
+                            if (v.boneWeight[i] <= 0.0f) continue;
+                            const std::size_t bi = v.boneIndex[i];
+                            if (bi < character_.palette.size())
+                                q += v.boneWeight[i] *
+                                     (character_.palette[bi] * glm::vec4(v.position, 1.0f));
+                        }
+                        low = std::min(low, q.y);
+                    }
+                    std::fprintf(stderr, "[drawlow] lowest drawn vertex y = %.4f m\n",
+                                 (double)low);
+                }
+            }
             model.BindPalette(*skin_, character_.palette);
 
             // Every sampler must point at a complete texture on every draw, dummy
@@ -3202,6 +3225,7 @@ int main(int argc, char** argv) {
 
 
 
+
             // Ground contact, solved forward from the pose instead of authored by
             // hand: find the lowest of the four sole points *after* posing, then
             // slide the whole character down/up by that amount. The pelvis bob
@@ -3233,6 +3257,35 @@ int main(int argc, char** argv) {
                                : 0.0f;
             if (solved.valid() && view.walk) {
                 gldx::GroundContact::ApplyLift(character.palette, shift);
+
+            // ---- 用"即将上传的调色板"把角色贴到地面 ----
+            //
+            // 在此之前所有高度修正都读的是另一个时刻的 palette，于是报告说 `sole
+            // 0.000` 而画面悬空。这里改成：算完 palette、在它被上传之前，直接量它的
+            // 最低顶点，再把它整体下移。量什么就改什么，中间没有第二个数据源。
+            //
+            // 只对"应该踩在地上"的动作生效：jump 的腾空高度是作者给的，run 有腾空
+            // 段，把它们拉下来会把跳跃删掉。
+            if (view.walk && !character.probeVerts.empty()) {
+                float low = 1.0e9f;
+                for (const gldx::SkinnedVertex& v : character.probeVerts) {
+                    glm::vec4 q(0.0f);
+                    for (int i = 0; i < 4; ++i) {
+                        if (v.boneWeight[i] <= 0.0f) continue;
+                        const std::size_t bi = v.boneIndex[i];
+                        if (bi < character.palette.size())
+                            q += v.boneWeight[i] *
+                                 (character.palette[bi] * glm::vec4(v.position, 1.0f));
+                    }
+                    low = std::min(low, q.y);
+                }
+                const bool airborne = (view.requestAction == Action::Jump) ||
+                                      (view.requestAction == Action::Run) ||
+                                      (view.requestAction == Action::Swim);
+                if (!airborne && std::isfinite(low) && std::abs(low) > 1e-4f) {
+                    gldx::GroundContact::ApplyLift(character.palette, -low);
+                }
+            }
             }
             // Where the lowest sole ended up after the shift: the number that says
             // "planted" (0) or "in the air" (>0). Printed in millimetres because
