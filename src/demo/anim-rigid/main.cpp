@@ -325,6 +325,12 @@ struct Character {
     //
     // Found by name at load (this is demo-side, MMD-specific knowledge).
     std::vector<int> twistBones;
+    // For each twist bone: where it sits in the FOREARM's local frame, measured in bind
+    // pose. Applying that offset through the posed forearm puts the bone exactly where it
+    // would be if the exporter had parented it to the forearm - which is what the cuff
+    // geometry assumes. Handles both variants identically (`左腕捩` under the upper arm,
+    // `左腕捩` deeper down, etc.) without per-bone special cases.
+    std::vector<glm::vec3> twistForearmOffset;   // parallel to twistBones
     // The bone that carries BOTH the legs and the torso: the lowest common ancestor of
     // `hips` and `spine`.
     //
@@ -1321,6 +1327,21 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                     character.twistBones.push_back(static_cast<int>(i));
             }
         }
+        // Bind-pose offset of each twist bone in its forearm's frame.
+        character.twistForearmOffset.clear();
+        for (int tb : character.twistBones) {
+            int sd = 0;
+            for (; sd < gldx::kRigSides; ++sd)
+                if (character.rig.armUp[sd] >= 0 &&
+                    skeleton.bones()[(std::size_t)tb].parent == character.rig.armUp[sd])
+                    break;
+            const int low = (sd < gldx::kRigSides) ? character.rig.armLow[sd] : -1;
+            if (low < 0) { character.twistForearmOffset.emplace_back(0.0f); continue; }
+            const glm::mat4 invForearm = glm::inverse(skeleton.RestWorld(low));
+            const glm::vec3 tbRest(skeleton.RestWorld(tb)[3]);
+            character.twistForearmOffset.emplace_back(glm::vec3(invForearm * glm::vec4(tbRest, 1.0f)));
+        }
+
         if (!character.twistBones.empty()) {
             std::string names;
             for (int b : character.twistBones)
@@ -2823,6 +2844,90 @@ int main(int argc, char** argv) {
                     character.machine.SetPendingTime(character.walkTimeFor(phase));
                 }
                 character.machine.Evaluate(character.pose);
+            }
+
+            // ---- 把肘部旋转与位置都带给挂在上臂下的 `捩` 骨 ----
+            //
+            // MMD 手臂有两套 twist 骨，位置不同：
+            //   左腕捩  -> 挂在 `左腕`(上臂) 下，是 `左ひじ` 的父级
+            //   左手捩  -> 挂在 `左ひじ` 下（自动继承肘部，无需处理）
+            //   右腕捩1 -> **直接挂 `右腕` 下**，是 `右腕捩` 的兄弟
+            //
+            // 手套/袖套网格的主导骨骼是 `左手捩` 与 `右腕捩1`（GLDX_MESHDOM 量得）。
+            // pose 代码只转 `armUp`/`armLow`，所以挂在上臂下的 twist 骨跟着上臂走、却
+            // 不跟着肘弯曲；而且它们的**原点在肩部**，旋转不会把它沿手臂移动。
+            // 两件事叠加就是"袖套横在腰前、小臂从它中间穿过"。
+            //
+            // 先做一次世界快照，算完所有目标再统一应用：边算边改会让后一根骨的
+            // `want` 被前一根的改动污染（实测同帧内前臂世界 y 从 1.283 漂到 1.181）。
+            {
+                std::vector<glm::mat4> wsnap;
+                character.model.skeleton().ComputeWorld(character.pose, character.model.Mat4(),
+                                                        wsnap);
+                struct Move { int bone; glm::mat4 target; glm::mat4 invParent; };
+                std::vector<Move> moves;
+                for (int tb : character.twistBones) {
+                    int sd = 0;
+                    for (; sd < gldx::kRigSides; ++sd)
+                        if (character.rig.armUp[sd] >= 0 &&
+                            character.model.skeleton().bones()[(std::size_t)tb].parent ==
+                                character.rig.armUp[sd])
+                            break;
+                    if (sd >= gldx::kRigSides) continue;
+                    const int low = character.rig.armLow[sd];
+                    if (low < 0) continue;
+
+                    // 朝向：**直接取前臂的世界旋转**，不是复制局部增量。
+                    //
+                    // 复制增量只在这根骨的 rest 朝向与前臂一致时才对；这具资产里它们
+                    // 不一致，于是袖套的开口朝上、没有包住小臂（位置对、朝向错）。
+                    // 袖套是套在腕上的筒，它的轴向必须与前臂轴向一致，所以直接对齐。
+                    const glm::mat4& foreRest =
+                        character.model.skeleton().bones()[(std::size_t)low].restLocal;
+                    (void)foreRest;
+
+                    // 位置：把它挪到前臂关节处。`armLow` 是它的**兄弟**，旋转不改变
+                    // 原点位置，所以必须显式平移过来（实测差 37 cm）。
+                    const int par = character.model.skeleton().bones()[(std::size_t)tb].parent;
+                    if (par < 0 || static_cast<std::size_t>(par) >= wsnap.size()) continue;
+                    // Where it belongs: the posed forearm transformed by the bind-pose
+                    // offset between them. Putting it at the elbow (the first attempt)
+                    // left it 17 cm high, because the cuff's geometry sits part-way down
+                    // the forearm - `左手捩` proves it by already hanging there.
+                    const std::size_t idx =
+                        static_cast<std::size_t>(&tb - character.twistBones.data());
+                    const glm::vec3 bindOff =
+                        (idx < character.twistForearmOffset.size())
+                            ? character.twistForearmOffset[idx] : glm::vec3(0.0f);
+                    const glm::mat4 foreWorld = wsnap[(std::size_t)low];
+                    const glm::vec3 want =
+                        glm::vec3(foreWorld * glm::vec4(bindOff, 1.0f));
+                    // Build the world transform the cuff's bone SHOULD have: the forearm's
+                    // rotation (so the cylinder's axis matches the arm) at the target
+                    // position. Then convert to local via the parent's inverse.
+                    glm::mat4 targetWorld = foreWorld;
+                    targetWorld[3] = glm::vec4(want, 1.0f);
+                    const glm::mat4 invParent = glm::inverse(wsnap[(std::size_t)par]);
+                    moves.push_back({tb, targetWorld, invParent});
+                }
+                for (const Move& mv : moves)
+                    character.pose[(std::size_t)mv.bone] = mv.invParent * mv.target;
+
+                if (std::getenv("GLDX_TWEAKDBG")) {
+                    static int n = 0;
+                    if (n++ < 2) {
+                        std::vector<glm::mat4> after;
+                        character.model.skeleton().ComputeWorld(character.pose,
+                                                               character.model.Mat4(), after);
+                        for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+                            const int el = character.rig.armLow[sd];
+                            if (el < 0) continue;
+                            std::fprintf(stderr, "[tweak4] %s elbow(%d) y=%.3f\n",
+                                         sd == 0 ? "L" : "R", el,
+                                         (double)glm::vec3(after[(std::size_t)el][3]).y);
+                        }
+                    }
+                }
             }
 
             // Swim is the one action that needs a ROOT rotation, and it cannot live in
