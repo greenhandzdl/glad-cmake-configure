@@ -347,7 +347,15 @@ void ProceduralSwim::Sample(float t, std::vector<glm::mat4>& outPose) const {
     // 整具身体连同已经摆好的手臂一起转到世界里的俯卧姿态。把 prone 设成 0 时手臂
     // 清晰地前伸，证明了"对齐本身是对的、只是被这一步的次序吃掉"。
     if (prone_ != 0.0f) {
-        RotateBone(outPose, restWorld_, rig_.hips, rig_.side, prone_);
+        // Rotate the legs' and torso's COMMON ANCESTOR, not `hips`.
+        //
+        // On MMD rigs `下半身`(hips) and `上半身`(spine) are siblings, so rotating hips
+        // tilts only the legs: measured with GLDX_SWIMAX, the hips->head axis stayed at
+        // up=+0.97 (standing) while the chest alone had turned - i.e. the character
+        // "swam" while upright. The caller passes the LCA via SetProneBone; -1 keeps the
+        // old behaviour for rigs where hips really is the parent.
+        const int axisBone = (proneBone_ >= 0) ? proneBone_ : rig_.hips;
+        RotateBone(outPose, restWorld_, axisBone, rig_.side, prone_);
     }
 }
 

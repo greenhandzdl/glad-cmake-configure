@@ -90,6 +90,16 @@ public:
      * 几乎平行，`acos(dot)` 永远得到一个小角度。
      */
     void SetProneAngle(float radians) { prone_ = radians; }
+
+    /**
+     * 俯卧旋转要绕**哪根骨**转。默认 `hips`。
+     *
+     * 必须是"腿与躯干的共同祖先"。MMD 上 `下半身`(hips) 与 `上半身`(spine) 是
+     * **兄弟**，所以绕 `hips` 转只转腿、躯干不动——实测 `GLDX_SWIMAX` 报
+     * `body(hips→head) up=+0.97`，也就是身体仍然竖着，"游泳"看起来像站着划手。
+     * 调用方应当传入 `hips` 与 `spine` 的最低公共祖先（demo 里是 `腰`）。
+     */
+    void SetProneBone(int bone) { proneBone_ = bone; }
     [[nodiscard]] float proneAngle() const noexcept { return prone_; }
 
     ProceduralSwim(const Skeleton& skeleton, const RigProfile& rig,
@@ -122,6 +132,7 @@ private:
     SwimTuning                    tuning_;
     float                         duration_ = 1.0f;
     float                         prone_ = 0.0f;   // see SetProneAngle
+    int                           proneBone_ = -1; // -1 = fall back to rig_.hips
     // 米，见 waterRise()。
     //
     // 游泳的人躯干**在水线附近**，腿略沉——也就是重心比"平躺在半空"低。所以这里

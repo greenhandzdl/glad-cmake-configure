@@ -1621,6 +1621,9 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // Face down. The sign is the difference between freestyle and backstroke, and it
     // now lives in the pose source so it shares a frame with the arm targets.
     character.swimSource->SetProneAngle(1.55f);
+    // Rotate the common ancestor of legs and spine, NOT `hips` alone - on MMD those two
+    // are siblings, so rotating hips leaves the torso upright (body axis up=+0.97).
+    character.swimSource->SetProneBone(character.bodyRoot);
     // Chain parameters, one set per kind. Numbers are per-asset: the skirt here is a
     // 12-panel MMD hem, which is much softer than a tailor-made cape.
     {
@@ -1790,6 +1793,28 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                      (double)du, (double)dsu);
     }
 
+    if (std::getenv("GLDX_SWIMAX") && character.swimSource) {
+        const auto& sk6 = model.skeleton();
+        std::vector<glm::mat4> pose, wm;
+        character.swimSource->Sample(0.6f, pose);
+        sk6.ComputeWorld(pose, model.Mat4(), wm);
+        auto P = [&](int b) { return b < 0 ? glm::vec3(0) : glm::vec3(wm[(std::size_t)b][3]); };
+        // Body axis: hips -> head. In a real prone swim this points horizontally forward.
+        const glm::vec3 body = P(character.rig.head) - P(character.rig.hips);
+        const glm::vec3 n = glm::length(body) > 1e-6f ? glm::normalize(body) : body;
+        std::fprintf(stderr,
+                     "[swimax] body(hips->head) up=%+.2f fwd=%+.2f side=%+.2f  "
+                     "(prone 应为 up~0, |fwd|~1)\n",
+                     (double)glm::dot(n, character.rig.up),
+                     (double)glm::dot(n, character.rig.forward),
+                     (double)glm::dot(n, character.rig.side));
+        // Torso facing: chest normal. Prone => faces DOWN.
+        const glm::vec3 chestFwd = glm::vec3(glm::vec3(wm[(std::size_t)character.rig.chest][2])[0], glm::vec3(wm[(std::size_t)character.rig.chest][2])[1], glm::vec3(wm[(std::size_t)character.rig.chest][2])[2]);
+        std::fprintf(stderr, "[swimax] chest z-axis up=%+.2f fwd=%+.2f side=%+.2f\n",
+                     (double)glm::dot(chestFwd, character.rig.up),
+                     (double)glm::dot(chestFwd, character.rig.forward),
+                     (double)glm::dot(chestFwd, character.rig.side));
+    }
     if (std::getenv("GLDX_ELBOWDIR") && character.sourceFor(Action::Walk)) {
         const auto& sk5 = model.skeleton();
         std::vector<glm::mat4> pose, wm;
