@@ -1777,9 +1777,16 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                      (double)du, (double)dsu);
     }
 
-    if (std::getenv("GLDX_ELBOWDIR") && character.walkSource) {
+    if (std::getenv("GLDX_ELBOWDIR") && character.sourceFor(Action::Walk)) {
         const auto& sk5 = model.skeleton();
         std::vector<glm::mat4> pose, wm;
+        // Sample whichever action the caller asked for - a probe pinned to the walk
+        // source reports the same numbers for every `--action`, which reads as "all
+        // actions are fine" when it only ever measured one.
+        // NOTE: this runs before `--action` reaches the state machine, so it samples the
+        // WALK source on the first frame regardless of the flag. That is fine for what
+        // it exists for (does the elbow bend forward on BOTH sides - a property of the
+        // pose sources, not of the action), but do not read it as "action X is checked".
         character.walkSource->Sample(0.0f, pose);
         sk5.ComputeWorld(pose, model.Mat4(), wm);
         for (int sd = 0; sd < gldx::kRigSides; ++sd) {
