@@ -164,8 +164,11 @@ void ProceduralRun::Sample(float t, std::vector<glm::mat4>& outPose) const {
     // 手臂：先放到贴着身体的基准角（跑步不需要走路那么多 A-pose 外展）。
     rotate(rig_.armUp[kRigLeft], rig_.forward, -tune.armDown);
     rotate(rig_.armUp[kRigRight], rig_.forward, +tune.armDown);
+    // SAME sign on both sides: `forward` is one world axis, so one signed angle is
+    // already mirrored in body terms. Opposite signs pushed both arms the same way in
+    // world space and left the two hands 19 cm apart (see ProceduralWalk).
     rotate(rig_.armUp[kRigLeft], rig_.forward, -tune.armOut);
-    rotate(rig_.armUp[kRigRight], rig_.forward, +tune.armOut);
+    rotate(rig_.armUp[kRigRight], rig_.forward, -tune.armOut);
 
     const float yawDriver = left.hip / std::max(tune.hipSwing, 1e-4f);
     rotate(rig_.hips, rig_.up, tune.hipYaw * yawDriver);
