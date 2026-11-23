@@ -1793,6 +1793,26 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                      (double)du, (double)dsu);
     }
 
+    if (std::getenv("GLDX_SWIMKICK") && character.swimSource) {
+        const auto& sk7 = model.skeleton();
+        // Sample at 1/8 intervals: `sin` is ZERO at 0, 0.25, 0.5, 0.75 of the kick
+        // cycle, so a quarter-period probe reports "the legs never move" for a leg that
+        // is moving perfectly well.
+        for (float ph : {0.0f, 0.125f, 0.25f, 0.375f, 0.5f}) {
+            std::vector<glm::mat4> pose, wm;
+            character.swimSource->Sample(ph * character.swimSource->Duration(), pose);
+            sk7.ComputeWorld(pose, model.Mat4(), wm);
+            auto P = [&](int b) { return b < 0 ? glm::vec3(0) : glm::vec3(wm[(std::size_t)b][3]); };
+            const glm::vec3 lf = P(character.rig.foot[0]) - P(character.rig.hips);
+            const glm::vec3 rf = P(character.rig.foot[1]) - P(character.rig.hips);
+            const glm::vec3 thL = P(character.rig.legLow[0]) - P(character.rig.legUp[0]);
+            const glm::vec3 thR = P(character.rig.legLow[1]) - P(character.rig.legUp[1]);
+            std::fprintf(stderr,
+                         "[kick] ph=%.2f footL.up=%+.3f footR.up=%+.3f | thighL.up=%+.3f thighR.up=%+.3f\n",
+                         (double)ph, (double)lf.y, (double)rf.y,
+                         (double)glm::normalize(thL).y, (double)glm::normalize(thR).y);
+        }
+    }
     if (std::getenv("GLDX_SWIMAX") && character.swimSource) {
         const auto& sk6 = model.skeleton();
         std::vector<glm::mat4> pose, wm;

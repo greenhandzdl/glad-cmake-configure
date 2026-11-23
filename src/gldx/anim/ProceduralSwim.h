@@ -54,7 +54,14 @@ struct SwimTuning {
     // 但从侧面看，正角是让腿从水里**翘上去**（用户看到的"腿太高"就是这个）。
     // 微小负值让脚尖略沉，符合游泳时腿略低于水面的样子。
     float legTrail   = -0.06f;   // rad，0 = 腿与躯干齐平
-    float kickAmp    = 0.18f;    // rad，打腿幅度（小幅度、鞭状）
+    float kickAmp    = 0.32f;
+    /**
+     * 两腿内收量（rad，绕 `forward`），把腿并拢。
+     *
+     * 绕 `side` 只让腿前后摆，**不控制左右开合**；缺这一项时俯视图是一个明显的 V 形
+     * ——两条腿从臀部就分开，各摆各的。自由泳的打水是"并拢的两条腿交替上下"。
+     */
+    float legAdduct  = 0.10f;    // rad，打腿幅度（小幅度、鞭状）
     float kneeFlex   = 0.26f;    // rad，打腿时膝的最大弯曲（只在下面那半段出现）
     float anklePoint = 0.45f;    // rad，脚背绷直
 

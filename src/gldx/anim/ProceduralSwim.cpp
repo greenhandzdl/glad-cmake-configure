@@ -103,6 +103,11 @@ void ProceduralSwim::Sample(float t, std::vector<glm::mat4>& outPose) const {
         const float k = std::sin(off * 2.0f * kPi);
         // 上提那半段才屈膝：打腿的"鞭状"来自先弯后甩，一直弯就是蹬自行车。
         const float up = std::max(k, 0.0f);
+        // 内收：让两条腿并拢。绕 `side` 只负责前后摆，并拢必须绕 `forward`。
+        //
+        // 缺这一项时俯视图是明显的 V 形（两腿从臀部就开始分开）——自由泳的打腿是
+        // "并拢的两条腿交替上下"，不是"张开的两条腿各摆各的"。
+        rotate(rig_.legUp[s], rig_.forward, -tune.legAdduct * (s == 0 ? 1.0f : -1.0f));
         rotate(rig_.legUp[s], rig_.side, tune.legTrail - tune.kickAmp * k);
         rotate(rig_.legLow[s], rig_.side, tune.kneeFlex * up);
         // 脚背绷直，脚踝略背屈一点点以免完全僵直。
