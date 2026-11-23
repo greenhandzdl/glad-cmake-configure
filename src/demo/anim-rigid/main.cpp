@@ -2866,6 +2866,69 @@ int main(int argc, char** argv) {
                 const glm::mat4 delta = rel * glm::inverse(restLow);
                 character.pose[(std::size_t)tb] =
                     model.skeleton().bones()[(std::size_t)tb].restLocal * delta;
+                // Rotation alone is not enough: the twist bone's ORIGIN is still up at
+                // the shoulder because that is where the exporter put it. Cuffs weighted
+                // to it therefore sit at mid-upper-arm while the forearm swings below -
+                // measured, `右腕捱1` at y=1.474 vs the left side's `左手捱` at 1.105, a
+                // 37 cm gap that shows up as "the cuff hangs at the waist on one side".
+                //
+                // Moving it to the forearm's joint is what makes the two sides behave the
+                // same: the left one already hangs there by construction.
+                if (std::getenv("GLDX_TWEAKDBG")) {
+                    static int n = 0;
+                    if (n++ < 4)
+                        std::fprintf(stderr, "[tweak] tb=%d sd=%d low=%d\n", tb, sd, low);
+                }
+                {
+                    std::vector<glm::mat4> wcheck;
+                    model.skeleton().ComputeWorld(character.pose, model.Mat4(), wcheck);
+                    const glm::vec3 want = glm::vec3(wcheck[(std::size_t)low][3]);
+                    const glm::vec3 have = glm::vec3(wcheck[(std::size_t)tb][3]);
+                    // `TranslateBone` folds a WORLD offset into the bone's rest frame, but
+                    // `have`/`want` are world positions AFTER the parent chain has moved.
+                    // The parent of this twist bone is the upper arm, which is posed, so
+                    // the offset has to be expressed in the bone's CURRENT frame - the
+                    // rest frame is the wrong basis and the move lands somewhere else.
+                    //
+                    // Convert through the bone's current world rotation instead.
+                    // The world matrices here are NOT pure rotations: they carry the
+                    // rig's unit scale, so `transpose(mat3(world))` is not an inverse and
+                    // shrinks a 0.1 m correction to 0.004. Convert through the parent's
+                    // LOCAL-to-world instead: the offset the child needs in its own local
+                    // space is the world delta expressed in the parent's frame, divided by
+                    // the parent's scale.
+                    const int par = model.skeleton().bones()[(std::size_t)tb].parent;
+                    if (par < 0 || static_cast<std::size_t>(par) >= wcheck.size()) continue;
+                    const glm::mat4 parentWorld =
+                        model.Mat4() * wcheck[(std::size_t)par];
+                    (void)parentWorld;
+                    const glm::mat3 parBasis = glm::mat3(wcheck[(std::size_t)par]);
+                    const float scale = glm::length(parBasis[0]);
+                    if (!(scale > 1e-6f)) continue;
+                    // World delta -> parent-local delta (rotation only, then unscale).
+                    const glm::mat3 rot = parBasis / scale;
+                    const glm::vec3 localOffset =
+                        glm::transpose(rot) * (want - have) / scale;
+                    character.pose[(std::size_t)tb][3] += glm::vec4(localOffset, 0.0f);
+                }
+            }
+            // `GLDX_TWISTCHK`: where each cuff-carrying twist bone actually ends up,
+            // so left and right can be compared in the SAME frame. They are weighted to
+            // different bones (`左手捩` hangs under the forearm, `右腕捱1` under the
+            // upper arm), which is exactly how the two sides drift apart.
+            if (std::getenv("GLDX_TWISTCHK")) {
+                static int shown = 0;
+                if (shown++ < 2) {
+                    std::vector<glm::mat4> tw;
+                    model.skeleton().ComputeWorld(character.pose, model.Mat4(), tw);
+                    for (int b : {96, 118, 104, 124}) {
+                        if (b < 0 || static_cast<std::size_t>(b) >= tw.size()) continue;
+                        const glm::vec3 w = glm::vec3(tw[(std::size_t)b][3]);
+                        std::fprintf(stderr, "[twistchk] %3d '%s' x=%+.3f y=%+.3f z=%+.3f\n", b,
+                                     model.skeleton().bones()[(std::size_t)b].name.c_str(),
+                                     (double)w.x, (double)w.y, (double)w.z);
+                    }
+                }
             }
         }
 
