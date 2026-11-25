@@ -190,7 +190,14 @@ void ProceduralWalk::SampleAtPhase(float phase, std::vector<glm::mat4>& outPose)
         // already mirrors in body terms (exactly like the elbow fix). Using opposite
         // signs pushed both arms the same way in world space, which is why the two sides
         // stayed 0.19 m apart (measured -0.123 / +0.072).
-        rotate(rig_.armUp[s], rig_.forward, -tune.armOut);
+        // MIRROR the splay. "\`forward\` is one world axis, so one signed angle already
+        // mirrors" is true for the SWING (about side) but false for the SPLAY: measured
+        // with GLDX_ARM, both upper arms came out on the same side of the body
+        // (L side=-0.23, R side=-0.26). One arm then hangs away from the hip and the
+        // other one goes through the torso and the skirt - that is the hand-in-skirt
+        // clipping seen on a walk. Outward is +side for the left, -side for the right.
+        const float outSign = (s == 0) ? 1.0f : -1.0f;
+        rotate(rig_.armUp[s], rig_.forward, tune.armOut * outSign);
         // 肩胛不是刚性支架：它跟着手臂前后动。三度就够让轮廓不再读成"方块上装着
         // 一条铰接的棍子"。
         rotate(rig_.clavicle[s], rig_.up, -tune.clavicleRoll * swingN);
@@ -209,7 +216,11 @@ void ProceduralWalk::SampleAtPhase(float phase, std::vector<glm::mat4>& outPose)
         // backwards - measured with GLDX_ELBOWDIR, the left forearm gained +0.38 of
         // forward component while the right LOST 0.44, i.e. the right elbow folded
         // BACKWARD, which no human elbow does.
-        rotate(rig_.armLow[s], rig_.side, elbow - 0.30f * tune.crouch);
+        rotate(rig_.armLow[s], elbowAxis(rig_), elbow - 0.30f * tune.crouch);
+        // 前臂内收（朝身体前方收）：只靠绕 `side` 屈肘，前臂在侧向上会外撇——实测
+        // walk 的前臂侧向分量 R 侧到 -0.39，画面上就是"手不是在身前摆，而是往旁边伸"。
+        // 这个补偿把前臂拉到身体前方，数值与 run 用同一套（见 ProceduralRun）。
+        rotate(rig_.armLow[s], rig_.up, tune.foreAdduct * ((s == 0) ? 1.0f : -1.0f));
         // (The clearance used to be applied here as a forearm rotation about `up`, and
         // on top of the new upper-arm lift it pulled the two sides apart: measured wrist
         // offsets -0.130 / +0.054 m, i.e. one hand clear and one still inside the hem.

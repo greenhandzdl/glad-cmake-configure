@@ -69,7 +69,9 @@ struct WalkTuning {
     float armDown   = 0.790f;        // rad
     float armSwing  = 0.55f;
     float elbowBase = 0.55f;         // 两个摆动相都保留的屈肘
-    float elbowSwing = 0.22f;        // 手臂前摆时额外加的
+    // 前臂向身体前方内收的补偿角（rad）。0 时前臂会外撇（见 ProceduralWalk.cpp）。
+    float foreAdduct = 0.55f;
+    float elbowSwing = 0.34f;        // 手臂前摆时额外加的（原先 0.22 读不出小臂在动）
     // 上臂额外抬高量。**保持 0**——手臂本来就落在裙摆外侧。
     //
     // 这一项是为了"把手拿出裙摆"加的，试过三种轴和五个角度，全部让情况更糟：
@@ -81,7 +83,7 @@ struct WalkTuning {
     //
     // 真正的问题一直是**肘部没有左右镜像**（见 ProceduralWalk.cpp），那修好之后手
     // 本来就垂在裙外，不需要额外抬高。留着这个参数是为了让下一个人知道这条路试过。
-    float armOut    = 0.28f;         // rad，上臂抬高（绕 forward，~26 deg）
+    float armOut    = 0.12f;         // rad，上臂抬高（绕 forward，~26 deg）
     float wristBase = 0.14f;
     float wristSwing = 0.16f;
     float wristDeviate = 0.07f;

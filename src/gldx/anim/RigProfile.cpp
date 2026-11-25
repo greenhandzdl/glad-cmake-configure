@@ -132,6 +132,33 @@ RigProfile RigProfile::Classify(const Skeleton& skeleton, const RigNaming* namin
         rig.chains[kind].count = take;
         for (int i = 0; i < take; ++i) rig.chains[kind].bones[i] = bones[i];
     }
+    // ---- 手指：按 MMD 骨名直接解析 ----
+    //
+    // 手指不属于任何"可选链"（它们没有摇晃物理，也不需要碰撞），所以不走 FindChain。
+    // 这里直接按名字查：MMD 的指骨名是固定的（左人指１…、左親指２…），全角数字
+    // 也是固定的。找不到就留 -1 —— 别的资产没有手指时，弯曲函数会跳过，不会静默
+    // 去扭一根索引 0 的骨头（那是 root，扭了等于整具骨架乱转）。
+    for (int sd = 0; sd < kRigSides; ++sd)
+        for (int f = 0; f < 5; ++f)
+            for (int j = 0; j < 3; ++j) rig.finger[sd][f][j] = -1;
+    {
+        static const char* const kFinger[5] = {"人指", "中指", "薬指", "小指", "親指"};
+        // 拇指从 ０ 起，其余从 １ 起（MMD 的约定）。
+        static const char* const kDigit[5][3] = {
+            {"１", "２", "３"}, {"１", "２", "３"}, {"１", "２", "３"},
+            {"１", "２", "３"}, {"０", "１", "２"},
+        };
+        const char* const kSide[2] = {"左", "右"};
+        for (int sd = 0; sd < kRigSides; ++sd) {
+            for (int f = 0; f < 5; ++f) {
+                for (int j = 0; j < 3; ++j) {
+                    const std::string nm =
+                        std::string(kSide[sd]) + kFinger[f] + kDigit[f][j];
+                    rig.finger[sd][f][j] = skeleton.Find(nm);
+                }
+            }
+        }
+    }
     return rig;
 }
 
@@ -235,6 +262,25 @@ std::vector<const char*> RigProfile::Missing() const {
         if (Index(slot) < 0) missing.push_back(SlotName(slot));
     }
     return missing;
+}
+
+
+void CurlFingers(std::vector<glm::mat4>& pose, const std::vector<glm::mat4>& restWorld,
+                 const RigProfile& rig, const glm::vec3& curlAxis, float curl, float thumbCurl) {
+    // 远端弯得多：真手指的近节承担大部分位移，但远节弯得更"蜷"。这三个系数是
+    // 目视标定的——0.5/0.35/0.30 让手在走路幅度下读成"放松的半握"，而不是"握拳"
+    // 也不是"张开的巴掌"。
+    static const float kJoint[3] = {1.0f, 0.70f, 0.60f};
+    for (int sd = 0; sd < kRigSides; ++sd) {
+        for (int f = 0; f < 5; ++f) {
+            const float amount = (f == 4) ? thumbCurl : curl;   // 4 = 親指
+            for (int j = 0; j < 3; ++j) {
+                const int b = rig.finger[sd][f][j];
+                if (b < 0) continue;
+                RotateBone(pose, restWorld, b, curlAxis, amount * kJoint[j]);
+            }
+        }
+    }
 }
 
 std::string RigProfile::BindingReport() const {

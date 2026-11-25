@@ -48,6 +48,13 @@ class RigNaming;   // 前向声明：RigProfile 只在 Classify 的签名里用�
  * 一具骨架的语义分类结果。纯数据，可拷贝、可跨线程传（不含 GL、不含指针）。
  */
 struct RigProfile {
+    // 手指槽位默认 -1：0 是合法的骨骼下标（根骨），留着 0 会让"没绑上"变成
+    // "去扭根骨"，整具骨架一起歪。
+    RigProfile() {
+        for (int sd = 0; sd < kRigSides; ++sd)
+            for (int f = 0; f < 5; ++f)
+                for (int j = 0; j < 3; ++j) finger[sd][f][j] = -1;
+    }
     int hips   = -1;
     int spine  = -1;
     int spine1 = -1;   // 辅助槽位：躯干中段，见 kRigRequiredSlotCount
@@ -62,7 +69,20 @@ struct RigProfile {
     int armUp[kRigSides]     = {-1, -1};
     int armLow[kRigSides]    = {-1, -1};
     int hand[kRigSides]      = {-1, -1};   // 腕：手部网格主要被权重到的那个骨头
-    int clavicle[kRigSides]  = {-1, -1};   // 锁骨/肩胛：只转几度，但少了它就"像个铰接木偶"
+    int clavicle[kRigSides]  = {-1, -1};   // 锁骨/肩胛：只转几度，但少了它就"像个铰接木��"
+
+    /**
+     * 手指：5 根 × 3 节。
+     *
+     * **为什么要专门留槽位**：这具骨架有完整手指（人指/中指/薬指/小指/親指 各 3 节），
+     * 但没有任何动作源摆过它们——于是手一直是 bind pose 里张开的样子，走起来两只手
+     * 都像"爵士手"向两边张开。手指不属于任何"链"（它们没有摇晃物理），所以不能
+     * 借用 chains；这里是纯 FK 的弯曲量。
+     *
+     * 下标顺序固定为 [手][指][节]，指的顺序 = 人指、中指、薬指、小指、親指。
+     * 找不到的关节保持 -1，弯曲时跳过——不同资产少几节也不会静默错位。
+     */
+    int finger[kRigSides][5][3];
 
     /**
      * 一条可选骨骼链（尾巴 / 裙摆 / 长发 / 兽耳）。
@@ -168,6 +188,22 @@ struct RigProfile {
      */
     [[nodiscard]] std::string BindingReport() const;
 };
+
+
+/**
+ * 把两只手的手指弯起来（握持/放松）。
+ *
+ * 为什么需要：这具骨架有完整手指，但所有动作源都只摆到"手首"为止，于是手永远是
+ * bind pose 里张开的样子——走起来两只手都像"爵士手"向两边张开，这是整条手臂
+ * 读起来不对的最后一段。
+ *
+ * 弯曲量按关节递减（远端弯得更多），像真的手指；拇指单独给，因为它的弯法不同。
+ *
+ * @param curl      近节指的弯曲（弧度，正 = 弯向掌心）
+ * @param thumbCurl 拇指的弯曲
+ */
+void CurlFingers(std::vector<glm::mat4>& pose, const std::vector<glm::mat4>& restWorld,
+                 const RigProfile& rig, const glm::vec3& curlAxis, float curl, float thumbCurl);
 
 } // namespace gldx
 

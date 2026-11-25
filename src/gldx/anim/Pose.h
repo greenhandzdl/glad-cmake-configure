@@ -49,11 +49,13 @@
  * 增量累加在单帧里看起来是对的。
  */
 
+#include <cstdlib>
 #include <cstddef>
 #include <vector>
 
 #include <glm/glm.hpp>
 
+#include "gldx/anim/RigProfile.h"
 #include "gldx/anim/Skeleton.h"
 
 namespace gldx {
@@ -141,6 +143,27 @@ void TranslateBone(std::vector<glm::mat4>& pose, const std::vector<glm::mat4>& r
  */
 void ComputeRestWorlds(const Skeleton& skeleton, std::vector<glm::mat4>& outRestWorld);
 [[nodiscard]] std::vector<glm::mat4> RestWorlds(const Skeleton& skeleton);
+
+
+/**
+ * 肘部的铰链轴。**实测选出来的，不是想当然的 side。**
+ *
+ * 这具骨架的 bind pose 手臂沿 `side` 伸出，所以"绕 side 转"在 rest 系里其实是沿
+ * 手臂自身长轴自转；真正让前臂往前弯的是另一根轴。GLDX_ELBOWAXIS 用来扫这三根轴，
+ * 量的是前臂在世界系里的方向（GLDX_ARM 的 fore fwd/up/side），取"fwd 最大、side
+ * 最小"的那根。
+ */
+inline glm::vec3 elbowAxis(const RigProfile& rig) {
+    if (const char* ov = std::getenv("GLDX_ELBOWAXIS")) {
+        switch (ov[0]) {
+            case 's': return rig.side;
+            case 'u': return rig.up;
+            case 'f': return rig.forward;
+            default: break;
+        }
+    }
+    return rig.side;
+}
 
 } // namespace gldx
 

@@ -243,6 +243,18 @@ struct Character {
     gldx::RigProfile  rig;
     gldx::GroundContact ground;
 
+    // Constant vertical offset for the run, in metres, applied instead of the per-frame
+    // ground solve.
+    //
+    // A run has a FLIGHT PHASE, so grounding it every frame (lowest vertex -> 0) would
+    // flatten the very thing that makes it read as a run. Leaving it out entirely - the
+    // previous behaviour - was worse: the character hovered a constant 0.135 m up, all
+    // cycle, with a shadow far below. The right lever is a constant: measure the lowest
+    // vertex over one whole cycle and shift the character by -that, so the lowest instant
+    // of the cycle plants on the floor and the flight phase keeps its own arc on top.
+    float runGroundOffset = 0.0f;
+    bool  runGroundReady  = false;
+
     std::vector<glm::mat4> pose;      // one local matrix per bone, rebuilt per frame
     std::vector<glm::mat4> palette;   // what the vertex shader reads as uBones[]
     GaitTuning tune;
@@ -770,6 +782,87 @@ public:
             // ABOUT to be uploaded - not from the one the report measures. Every height
             // probe so far read `character.palette` at a different moment and disagreed
             // with the picture; this one is taken at the draw itself.
+            // `GLDX_SEATLOW`: where the SEAT (hips + skirt) is, not the lowest point of
+            // the whole body. A W-sit is supposed to put the hips on the floor; if the
+            // grounding pass is satisfied by a toe or the tail, the character visually
+            // hovers while every "lowest vertex" reading says 0.
+            if (std::getenv("GLDX_SEATLOW") && !character_.probeVerts.empty()) {
+                static int shown = 0;
+                if (shown++ < 2) {
+                    std::vector<int> allowed;
+                    if (character_.rig.hips >= 0) allowed.push_back(character_.rig.hips);
+                    const int si = static_cast<int>(gldx::RigChainKind::Skirt);
+                    for (int k = 0; k < character_.rig.chains[si].count; ++k)
+                        allowed.push_back(character_.rig.chains[si].bones[k]);
+                    float low = 1.0e9f;
+                    for (const gldx::SkinnedVertex& v : character_.probeVerts) {
+                        bool ok = false;
+                        for (int i = 0; i < 4; ++i) {
+                            if (v.boneWeight[i] <= 0.0f) continue;
+                            const int bi = static_cast<int>(v.boneIndex[i]);
+                            if (std::find(allowed.begin(), allowed.end(), bi) != allowed.end()) {
+                                ok = true; break;
+                            }
+                        }
+                        if (!ok) continue;
+                        glm::vec4 q(0.0f);
+                        for (int i = 0; i < 4; ++i) {
+                            if (v.boneWeight[i] <= 0.0f) continue;
+                            const std::size_t bi = v.boneIndex[i];
+                            if (bi < character_.palette.size())
+                                q += v.boneWeight[i] *
+                                     (character_.palette[bi] * glm::vec4(v.position, 1.0f));
+                        }
+                        low = std::min(low, q.y);
+                    }
+                    std::fprintf(stderr, "[seatlow] seat lowest y = %.4f m\n", (double)low);
+                }
+            }
+            // `GLDX_ALLDRAWLOW`: lowest vertex of ANY bone, at the draw call. Sit hovered
+            // visually while `GLDX_SEATLOW` (measured before ApplyLift) reported 0.000 -
+            // the same "two palettes" trap as before, so this one is taken where it
+            // counts.
+            if (std::getenv("GLDX_ALLDRAWLOW") && !character_.probeVerts.empty()) {
+                static int shown = 0;
+                if (shown++ < 2) {
+                    float low = 1.0e9f;
+                    int lowBone = -1;
+                    for (const gldx::SkinnedVertex& v : character_.probeVerts) {
+                        glm::vec4 q(0.0f);
+                        int dom = -1;
+                        float bestW = 0.0f;
+                        for (int i = 0; i < 4; ++i) {
+                            if (v.boneWeight[i] <= 0.0f) continue;
+                            const std::size_t bi = v.boneIndex[i];
+                            if (bi < character_.palette.size())
+                                q += v.boneWeight[i] *
+                                     (character_.palette[bi] * glm::vec4(v.position, 1.0f));
+                            if (v.boneWeight[i] > bestW) {
+                                bestW = v.boneWeight[i];
+                                dom = static_cast<int>(bi);
+                            }
+                        }
+                        if (q.y < low) { low = q.y; lowBone = dom; }
+                    }
+                    const glm::mat4 hp = character_.palette[(std::size_t)character_.rig.hips];
+                    for (int kk = 0; kk < gldx::kRigSides; ++kk) {
+                        const int lb[3] = {character_.rig.hips, character_.rig.legLow[kk],
+                                           character_.rig.foot[kk]};
+                        std::fprintf(stderr,
+                                     "[bonepos] %s hips=%.3f knee%d=%.3f foot%d=%.3f head=%.3f\n",
+                                     kk == 0 ? "L" : "R",
+                                     (double)character_.palette[(std::size_t)lb[0]][3][1], kk,
+                                     (double)character_.palette[(std::size_t)lb[1]][3][1], kk,
+                                     (double)character_.palette[(std::size_t)lb[2]][3][1],
+                                     (double)character_.palette[(std::size_t)character_.rig.head][3][1]);
+                    }
+                    std::fprintf(stderr, "[alldraw] hips y=%.4f m | lowest=%.4f m on bone %d '%s'\n",
+                                 (double)hp[3][1], (double)low, lowBone,
+                                 lowBone >= 0
+                                     ? character_.model.skeleton().bones()[(std::size_t)lowBone].name.c_str()
+                                     : "?");
+                }
+            }
             if (std::getenv("GLDX_DRAWLOW") && !character_.probeVerts.empty()) {
                 static int shown = 0;
                 if (shown++ < 2) {
@@ -1038,7 +1131,7 @@ public:
 
         hud.BeginSection(gldx::Hud::Anchor::BottomLeft, 14.0f);
         hud.AddLines({
-            "0 idle  1 walk  2 run  3 crouch  4 crouchwalk  5 attack  6 jump  7 sit  8 swim",
+            "0 idle  1 walk  2 run  4 crouchwalk  5 attack  6 jump  7 sit  8 swim",
             "W walk on/off   G floor   F wireframe   H hud",
             "drag orbit   wheel zoom   Esc quit",
         }, gldx::Hud::kDim);
@@ -1602,7 +1695,51 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         // old "-lowest" compensation (which existed to rescue a pose that never moved)
         // just pushes the character underground. Measured both ways: without it
         // `lowestY = 0.0`, with it `-0.668` (`sit <- SINKS`).
-        character.sitRise = 0.10f;
+        // ---- 用"承重部位"的最低点定坐高，且**不要硬编码** ----
+        //
+        // 这里原本是 `sitRise = 0.10f`（一个旧姿势下试出来的常数），而姿势后来整个
+        // 换过（髋角符号、外展、扭转都改了），那个数就变成"把角色架在半空 10 cm"。
+        // 画面里坐姿一直是悬空的，HUD 的 `shift +100.0 mm` 正是它。
+        //
+        // 也不能用"-lowest"：`lowest` 是**全身**最低点，而这具资产上最低的是一条垂
+        // 下来的缎带（实测骨骼 `右リボン大２`）。把缎带放到地面，臀部就停在 20 cm
+        // 高处——"人坐在缎带上"。坐姿的承重件是臀、大腿、小腿、脚，所以只量这些。
+        float supportLow = 1.0e9f;
+        {
+            std::vector<int> support;
+            if (character.rig.hips >= 0) support.push_back(character.rig.hips);
+            for (int b : character.rig.legUp) support.push_back(b);
+            for (int b : character.rig.legLow) support.push_back(b);
+            for (int b : character.rig.foot) support.push_back(b);
+            for (const gldx::SkinnedVertex& v : character.probeVerts) {
+                bool ok = false;
+                for (int i = 0; i < 4; ++i) {
+                    if (v.boneWeight[i] <= 0.0f) continue;
+                    const int bi = static_cast<int>(v.boneIndex[i]);
+                    if (std::find(support.begin(), support.end(), bi) != support.end()) {
+                        ok = true;
+                        break;
+                    }
+                }
+                if (!ok) continue;
+                glm::vec4 q(0.0f);
+                for (int i = 0; i < 4; ++i) {
+                    if (v.boneWeight[i] <= 0.0f) continue;
+                    const std::size_t bi = v.boneIndex[i];
+                    if (bi < sitPalette.size())
+                        q += v.boneWeight[i] * (sitPalette[bi] * glm::vec4(v.position, 1.0f));
+                }
+                supportLow = std::min(supportLow, q.y);
+            }
+        }
+        // `sitRise` is left at 0: the frame loop grounds a seated pose from the real
+        // skinned body every frame (see the `seated` branch), which cannot disagree with
+        // the picture. Keeping a load-time constant here as well meant two corrections
+        // fought each other, and whichever ran last won - "changed the number, nothing
+        // moved on screen".
+        character.sitRise = 0.0f;
+        std::fprintf(stderr, "[anim-rigid] sit support low %.4f -> sitRise %.4f\n",
+                     (double)supportLow, (double)character.sitRise);
         std::fprintf(stderr,
                      "[anim-rigid] seated drop measured: lowest %.4f -> sitRise %.4f "
                      "(rig units); seatedHip %.3f m, restLift %.4f, %zu probe verts\n",
@@ -1648,6 +1785,23 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         t[static_cast<int>(RigChainKind::Hair)]  = gldx::ChainTuning{0.13f, 0.970f, 0.18f};
         t[static_cast<int>(RigChainKind::Tail)]  = gldx::ChainTuning{0.12f, 0.965f, 0.12f};
         t[static_cast<int>(RigChainKind::Ear)]   = gldx::ChainTuning{0.45f, 0.80f, -0.10f};
+
+        // 静止微动：头发最明显（它最轻、最长），尾巴次之，裙摆再小一档（布料比头发重，
+        // 不动才是对的），耳朵几乎不抖。放在这个初始化里而不是每个动作源里，是因为
+        // "角色是活的"与动作无关——坐下、待机、站着说话时都要有。
+        t[static_cast<int>(RigChainKind::Hair)].breathe   = 0.030f;
+        t[static_cast<int>(RigChainKind::Hair)].breatheHz = 0.42f;
+        t[static_cast<int>(RigChainKind::Tail)].breathe   = 0.024f;
+        t[static_cast<int>(RigChainKind::Tail)].breatheHz = 0.35f;
+        t[static_cast<int>(RigChainKind::Ear)].breathe    = 0.010f;
+        t[static_cast<int>(RigChainKind::Ear)].breatheHz  = 0.55f;
+        t[static_cast<int>(RigChainKind::Skirt)].breathe  = 0.011f;
+        t[static_cast<int>(RigChainKind::Skirt)].breatheHz = 0.33f;
+        // 取证开关：把微动整体关掉，用来分清"末端的摆动来自微动"还是"来自待机动作本身"。
+        if (const char* off = std::getenv("GLDX_NOBREATHE")) {
+            if (off[0] == '1')
+                for (int k = 0; k < gldx::RigChainKindCount; ++k) t[k].breathe = 0.0f;
+        }
     }
 
     character.machine.Set(character.walkSource.get());
@@ -1812,6 +1966,147 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
                          (double)ph, (double)lf.y, (double)rf.y,
                          (double)glm::normalize(thL).y, (double)glm::normalize(thR).y);
         }
+    }
+    // `GLDX_GAITLOW=run|walk|crouchwalk`: sweep one gait's whole cycle and report the
+    // lowest skinned vertex per phase. A gait cannot be grounded per frame without
+    // flattening its flight phase, so what it needs is a CONSTANT offset = the cycle
+    // minimum; this prints exactly that number.
+    // Run needs a constant ground offset; compute it once, from the same measurement
+    // the probe below prints. Doing it here (after the probe vertices exist) keeps the
+    // number derived from the geometry instead of hard-coded.
+    if (!character.runGroundReady && character.runSource && !character.probeVerts.empty()) {
+        const float dur = character.runSource->Duration();
+        float lowest = 1.0e9f;
+        for (int q = 0; q < 24; ++q) {
+            std::vector<glm::mat4> pose, pal;
+            character.runSource->Sample(dur * (float)q / 24.0f, pose);
+            character.model.skeleton().ComputeSkinning(pose, character.model.Mat4(), pal);
+            for (const gldx::SkinnedVertex& v : character.probeVerts) {
+                glm::vec4 wp(0.0f);
+                for (int i = 0; i < 4; ++i) {
+                    if (v.boneWeight[i] <= 0.0f) continue;
+                    const std::size_t bi = v.boneIndex[i];
+                    if (bi < pal.size())
+                        wp += v.boneWeight[i] * (pal[bi] * glm::vec4(v.position, 1.0f));
+                }
+                lowest = std::min(lowest, wp.y);
+            }
+        }
+        if (std::isfinite(lowest) && lowest < 1.0e8f) {
+            character.runGroundOffset = -lowest;
+            character.runGroundReady  = true;
+            std::fprintf(stderr,
+                         "[run-ground] cycle minimum %.4f m -> constant lift %.4f m\n",
+                         (double)lowest, (double)character.runGroundOffset);
+        }
+    }
+    if (const char* which = std::getenv("GLDX_GAITLOW")) {
+        gldx::AnimPoseSource* src = nullptr;
+        if (std::strcmp(which, "run") == 0) src = character.runSource.get();
+        else if (std::strcmp(which, "walk") == 0) src = character.walkSource.get();
+        else if (std::strcmp(which, "crouchwalk") == 0) src = character.crouchWalkSource.get();
+        if (src != nullptr && !character.probeVerts.empty()) {
+            const float dur = src->Duration();
+            float best = 1.0e9f;
+            float worst = -1.0e9f;
+            for (int q = 0; q < 24; ++q) {
+                std::vector<glm::mat4> pose, pal;
+                src->Sample(dur * (float)q / 24.0f, pose);
+                character.model.skeleton().ComputeSkinning(pose, character.model.Mat4(), pal);
+                float low = 1.0e9f;
+                for (const gldx::SkinnedVertex& v : character.probeVerts) {
+                    glm::vec4 wp(0.0f);
+                    for (int i = 0; i < 4; ++i) {
+                        if (v.boneWeight[i] <= 0.0f) continue;
+                        const std::size_t bi = v.boneIndex[i];
+                        if (bi < pal.size())
+                            wp += v.boneWeight[i] * (pal[bi] * glm::vec4(v.position, 1.0f));
+                    }
+                    low = std::min(low, wp.y);
+                }
+                best = std::min(best, low);
+                worst = std::max(worst, low);
+                std::fprintf(stderr, "[gaitlow] %s q=%2d low=%+.4f m\n", which, q, (double)low);
+            }
+            std::fprintf(stderr,
+                         "[gaitlow] %s cycle min=%+.4f m (max=%+.4f) -> constant offset %+.4f m\n",
+                         which, (double)best, (double)worst, (double)-best);
+        }
+    }
+    if (std::getenv("GLDX_FINGERS")) {
+        for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+            std::fprintf(stderr, "[finger] %s:", sd == 0 ? "L" : "R");
+            for (int f = 0; f < 5; ++f)
+                for (int j = 0; j < 3; ++j)
+                    std::fprintf(stderr, " %d", character.rig.finger[sd][f][j]);
+            std::fprintf(stderr, "\n");
+        }
+    }
+    if (std::getenv("GLDX_ARM")) {
+        const auto& sk7 = model.skeleton();
+        struct Probe { const char* name; gldx::AnimPoseSource* src; };
+        Probe probes[] = {
+            {"idle", character.idleSource.get()},
+            {"walk", character.walkSource.get()},
+            {"run", character.runSource.get()},
+            {"crouchwalk", character.crouchWalkSource.get()},
+            {"sit", character.sitSource.get()},
+        };
+        for (const Probe& pr : probes) {
+            if (!pr.src) continue;
+            const float dur = (pr.src->Duration() > 1e-4f) ? pr.src->Duration() : 1.0f;
+            for (int q = 0; q < 4; ++q) {
+                const float tt = dur * 0.25f * (float)q;
+                std::vector<glm::mat4> pose, wm;
+                pr.src->Sample(tt, pose);
+                sk7.ComputeWorld(pose, model.Mat4(), wm);
+                auto P = [&](int b) { return b < 0 ? glm::vec3(0) : glm::vec3(wm[(std::size_t)b][3]); };
+                auto D = [&](int a, int c) {
+                    const glm::vec3 d = P(c) - P(a);
+                    return glm::length(d) > 1e-6f ? glm::normalize(d) : glm::vec3(0);
+                };
+                auto bx = [&](const glm::vec3& v) {
+                    return glm::vec3(glm::dot(v, character.rig.forward),
+                                     glm::dot(v, character.rig.up),
+                                     glm::dot(v, character.rig.side));
+                };
+                for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+                    const glm::vec3 ua = bx(D(character.rig.armUp[sd], character.rig.armLow[sd]));
+                    const glm::vec3 fa = bx(D(character.rig.armLow[sd], character.rig.hand[sd]));
+                    std::fprintf(stderr,
+                                 "[arm] %-10s t=%.2f %s upper fwd=%+.2f up=%+.2f side=%+.2f | "
+                                 "fore fwd=%+.2f up=%+.2f side=%+.2f\n",
+                                 pr.name, (double)tt, sd == 0 ? "L" : "R",
+                                 (double)ua.x, (double)ua.y, (double)ua.z,
+                                 (double)fa.x, (double)fa.y, (double)fa.z);
+                }
+            }
+        }
+        std::fprintf(stderr, "[arm] 目标(走/跑): upper up≈-0.90 side≈±0.15 fwd在±0.40内摆动; fore up≈-0.6..-0.9\n");
+    }
+    if (std::getenv("GLDX_SITLEG") && character.sitSource) {
+        const auto& sk9 = model.skeleton();
+        std::vector<glm::mat4> pose, wm;
+        character.sitSource->Sample(0.0f, pose);
+        sk9.ComputeWorld(pose, model.Mat4(), wm);
+        auto P = [&](int b) { return b < 0 ? glm::vec3(0) : glm::vec3(wm[(std::size_t)b][3]); };
+        for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+            const glm::vec3 hip = P(character.rig.legUp[sd]);
+            const glm::vec3 knee = P(character.rig.legLow[sd]);
+            const glm::vec3 ank = P(character.rig.foot[sd]);
+            const glm::vec3 th = glm::normalize(knee - hip);
+            const glm::vec3 sh = glm::normalize(ank - knee);
+            std::fprintf(stderr,
+                         "[sitleg] %s thigh fwd=%+.2f up=%+.2f side=%+.2f | shin fwd=%+.2f up=%+.2f side=%+.2f\n",
+                         sd == 0 ? "L" : "R",
+                         (double)glm::dot(th, character.rig.forward),
+                         (double)glm::dot(th, character.rig.up),
+                         (double)glm::dot(th, character.rig.side),
+                         (double)glm::dot(sh, character.rig.forward),
+                         (double)glm::dot(sh, character.rig.up),
+                         (double)glm::dot(sh, character.rig.side));
+        }
+        std::fprintf(stderr, "[sitleg] 目标: 大腿 fwd~+0.7 up~-0.6 | 小腿 fwd~-0.6 up~-0.5 (W 坐)\n");
     }
     if (std::getenv("GLDX_SWIMAX") && character.swimSource) {
         const auto& sk6 = model.skeleton();
@@ -2576,7 +2871,10 @@ int main(int argc, char** argv) {
             case gldx::win::Key::Num0: view.Request(Action::Idle, gldx::win::App::Get().Now()); break;
             case gldx::win::Key::Num1: view.Request(Action::Walk, gldx::win::App::Get().Now()); break;
             case gldx::win::Key::Num2: view.Request(Action::Run, gldx::win::App::Get().Now()); break;
-            case gldx::win::Key::Num3: view.Request(Action::Crouch, gldx::win::App::Get().Now()); break;
+            // `3` used to bind Action::Crouch. Removed on request: the standalone crouch
+            // pose is gone from the keyboard, `4` (crouch-walk) is the one that is still
+            // reachable. The enum and the pose source stay - the crouch tuning is what
+            // crouch-walk is built from, so deleting it would break action 4 as well.
             case gldx::win::Key::Num4: view.Request(Action::CrouchWalk, gldx::win::App::Get().Now()); break;
             case gldx::win::Key::Num5: view.Request(Action::Attack, gldx::win::App::Get().Now()); break;
             case gldx::win::Key::Num6: view.Request(Action::Jump, gldx::win::App::Get().Now()); break;
@@ -2844,6 +3142,43 @@ int main(int argc, char** argv) {
                 character.machine.Evaluate(character.pose);
             }
 
+            // ---- 手指：所有动作共用一处，按动作给不同握持度 ----
+            //
+            // 手指不属于任何动作源的调参范围（它们没有摇晃物理，也没有碰撞），但少了
+            // 这一段整条手臂就以"张开的巴掌"收尾——实测渲染里两只手是向外张开的扇子，
+            // 走、跑、蹲走都一样。放在这里而不是各动作源里，是因为"手多松"是动作的
+            // 属性，而"怎么弯"是骨架的属性，两者分开就不会出现某个动作忘了弯。
+            {
+                // 跑的时候是握拳，走路是放松的半握，游泳要张掌。
+                float curl = 0.55f;
+                float thumb = 0.30f;
+                switch (view.requestAction) {
+                    case Action::Idle:   curl = 0.45f; thumb = 0.24f; break;
+                    case Action::Walk:   curl = 0.55f; thumb = 0.30f; break;
+                    case Action::Run:    curl = 0.95f; thumb = 0.50f; break;
+                    case Action::Crouch: curl = 0.62f; thumb = 0.34f; break;
+                    case Action::Sit:    curl = 0.45f; thumb = 0.24f; break;
+                    case Action::Swim:   curl = 0.12f; thumb = 0.06f; break;
+                    case Action::Attack: curl = 0.90f; thumb = 0.48f; break;
+                    case Action::Jump:   curl = 0.70f; thumb = 0.38f; break;
+                }
+                if (const char* ov = std::getenv("GLDX_CURL"))
+                    curl = static_cast<float>(std::atof(ov));
+                if (const char* ov = std::getenv("GLDX_TCURL"))
+                    thumb = static_cast<float>(std::atof(ov));
+                // 弯曲轴是 side，不是 forward：绕 forward 转等于让手指沿自身长轴
+                // 自转（画面完全不变，实测 curl 0 -> 2.5 只有 0 像素差异）。
+                glm::vec3 curlAxis = character.rig.side;
+                if (const char* ax = std::getenv("GLDX_CURLAXIS")) {
+                    const char c = ax[0];
+                    curlAxis = (c == 's') ? character.rig.side
+                             : (c == 'u') ? character.rig.up
+                                          : character.rig.forward;
+                }
+                gldx::CurlFingers(character.pose, character.model.restWorld(), character.rig,
+                                  curlAxis, curl, thumb);
+            }
+
             // ---- 把肘部旋转与位置都带给挂在上臂下的 `捩` 骨 ----
             //
             // MMD 手臂有两套 twist 骨，位置不同：
@@ -3108,14 +3443,33 @@ int main(int argc, char** argv) {
                         if (b >= 0) legPts.emplace_back(smWorld[(std::size_t)b][3]);
                     }
                 }
+                // Hands and forearms join the same probe set.
+                //
+                // The hem is at hand height in every idle/standing pose, so the two
+                // intersect constantly - that is the "IDLE 和裙子穿模". Raising the arms
+                // to clear it moves them out of a natural pose, and shrinking the skirt
+                // changes its silhouette. Pushing the CLOTH away from the hand is the one
+                // change that fixes the intersection and reads as the hem puffing out
+                // slightly when a hand comes down past it.
+                std::vector<glm::vec3> handPts;
+                for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+                    for (int b : {character.rig.armLow[sd], character.rig.hand[sd]}) {
+                        if (b >= 0) handPts.emplace_back(smWorld[(std::size_t)b][3]);
+                    }
+                }
                 const float legRadius = 0.11f * model.unitScale() * 10.0f;   // ~thigh radius
                 for (int ci = 0; ci < gldx::RigChainKindCount; ++ci) {
                     const auto kind = static_cast<gldx::RigChainKind>(ci);
                     if (!character.rig.hasChain(kind)) continue;
                     if (std::getenv("GLDX_NO_SECONDARY")) continue;   // A/B switch
                     // Only the skirt has legs inside it.
-                    if (kind == gldx::RigChainKind::Skirt)
+                    if (kind == gldx::RigChainKind::Skirt) {
                         character.chainSolvers[ci].SetLegProbes(legPts, legRadius);
+                        // Hands get their OWN, much smaller radius. Merging them into the
+                        // leg set made every swinging arm blow the hem out like a balloon
+                        // (thigh radius 0.11 m on a 5 cm wrist).
+                        character.chainSolvers[ci].AddProbes(handPts, 0.050f);
+                    }
                     const gldx::ChainTuning& tk = character.chainTune[ci];
                     character.chainSolvers[ci].Solve(character.rig.chains[ci], character.pose,
                                                      smWorld, model.restWorld(), tk,
@@ -3220,15 +3574,99 @@ int main(int argc, char** argv) {
                     }
                     low = std::min(low, q.y);
                 }
+                // Run is NOT in this list any more. It used to be, which meant it got
+                // no vertical correction at all and hovered 0.135 m up for the whole
+                // cycle. It is handled by a constant offset below instead: per-frame
+                // grounding would flatten its flight phase, and "no correction" is the
+                // hover. The offset is the cycle minimum, so the lowest instant of the
+                // cycle is what plants on the floor.
                 const bool airborne = (view.requestAction == Action::Jump) ||
-                                      (view.requestAction == Action::Run) ||
                                       (view.requestAction == Action::Swim);
+                if (view.requestAction == Action::Run && character.runGroundReady) {
+                    gldx::GroundContact::ApplyLift(character.palette,
+                                                   character.runGroundOffset);
+                }
+                // Which vertices may define "the floor" for this pose.
+                //
+                // For a seated pose it must be the SEAT, not "whatever hangs lowest".
+                // Measured: the lowest vertex was `右リボン大２` - a ribbon dangling from
+                // the costume - so the grounding pass planted the RIBBON on the floor and
+                // left the hips ~20 cm up. A ribbon is not what a person sits on.
+                const bool seated = (view.requestAction == Action::Sit);
                 // Iterate: skinning is not a rigid translation, so moving every bone
                 // by -d does not move the lowest vertex by exactly -d when that vertex
                 // is blended across bones. One pass measured crouch still 20 cm high.
+                // A seated pose folds the thighs up through the skirt, so the hem has to
+                // move out of the way. Lifting the skirt CHAIN bones (not the skirt mesh)
+                // is the one lever that works without re-authoring the costume: the
+                // palette is already built here, and translating a chain bone drags its
+                // panels - and the ribbons hanging off them - up with it.
+                //
+                // Amount is measured against the poke-through, not guessed: see the
+                // `--action sit` front view.
+                if (seated) {
+                    float skirtLift = 0.070f;
+                    if (const char* ov = std::getenv("GLDX_SKIRTLIFT"))
+                        skirtLift = static_cast<float>(std::atof(ov));
+                    float skirtFlare = 0.090f;
+                    if (const char* ov = std::getenv("GLDX_SKIRTFLARE"))
+                        skirtFlare = static_cast<float>(std::atof(ov));
+                    const int ks = static_cast<int>(gldx::RigChainKind::Skirt);
+                    const int kc = character.rig.chains[ks].count;
+                    const glm::vec3 hipP(character.palette[(std::size_t)character.rig.hips][3]);
+                    for (int i = 0; i < kc; ++i) {
+                        const int b = character.rig.chains[ks].bones[i];
+                        if (b < 0 || static_cast<std::size_t>(b) >= character.palette.size())
+                            continue;
+                        glm::mat4& m = character.palette[static_cast<std::size_t>(b)];
+                        m[3][1] += skirtLift;
+                        // Push the panel OUTWARD along the radial (horizontal) direction,
+                        // so the hem drapes around the folded thighs instead of the knees
+                        // pushing through it. Lifting alone only trades clipping for a
+                        // skirt that looks hoisted off the waist.
+                        glm::vec3 rad(m[3][0] - hipP.x, 0.0f, m[3][2] - hipP.z);
+                        const float len = glm::length(rad);
+                        if (len > 1.0e-4f) {
+                            rad /= len;
+                            m[3][0] += rad.x * skirtFlare;
+                            m[3][2] += rad.z * skirtFlare;
+                        }
+                    }
+                }
+                // For a seated pose the support is BODY SKIN: the buttocks, the backs of
+                // the thighs and the shins. It is NOT:
+                //   - the hair/tail/skirt chains (they hang below and would be planted on
+                //     the floor instead - measured: the lowest vertex was the ribbon bone
+                //     `右リボン大２`, which left the hips hovering ~20 cm up), nor
+                //   - a hand-picked bone list containing only `hips` (its vertices sit
+                //     inside the pelvis, far above the skin that actually touches).
+                //
+                // So: everything EXCEPT the secondary-motion chains.
+                std::vector<int> chainBones;
+                if (seated) {
+                    for (int k = 0; k < gldx::RigChainKindCount; ++k) {
+                        const auto& ch = character.rig.chains[k];
+                        for (int t = 0; t < ch.count; ++t) chainBones.push_back(ch.bones[t]);
+                    }
+                }
                 for (int pass = 0; !airborne && pass < 4; ++pass) {
                     float now = 1.0e9f;
                     for (const gldx::SkinnedVertex& v : character.probeVerts) {
+                        if (seated) {
+                            // Skip vertices whose DOMINANT bone belongs to a chain.
+                            int dom = -1;
+                            float bestW = 0.0f;
+                            for (int i = 0; i < 4; ++i) {
+                                if (v.boneWeight[i] > bestW) {
+                                    bestW = v.boneWeight[i];
+                                    dom = static_cast<int>(v.boneIndex[i]);
+                                }
+                            }
+                            if (dom >= 0 &&
+                                std::find(chainBones.begin(), chainBones.end(), dom) !=
+                                    chainBones.end())
+                                continue;
+                        }
                         glm::vec4 q(0.0f);
                         for (int i = 0; i < 4; ++i) {
                             if (v.boneWeight[i] <= 0.0f) continue;
@@ -3244,6 +3682,97 @@ int main(int argc, char** argv) {
                 }
                 (void)low;
             }
+            }
+            if (std::getenv("GLDX_SKIRTSYM")) {
+                std::vector<glm::mat4> bw;
+                character.model.skeleton().ComputeWorld(character.pose, character.model.Mat4(),
+                                                        bw);
+                const auto& skc =
+                    character.rig.chains[static_cast<int>(gldx::RigChainKind::Skirt)];
+                if (skc.count > 0) {
+                    const glm::vec3 root(bw[(std::size_t)skc.bones[0]][3]);
+                    float lo = 1e9f, hi = -1e9f, sum = 0.0f;
+                    int n = 0;
+                    for (int i = 0; i < skc.count; ++i) {
+                        const int b = skc.bones[i];
+                        if (b < 0 || static_cast<std::size_t>(b) >= bw.size()) continue;
+                        const float dx = glm::vec3(bw[(std::size_t)b][3]).x - root.x;
+                        lo = std::min(lo, dx);
+                        hi = std::max(hi, dx);
+                        sum += dx;
+                        ++n;
+                    }
+                    std::fprintf(stderr,
+                                 "[skirt] n=%d min=%+.3f max=%+.3f mean=%+.3f (asym %.3f)\n", n,
+                                 (double)lo, (double)hi, (double)(sum / std::max(n, 1)),
+                                 (double)(hi + lo));
+                    for (int i = 0; i < skc.count; ++i) {
+                        const int b = skc.bones[i];
+                        if (b < 0 || static_cast<std::size_t>(b) >= bw.size()) continue;
+                        const glm::vec3 pd(bw[(std::size_t)b][3]);
+                        std::fprintf(stderr, "[skirtbone] %2d dx=%+.3f dy=%+.3f dz=%+.3f\n", i,
+                                     (double)(pd.x - root.x), (double)(pd.y - root.y),
+                                     (double)(pd.z - root.z));
+                    }
+                }
+            }
+            if (std::getenv("GLDX_BREATHE")) {
+                static int bf = 0;
+                if (bf++ % 20 == 0) {
+                    std::vector<glm::mat4> bw;
+                    character.model.skeleton().ComputeWorld(character.pose, character.model.Mat4(),
+                                                           bw);
+                    const auto& hc = character.rig.chains[static_cast<int>(gldx::RigChainKind::Hair)];
+                    if (hc.count > 0) {
+                        const int b = hc.bones[hc.count - 1];
+                        if (b >= 0 && static_cast<std::size_t>(b) < bw.size()) {
+                            const glm::vec3 p3(bw[(std::size_t)b][3]);
+                            std::fprintf(stderr, "[breathe] frame=%d hairTip=(%.4f,%.4f,%.4f)\n",
+                                         bf, (double)p3.x, (double)p3.y, (double)p3.z);
+                        }
+                    }
+                }
+            }
+            if (std::getenv("GLDX_HANDDBG")) {
+                // `character.palette` holds SKINNING matrices (world * inverseBind), not
+                // bone world matrices - reading [3] out of it gave shoulder/elbow points
+                // 2.6 m apart, which is how this mistake showed up. World matrices have
+                // to come from ComputeWorld on the same pose.
+                std::vector<glm::mat4> dbgWorld;
+                character.model.skeleton().ComputeWorld(character.pose, character.model.Mat4(),
+                                                        dbgWorld);
+                auto P = [&](int b) {
+                    return b < 0 ? glm::vec3(0)
+                                 : glm::vec3(dbgWorld[(std::size_t)b][3]);
+                };
+                const glm::vec3 hip = P(character.rig.hips);
+                {
+                    const glm::vec3 kn = P(character.rig.legLow[0]);
+                    const glm::vec3 an = P(character.rig.foot[0]);
+                    const glm::vec3 hipJ = P(character.rig.legUp[0]);
+                    const float thigh = glm::length(kn - hipJ);
+                    const float shin = glm::length(an - kn);
+                    const float drop = hipJ.y - an.y;
+                    std::fprintf(stderr,
+                                 "[legdbg] hipJ=(%.3f,%.3f) knee=(%.3f,%.3f) ankle=(%.3f,%.3f) "
+                                 "thigh=%.3f shin=%.3f hipAboveAnkle=%.3f\n",
+                                 (double)hipJ.x, (double)hipJ.y, (double)kn.x, (double)kn.y,
+                                 (double)an.x, (double)an.y, (double)thigh, (double)shin,
+                                 (double)drop);
+                }
+                for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+                    const glm::vec3 ua = P(character.rig.armUp[sd]);
+                    const glm::vec3 la = P(character.rig.armLow[sd]);
+                    const glm::vec3 hd = P(character.rig.hand[sd]);
+                    std::fprintf(
+                        stderr,
+                        "[handdbg] %s shoulder=(%.3f,%.3f,%.3f) elbow=(%.3f,%.3f,%.3f) "
+                        "wrist=(%.3f,%.3f,%.3f) | from hip: dx=%+.3f dy=%+.3f dz=%+.3f\n",
+                        sd == 0 ? "L" : "R", (double)ua.x, (double)ua.y, (double)ua.z,
+                        (double)la.x, (double)la.y, (double)la.z, (double)hd.x, (double)hd.y,
+                        (double)hd.z, (double)(hd.x - hip.x), (double)(hd.y - hip.y),
+                        (double)(hd.z - hip.z));
+                }
             }
             // Where the lowest sole ended up after the shift: the number that says
             // "planted" (0) or "in the air" (>0). Printed in millimetres because

@@ -83,6 +83,8 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
     // A frozen clock is exactly this situation, so the apply path has to keep running
     // while the integrate path stops.
     const bool advance = dt > 0.0f;
+    // 微动时钟跟着真实时间走（不是跟着姿势时间）——它就是"这具身体还活着"的那条时间轴。
+    if (advance) clock_ += dt;
 
     const int count = chain.count;
 
@@ -133,7 +135,41 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
         target.y = -leanSide * gain * 8.0f;            // yaw: swing to the outside of a turn
         target.z = -liftAmount * gain * 6.0f;          // roll: flare on vertical motion
         target += glm::vec3(tuning.gravity * gain, 0.0f, 0.0f);   // hang under gravity
-        target.z += tuning.tuck * gain;                            // static inward tuck
+
+        // ---- 呼吸微动 ----
+        //
+        // 上面每一项都来自"根在动"或"腿在推"。角色站着不动时它们全是 0，弹簧收敛
+        // 到常数，链就彻底冻结了——头发/裙摆读作硬塑料。这里叠一个很慢很小的周期量，
+        // 相位按束错开（11 束头发、8 片裙摆不能同步摆），末端幅度更大。
+        if (tuning.breathe > 0.0f) {
+            const int strandLen = std::max(tuning.strandLength, 1);
+            const float ph = clock_ * 6.2831853f * tuning.breatheHz;
+            const float strandPhase = 0.9f * static_cast<float>(i % strandLen) +
+                                      2.1f * static_cast<float>(i / strandLen);
+            target.x += tuning.breathe * gain * std::sin(ph + strandPhase);
+            target.z += tuning.breathe * gain * 0.75f * std::cos(ph * 0.77f + strandPhase * 1.7f);
+        }
+        // Static tuck, SIGNED PER PANEL.
+        //
+        // `target` is expressed about WORLD axes (see PoseRotation above), so a single
+        // signed `tuck` rotates every panel the same way in world space - the whole skirt
+        // leans to one side instead of closing toward the midline. Which way a panel has
+        // to roll to move inward depends on which side of the body it hangs on, so the
+        // sign comes from the panel's own lateral offset from the chain root.
+        if (tuning.tuck != 0.0f) {
+            const glm::vec3 rootPos(world[chain[0]][3]);
+            const glm::vec3 sideAxis = glm::normalize(glm::vec3(world[chain[0]][0]));
+            const float lateral = glm::dot(glm::vec3(world[j][3]) - rootPos, sideAxis);
+            const float tuckSign = (lateral >= 0.0f) ? 1.0f : -1.0f;
+            // 幅度随"离中线多远"变化。
+            //
+            // 这具资产的裙片挂点本身就是歪的：量出来的根部半径一侧 +0.198 m、另一侧
+            // 只有 -0.071 m。等幅度内收救不了这种偏置——宽的一侧还是垂得更远。按
+            // 侧向距离加权之后，宽侧被收得更多，裙摆的重心才回到中线附近。
+            const float tuckScale =
+                std::clamp(std::abs(lateral) / 0.16f, 0.25f, 1.75f);
+            target.z += tuning.tuck * gain * tuckSign * tuckScale;
+        }
 
         // ---- cloth-vs-leg push ----
         //
@@ -148,12 +184,15 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
         if (!legPoints_.empty() && legRadius_ > 0.0f) {
             const glm::vec3 jointPos(world[j][3]);
             glm::vec3 push(0.0f);
-            for (const glm::vec3& lp : legPoints_) {
+            for (std::size_t pi = 0; pi < legPoints_.size(); ++pi) {
+                const glm::vec3& lp = legPoints_[pi];
+                const float radius = pi < legRadii_.size() ? legRadii_[pi] : legRadius_;
+                if (radius <= 0.0f) continue;
                 const glm::vec3 away = jointPos - lp;
                 const float dist = glm::length(away);
-                if (dist < 1e-5f || dist >= legRadius_) continue;
+                if (dist < 1e-5f || dist >= radius) continue;
                 // How deep the leg is inside this joint, as a 0..1 fraction of the radius.
-                const float depth = (legRadius_ - dist) / legRadius_;
+                const float depth = (radius - dist) / radius;
                 push += glm::normalize(away) * depth;
             }
             if (glm::length(push) > 1e-5f) {

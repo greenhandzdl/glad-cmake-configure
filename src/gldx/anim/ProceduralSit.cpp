@@ -110,7 +110,15 @@ void ProceduralSit::Sample(float t, std::vector<glm::mat4>& outPose) const {
         // `out` is kept as a small splay about the vertical axis instead, which is the
         // only direction that opens the knees without splaying the legs.
         rotate(rig_.legUp[s], rig_.side, -(tune.hip + asym));            // thigh forward
-        rotate(rig_.legUp[s], rig_.up, -tune.out * 0.25f * sideSign);    // knees slightly apart
+        // Twist first (about the thigh's own long axis - for a down-pointing leg, `up`
+        // IS that axis), then splay about `forward`. Both are right-multiplied, so they
+        // act in the bone's local frame and compose predictably.
+        rotate(rig_.legUp[s], rig_.up, tune.twist * sideSign);
+        // NOTE the sign: `-splay` measured thigh side=-0.79 on the LEFT leg, i.e. both
+        // thighs leaned toward EACH OTHER and the legs visibly crossed (user screenshot).
+        // Outward on this rig is +side*sideSign.
+        rotate(rig_.legUp[s], rig_.forward, tune.splay * sideSign);      // knees apart
+        rotate(rig_.legUp[s], rig_.up, -tune.out * 0.25f * sideSign);    // legacy twist
         // Shin folds back: same axis as the thigh, opposite direction.
         rotate(rig_.legLow[s], rig_.side, tune.knee);
 

@@ -164,10 +164,11 @@ void ProceduralRun::Sample(float t, std::vector<glm::mat4>& outPose) const {
     // 手臂：先放到贴着身体的基准角（跑步不需要走路那么多 A-pose 外展）。
     rotate(rig_.armUp[kRigLeft], rig_.forward, -tune.armDown);
     rotate(rig_.armUp[kRigRight], rig_.forward, +tune.armDown);
-    // SAME sign on both sides: `forward` is one world axis, so one signed angle is
-    // already mirrored in body terms. Opposite signs pushed both arms the same way in
-    // world space and left the two hands 19 cm apart (see ProceduralWalk).
-    rotate(rig_.armUp[kRigLeft], rig_.forward, -tune.armOut);
+    // MIRRORED, like the walk: this is an ABDUCTION (arm away from the torso), not a
+    // swing about a shared world axis. Both sides carried the same sign here, so both
+    // arms were pushed toward the same side of the body and one of them went out through
+    // the skirt while the other stayed inside it - the "arms stretched sideways" run.
+    rotate(rig_.armUp[kRigLeft], rig_.forward, tune.armOut);
     rotate(rig_.armUp[kRigRight], rig_.forward, -tune.armOut);
 
     const float yawDriver = left.hip / std::max(tune.hipSwing, 1e-4f);
@@ -183,16 +184,26 @@ void ProceduralRun::Sample(float t, std::vector<glm::mat4>& outPose) const {
         rotate(rig_.foot[s], rig_.side, leg.ankle);
         rotate(rig_.toe[s], rig_.side, leg.toe);
 
-        // 摆臂：对侧。跑步的摆幅比走路大，且肘角**基本固定**——走路时肘随摆动
-        // 屈伸，跑步时它锁在约 90°，靠肩在摆。这个差别正是"走"与"跑"的辨识点之一。
+        // 摆臂：对侧。跑步的摆幅比走路大。
         const float armSwingNorm = -(leg.hip / std::max(tune.hipSwing, 1e-4f));
         rotate(rig_.armUp[s], rig_.side, tune.armSwing * armSwingNorm);
         // NOT mirrored: `side` is one world axis, so the same signed angle already bends
         // both elbows the same way. Multiplying by a per-side sign folds one elbow
         // backward (measured: right forearm lost 0.44 of forward component).
-        rotate(rig_.armLow[s], rig_.side, -tune.elbowHold);
+        // 肘角随摆臂开合：前摆收得更紧、后摆打开。`armSwingNorm > 0` = 该侧手臂前摆。
+        // 锁死的肘角让整条小臂看起来焊在大臂上（只有大臂在动），是"跑起来手臂不像
+        // 在摆"的主因。
+        const float elbow = tune.elbowHold + tune.elbowSwing * armSwingNorm;
+        rotate(rig_.armLow[s], elbowAxis(rig_), -elbow);
         // 前臂略微外展，免得手扫到大腿。
-        rotate(rig_.armLow[s], rig_.up, 0.06f * (s == 0 ? 1.0f : -1.0f));
+        {
+            // 前臂内收：把前臂从"向外撇"拉回到身体前方。原先这里是 +0.06（向外），
+            // 实测前臂的侧向分量因此高达 0.89——画面上就是"两臂向两侧张开的跑姿"。
+            float add = 0.55f;
+            if (const char* ov = std::getenv("GLDX_FOREADD"))
+                add = static_cast<float>(std::atof(ov));
+            rotate(rig_.armLow[s], rig_.up, add * (s == 0 ? 1.0f : -1.0f));
+        }
         // 腕跟着摆一点点，不锁死。
         rotate(rig_.hand[s], rig_.side, -(0.10f + 0.12f * (0.5f - 0.5f * armSwingNorm)));
     }

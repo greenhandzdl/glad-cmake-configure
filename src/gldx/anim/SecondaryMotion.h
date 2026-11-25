@@ -67,6 +67,21 @@ struct ChainTuning {
      * 尾巴这种单根链填 1（或 count 本身都行，结果一样）。
      */
     int   strandLength = 1;
+
+    /**
+     * 呼吸微动的幅度（弧度）与频率（Hz）。
+     *
+     * **为什么需要它**：这一整套解算的目标只来自根的加速度（前倾、转向、竖直起伏）
+     * 和腿的推挤。角色**站着不动**时这些量全是 0，目标就是常数，弹簧收敛到常数后
+     * 链彻底冻结——画面读作"头发是塑料做的"，一动只有整体跟着头走。走路时幅度再
+     * 大也救不了静止帧。
+     *
+     * 所以加一个极慢的周期扰动：幅度按深度递增（末端晃得更多），相位按"束"错开，
+     * 这样 12 片裙摆不会像一块板子一起摆。数值要小到"说不出在动，但停下来就发现
+     * 它在动"——0.02 rad 在末端约 1 cm。
+     */
+    float breathe    = 0.0f;
+    float breatheHz  = 0.45f;
 };
 
 /**
@@ -104,10 +119,36 @@ public:
      */
     void SetLegProbes(const std::vector<glm::vec3>& points, float radius) {
         legPoints_ = points;
+        legRadii_.assign(points.size(), radius);
         legRadius_ = radius;
     }
 
+    /**
+     * Extra probes with their OWN radius (hands, props, whatever else pokes the cloth).
+     *
+     * A single radius for every probe is wrong by a factor of two: a thigh is ~11 cm
+     * across, a wrist is ~5. Feeding the hands in at thigh radius made the hem balloon
+     * out wherever an arm swung past it during a run - measured as the whole skirt
+     * flaring into a ball in the front view. The radius belongs to the probe, not to
+     * the mesh that owns the chain.
+     */
+    void AddProbes(const std::vector<glm::vec3>& points, float radius) {
+        for (const glm::vec3& p : points) {
+            legPoints_.push_back(p);
+            legRadii_.push_back(radius);
+        }
+    }
+
+    /** Drop every probe; call before rebuilding the set each frame. */
+    void ClearProbes() {
+        legPoints_.clear();
+        legRadii_.clear();
+    }
+
     [[nodiscard]] bool active() const noexcept { return !angle_.empty(); }
+
+    // 微动用的内部时钟（秒）。跨帧累加，静止时也走，所以"不动"的姿势里链仍在呼吸。
+    float clock_ = 0.0f;
 
 private:
     // Per-joint angular state, in the joint's own rest frame. Kept as a small vec3
@@ -120,7 +161,8 @@ private:
     glm::vec3              prevRootUp_{0.0f, 1.0f, 0.0f};
     // Leg sample points for the cloth-vs-leg push, refreshed every frame by the caller.
     std::vector<glm::vec3> legPoints_;
-    float                  legRadius_ = 0.0f;
+    std::vector<float>     legRadii_;
+    float                  legRadius_ = 0.0f;   // max radius, kept for the quick empty test
     bool                   primed_ = false;
 };
 

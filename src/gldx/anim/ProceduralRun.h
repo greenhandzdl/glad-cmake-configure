@@ -70,7 +70,14 @@ struct RunTuning {
 
     // 摆臂：跑步的肘屈曲几乎固定在大约 90°（走路是随摆动变化的），且摆幅更大。
     float armSwing = 0.96f;   // 真人约 55 deg
-    float elbowHold = 1.30f;         // rad，接近 90° 的固定屈肘
+    float elbowHold = 1.30f;         // rad，屈肘基准（约 75°）
+    // 肘角随摆臂**开合**，不是一个定值。
+    //
+    // 原实现把肘锁死在 elbowHold，注释还把它当成"跑与走的辨识点"。但画面上读到的
+    // 是"大臂在摆、小臂跟着大臂一起平移、相对角度不动"——小臂看起来像焊在大臂上。
+    // 真实的跑：手臂前摆时肘收得更紧（约 110°），后摆时打开（约 70°），这个开合
+    // 正是跑步手臂"有节奏"的来源，也是观众读速度的线索之一。
+    float elbowSwing = 0.34f;        // rad，肘角随摆臂的开合幅度
 
     float hipYaw   = 0.14f;
     float chestYaw = 0.22f;
@@ -89,11 +96,11 @@ struct RunTuning {
     // 像"参数没接上"。所以这个数必须按 bind pose 实际朝向算，不能跨资产照抄。
     //
     // bind pose 不是 A-pose 的资产，应当在自己的 tuning 里覆盖这一项。
-    float armDown = 0.790f;
+    float armDown = 1.000f;
     // Upper-arm abduction, same role as WalkTuning::armOut: with the arms hanging
     // straight down the hands sweep through the skirt. 0.40 rad was picked by eye
     // against the reference skirt (0.22 still intersected, 0.55 read as "arms held up").
-    float armOut = 0.28f;
+    float armOut = 0.12f;
 
     // 腾空高度（米）。这是**世界单位**，不在姿态里用——调用方拿 `AirborneWeightAt`
     // 乘在垂直位移上（见 ProceduralRun.h 文件头）。12 cm 是慢跑的量级：抬得再高
