@@ -4039,6 +4039,25 @@ int main(int argc, char** argv) {
         const float aspect = info.fbHeight > 0
                                  ? static_cast<float>(info.fbWidth) / static_cast<float>(info.fbHeight)
                                  : 1.0f;
+        // 拖拽的兜底：直接查按键状态，不信按下事件。
+        //
+        // 按下事件只有一条路径能到达（OnMouseButton）。若它因为窗口焦点、触控板
+        // 手势归属等原因没送到，`view.dragging` 永远是 false，光标回调里第一句就
+        // return——表现正是"按住拖，视角不动"。这里每帧查一次物理按键状态，按下
+        // 事件丢了也照样能转。
+        if (!view.dragging &&
+            (window.MouseIsDown(gldx::win::MouseButton::Left) ||
+             window.MouseIsDown(gldx::win::MouseButton::Right))) {
+            view.dragging = true;
+            const gldx::win::Vec2d c = window.CursorPos();
+            view.lastX = c.x;
+            view.lastY = c.y;
+        } else if (view.dragging &&
+                   !window.MouseIsDown(gldx::win::MouseButton::Left) &&
+                   !window.MouseIsDown(gldx::win::MouseButton::Right)) {
+            // 松开事件丢了也要能停下来，否则光标一动就转。
+            view.dragging = false;
+        }
         // `GLDX_SIM_DRAG=1`: synthesise the exact call the mouse callback would make,
         // bypassing event delivery. If the picture does NOT change with this on, the
         // fault is in the render path (Apply/settings); if it DOES change, the fault is
