@@ -120,8 +120,13 @@ struct SitTuning {
     // 手臂：肘微屈、手撑在身侧偏后。这是坐地时重心的第二种支撑，也解释了为什么
     // 上身可以只前倾 0.14 rad。
     float armDown   = 1.00f;   // rad，A-pose 下的基准
-    float armBack   = 0.55f;   // rad，向后（撑在身侧后方）
-    float elbowBend = 0.50f;   // rad
+    // 手放在大腿上，不是撑在身后。
+    //
+    // 原先 0.55 是照"跪坐/撑地"设计的。换成正坐（W 坐）以后，大腿向外前张开，
+    // 手臂再往后摆就把手推进了裙摆里——截图里两只手都看不见，只看到小臂从裙面
+    // 穿出来。改成略向前摆 + 屈肘加大，手自然落在大腿外侧靠近膝盖的位置。
+    float armBack   = -0.12f;  // rad，负数 = 向前
+    float elbowBend = 0.82f;   // rad，屈肘加大，前臂落到大腿上
     float armOut    = 0.30f;   // rad，前臂外展，手落到身体两侧
     float wristBack = 0.30f;   // rad，手掌向后翻，撑地
 

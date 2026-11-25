@@ -1338,6 +1338,29 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
             std::fprintf(stderr, "[anim-rigid]   bone %d '%s' carries %zu verts\n", b,
                          data.skeleton.bones()[(std::size_t)b].name.c_str(), perBone[(std::size_t)b]);
         }
+        // ---- 裙摆链骨到底带不带顶点？----
+        //
+        // 这一条必须先回答，否则"裙摆解算"可能只是在改一组不带任何几何的骨骼：
+        // 解算写得再对，画面也不会动，而"腿穿过裙面"看起来就像解算没生效。
+        {
+            const auto& sk = character.rig.chains[static_cast<int>(gldx::RigChainKind::Skirt)];
+            std::size_t carrier = 0;
+            for (int i = 0; i < sk.count; ++i) {
+                const int b = sk.bones[i];
+                if (b < 0) continue;
+                carrier += perBone[(std::size_t)b];
+            }
+            std::fprintf(stderr,
+                         "[anim-rigid] skirt chain: %d bones, %zu weighted vertices total\n",
+                         sk.count, carrier);
+            for (int i = 0; i < sk.count; ++i) {
+                const int b = sk.bones[i];
+                if (b < 0) continue;
+                std::fprintf(stderr, "[anim-rigid]   skirt[%2d] bone %d '%s' -> %zu verts\n", i, b,
+                             data.skeleton.bones()[(std::size_t)b].name.c_str(),
+                             perBone[(std::size_t)b]);
+            }
+        }
         std::vector<std::pair<std::size_t, std::size_t>> top;
         for (std::size_t i = 0; i < perBone.size(); ++i)
             if (perBone[i] > 0) top.emplace_back(perBone[i], i);
@@ -1795,7 +1818,7 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         t[static_cast<int>(RigChainKind::Tail)].breatheHz = 0.35f;
         t[static_cast<int>(RigChainKind::Ear)].breathe    = 0.010f;
         t[static_cast<int>(RigChainKind::Ear)].breatheHz  = 0.55f;
-        t[static_cast<int>(RigChainKind::Skirt)].breathe  = 0.011f;
+        t[static_cast<int>(RigChainKind::Skirt)].breathe  = 0.006f;
         t[static_cast<int>(RigChainKind::Skirt)].breatheHz = 0.33f;
         // 取证开关：把微动整体关掉，用来分清"末端的摆动来自微动"还是"来自待机动作本身"。
         if (const char* off = std::getenv("GLDX_NOBREATHE")) {
@@ -2833,6 +2856,17 @@ int main(int argc, char** argv) {
     // Input goes through the gldxwin surface only (GLFW's user pointer belongs to
     // that library). A drag orbits, the wheel scales the distance.
     window.OnCursor([&view](gldx::win::Window&, gldx::win::Vec2d pos) {
+        // `GLDX_INPUT=1`: prove the event actually arrives. "The drag does nothing" has
+        // three very different causes (no events / events ignored / camera not applied)
+        // and reading the code cannot tell them apart. The synthetic-drag probe
+        // (`GLDX_SIM_DRAG`) already proved the last one is fine, so this separates the
+        // first two.
+        if (std::getenv("GLDX_INPUT") && view.dragging) {
+            static int n = 0;
+            if (n++ % 10 == 0)
+                std::fprintf(stderr, "[input] cursor pos=(%.1f,%.1f) dragging=1\n",
+                             (double)pos.x, (double)pos.y);
+        }
         if (!view.dragging) return;
         view.orbit.Drag(glm::vec2(static_cast<float>(pos.x - view.lastX),
                                   static_cast<float>(pos.y - view.lastY)));
@@ -2841,7 +2875,14 @@ int main(int argc, char** argv) {
     });
     window.OnMouseButton([&view](gldx::win::Window& w, gldx::win::MouseButton button,
                                  gldx::win::KeyAction action, int) {
-        if (button != gldx::win::MouseButton::Left) return;
+        // Left OR right button orbits. Left is the documented control; right is here
+        // because a trackpad drag can be ambiguous about which button the OS reports,
+        // and "nothing happens" is a much worse failure than "two buttons work".
+        if (button != gldx::win::MouseButton::Left &&
+            button != gldx::win::MouseButton::Right) return;
+        if (std::getenv("GLDX_INPUT"))
+            std::fprintf(stderr, "[input] button=%d action=%d\n", static_cast<int>(button),
+                         static_cast<int>(action));
         view.dragging = action == gldx::win::KeyAction::Press;
         const gldx::win::Vec2d c = w.CursorPos();
         view.lastX = c.x;
@@ -2856,6 +2897,12 @@ int main(int argc, char** argv) {
                                  gldx::win::KeyAction action, int) {
         if (action == gldx::win::KeyAction::Release) return;
         switch (key) {
+            // Keyboard orbit as a fallback, so the camera is never unreachable when
+            // the pointer path misbehaves on some window manager.
+            case gldx::win::Key::Left:  view.orbit.Drag(glm::vec2(-40.0f, 0.0f)); break;
+            case gldx::win::Key::Right: view.orbit.Drag(glm::vec2(40.0f, 0.0f)); break;
+            case gldx::win::Key::Up:    view.orbit.Drag(glm::vec2(0.0f, -30.0f)); break;
+            case gldx::win::Key::Down:  view.orbit.Drag(glm::vec2(0.0f, 30.0f)); break;
             case gldx::win::Key::W: view.walk = !view.walk; break;
             case gldx::win::Key::G: view.ground = !view.ground; break;
             case gldx::win::Key::F: view.wireframe = !view.wireframe; break;
@@ -3437,11 +3484,27 @@ int main(int argc, char** argv) {
                 // capsule chain would be better but the hem is short and the three
                 // points per leg already stop the visible intersection.
                 std::vector<glm::vec3> legPts;
+                std::vector<float> legRads;
                 for (int sd = 0; sd < gldx::kRigSides; ++sd) {
-                    for (int b : {character.rig.legUp[sd], character.rig.legLow[sd],
-                                  character.rig.foot[sd]}) {
-                        if (b >= 0) legPts.emplace_back(smWorld[(std::size_t)b][3]);
+                    const int bu = character.rig.legUp[sd];
+                    const int bl = character.rig.legLow[sd];
+                    const int bf = character.rig.foot[sd];
+                    const float rad = 0.125f * model.unitScale() * 10.0f;   // thigh radius
+                    if (bu >= 0) { legPts.emplace_back(smWorld[(std::size_t)bu][3]); legRads.push_back(rad); }
+                    // 大腿中点也要一个探针。
+                    //
+                    // 原先只有髋/膝/踝三点。腿往前摆时膝盖跑到髋**前面**，而小腿仍是
+                    // 竖直的，于是"髋到膝"这一段的中段正好扫过下摆前片——那里没有探针，
+                    // 布面就不会被推开，腿直接从裙面穿出来。加点比加半径有效：半径调大
+                    // 会把整圈裙撑开，中点只补上缺的那一段。
+                    if (bu >= 0 && bl >= 0) {
+                        const glm::vec3 hipP(smWorld[(std::size_t)bu][3]);
+                        const glm::vec3 kneeP(smWorld[(std::size_t)bl][3]);
+                        legPts.emplace_back(glm::mix(hipP, kneeP, 0.55f));
+                        legRads.push_back(rad * 0.95f);
                     }
+                    if (bl >= 0) { legPts.emplace_back(smWorld[(std::size_t)bl][3]); legRads.push_back(rad * 0.90f); }
+                    if (bf >= 0) { legPts.emplace_back(smWorld[(std::size_t)bf][3]); legRads.push_back(rad * 0.85f); }
                 }
                 // Hands and forearms join the same probe set.
                 //
@@ -3457,7 +3520,18 @@ int main(int argc, char** argv) {
                         if (b >= 0) handPts.emplace_back(smWorld[(std::size_t)b][3]);
                     }
                 }
-                const float legRadius = 0.11f * model.unitScale() * 10.0f;   // ~thigh radius
+                // 小臂中点：手往后摆时穿过裙摆的是这一段。
+                std::vector<glm::vec3> armMidPts;
+                for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+                    const int bu = character.rig.armUp[sd];
+                    const int bl = character.rig.armLow[sd];
+                    if (bu >= 0 && bl >= 0) {
+                        armMidPts.emplace_back(glm::mix(glm::vec3(smWorld[(std::size_t)bu][3]),
+                                                        glm::vec3(smWorld[(std::size_t)bl][3]),
+                                                        0.6f));
+                    }
+                }
+                const float legRadius = 0.125f * model.unitScale() * 10.0f;   // ~thigh radius
                 for (int ci = 0; ci < gldx::RigChainKindCount; ++ci) {
                     const auto kind = static_cast<gldx::RigChainKind>(ci);
                     if (!character.rig.hasChain(kind)) continue;
@@ -3465,10 +3539,13 @@ int main(int argc, char** argv) {
                     // Only the skirt has legs inside it.
                     if (kind == gldx::RigChainKind::Skirt) {
                         character.chainSolvers[ci].SetLegProbes(legPts, legRadius);
-                        // Hands get their OWN, much smaller radius. Merging them into the
-                        // leg set made every swinging arm blow the hem out like a balloon
-                        // (thigh radius 0.11 m on a 5 cm wrist).
-                        character.chainSolvers[ci].AddProbes(handPts, 0.050f);
+                        for (std::size_t pi = 0; pi < legRads.size(); ++pi)
+                            character.chainSolvers[ci].AddProbes({legPts[pi]}, legRads[pi]);
+                        // 手用小半径，而且**肩到肘**也要有探针：手往后摆时穿的是小臂，
+                        // 不是手腕那一点。
+                        character.chainSolvers[ci].AddProbes(handPts, 0.048f);
+                        for (std::size_t pi = 0; pi < armMidPts.size(); ++pi)
+                            character.chainSolvers[ci].AddProbes({armMidPts[pi]}, 0.045f);
                     }
                     const gldx::ChainTuning& tk = character.chainTune[ci];
                     character.chainSolvers[ci].Solve(character.rig.chains[ci], character.pose,
@@ -3604,11 +3681,41 @@ int main(int argc, char** argv) {
                 //
                 // Amount is measured against the poke-through, not guessed: see the
                 // `--action sit` front view.
+                // 步态时下摆略微"骑上去"。
+                //
+                // 短裙 + 摆腿：大腿一旦摆过下摆边缘，布面再怎么被推开也挡不住那条腿
+                // 切过下摆线——真实的短裙是靠下摆**沿腿滑上去**的。给一个很小的抬升
+                // 与外扩，让下摆贴着大腿走，而不是停在原地被切开。
+                if (!seated &&
+                    (view.requestAction == Action::Walk ||
+                     view.requestAction == Action::Run ||
+                     view.requestAction == Action::CrouchWalk)) {
+                    float gaitLift = 0.020f;
+                    if (const char* ov = std::getenv("GLDX_GAITLIFT"))
+                        gaitLift = static_cast<float>(std::atof(ov));
+                    const int ks = static_cast<int>(gldx::RigChainKind::Skirt);
+                    const int kc = character.rig.chains[ks].count;
+                    const glm::vec3 hipP(character.palette[(std::size_t)character.rig.hips][3]);
+                    for (int i = 0; i < kc; ++i) {
+                        const int b = character.rig.chains[ks].bones[i];
+                        if (b < 0 || static_cast<std::size_t>(b) >= character.palette.size())
+                            continue;
+                        glm::mat4& m = character.palette[static_cast<std::size_t>(b)];
+                        m[3][1] += gaitLift;
+                        glm::vec3 rad(m[3][0] - hipP.x, 0.0f, m[3][2] - hipP.z);
+                        const float len = glm::length(rad);
+                        if (len > 1.0e-4f) {
+                            rad /= len;
+                            m[3][0] += rad.x * 0.012f;
+                            m[3][2] += rad.z * 0.012f;
+                        }
+                    }
+                }
                 if (seated) {
-                    float skirtLift = 0.070f;
+                    float skirtLift = 0.045f;
                     if (const char* ov = std::getenv("GLDX_SKIRTLIFT"))
                         skirtLift = static_cast<float>(std::atof(ov));
-                    float skirtFlare = 0.090f;
+                    float skirtFlare = 0.200f;
                     if (const char* ov = std::getenv("GLDX_SKIRTFLARE"))
                         skirtFlare = static_cast<float>(std::atof(ov));
                     const int ks = static_cast<int>(gldx::RigChainKind::Skirt);
@@ -3682,6 +3789,63 @@ int main(int argc, char** argv) {
                 }
                 (void)low;
             }
+            }
+            if (const char* penv = std::getenv("GLDX_PEN")) {
+                // 穿模量化：对每个腿部/手部探针，找最近的裙摆骨骼，若距离小于探针半径
+                // 就说明布面被穿过去了，穿透深度 = 半径 - 距离。扫相位取最大值。
+                (void)penv;
+                std::vector<glm::mat4> pw;
+                character.model.skeleton().ComputeWorld(character.pose, character.model.Mat4(), pw);
+                const auto& skc2 = character.rig.chains[static_cast<int>(gldx::RigChainKind::Skirt)];
+                float worst = 0.0f;
+                if (skc2.count > 0) {
+                    std::vector<glm::vec3> pts;
+                    for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+                        const int bu = character.rig.legUp[sd], bl = character.rig.legLow[sd];
+                        const int bf = character.rig.foot[sd];
+                        const int au = character.rig.armUp[sd], al = character.rig.armLow[sd];
+                        const int bh = character.rig.hand[sd];
+                        if (bu >= 0) pts.emplace_back(pw[(std::size_t)bu][3]);
+                        if (bu >= 0 && bl >= 0)
+                            pts.emplace_back(glm::mix(glm::vec3(pw[(std::size_t)bu][3]),
+                                                      glm::vec3(pw[(std::size_t)bl][3]), 0.55f));
+                        if (bl >= 0) pts.emplace_back(pw[(std::size_t)bl][3]);
+                        if (bf >= 0) pts.emplace_back(pw[(std::size_t)bf][3]);
+                        if (au >= 0 && al >= 0)
+                            pts.emplace_back(glm::mix(glm::vec3(pw[(std::size_t)au][3]),
+                                                      glm::vec3(pw[(std::size_t)al][3]), 0.6f));
+                        if (bh >= 0) pts.emplace_back(pw[(std::size_t)bh][3]);
+                    }
+                    for (const glm::vec3& p3 : pts) {
+                        float best = 1e9f;
+                        for (int i = 0; i < skc2.count; ++i) {
+                            const int b = skc2.bones[i];
+                            if (b < 0 || static_cast<std::size_t>(b) >= pw.size()) continue;
+                            best = std::min(best, glm::distance(p3, glm::vec3(pw[(std::size_t)b][3])));
+                        }
+                        const float radius = 0.11f;
+                        worst = std::max(worst, radius - best);
+                    }
+                }
+                // 手到同侧大腿轴线的距离：坐姿下"手插进大腿"就是这么量的。
+                {
+                    float hd = 1e9f;
+                    for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+                        const int bh = character.rig.hand[sd];
+                        const int bu = character.rig.legUp[sd];
+                        const int bl = character.rig.legLow[sd];
+                        if (bh < 0 || bu < 0 || bl < 0) continue;
+                        const glm::vec3 h(pw[(std::size_t)bh][3]);
+                        const glm::vec3 a(pw[(std::size_t)bu][3]);
+                        const glm::vec3 b(pw[(std::size_t)bl][3]);
+                        const glm::vec3 ab = b - a;
+                        const float t = glm::clamp(glm::dot(h - a, ab) / std::max(glm::dot(ab, ab), 1e-6f),
+                                                   0.0f, 1.0f);
+                        hd = std::min(hd, glm::distance(h, a + ab * t));
+                    }
+                    std::fprintf(stderr, "[pen] handToThighAxis=%.4f\n", (double)hd);
+                }
+                std::fprintf(stderr, "[pen] worst=%.4f\n", (double)worst);
             }
             if (std::getenv("GLDX_SKIRTSYM")) {
                 std::vector<glm::mat4> bw;
@@ -3783,6 +3947,25 @@ int main(int argc, char** argv) {
         const float aspect = info.fbHeight > 0
                                  ? static_cast<float>(info.fbWidth) / static_cast<float>(info.fbHeight)
                                  : 1.0f;
+        // `GLDX_SIM_DRAG=1`: synthesise the exact call the mouse callback would make,
+        // bypassing event delivery. If the picture does NOT change with this on, the
+        // fault is in the render path (Apply/settings); if it DOES change, the fault is
+        // that the cursor/button events never arrive. Reading the code cannot tell those
+        // two apart, and they need completely different fixes.
+        if (std::getenv("GLDX_SIM_DRAG")) {
+            static int simFrames = 0;
+            if (++simFrames == 20) {
+                view.orbit.Drag(glm::vec2(120.0f, 0.0f));
+                std::fprintf(stderr, "[simdrag] yaw now %.4f\n",
+                             (double)view.orbit.settings().yaw);
+            }
+        }
+        // `GLDX_INPUT=1` prints every event the window library actually delivers, so
+        // "the drag does nothing" can be split into "no events" vs "events ignored".
+        if (std::getenv("GLDX_INPUT")) {
+            std::fprintf(stderr, "[input] frame=%d dragging=%d yaw=%.4f\n", view.drawCalls,
+                         view.dragging ? 1 : 0, (double)view.orbit.settings().yaw);
+        }
         view.orbit.Apply(view.fov, aspect, 0.05f, 200.0f);
         camera = view.orbit.camera();
 

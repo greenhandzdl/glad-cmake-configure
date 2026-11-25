@@ -184,6 +184,7 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
         if (!legPoints_.empty() && legRadius_ > 0.0f) {
             const glm::vec3 jointPos(world[j][3]);
             glm::vec3 push(0.0f);
+            float pushDepth = 0.0f;
             for (std::size_t pi = 0; pi < legPoints_.size(); ++pi) {
                 const glm::vec3& lp = legPoints_[pi];
                 const float radius = pi < legRadii_.size() ? legRadii_[pi] : legRadius_;
@@ -194,12 +195,26 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
                 // How deep the leg is inside this joint, as a 0..1 fraction of the radius.
                 const float depth = (radius - dist) / radius;
                 push += glm::normalize(away) * depth;
+                pushDepth += depth;
             }
-            if (glm::length(push) > 1e-5f) {
+            // 强度必须**正比于穿透深度**。
+            //
+            // 这里原来写的是 `glm::normalize(push)` 之后再取 `glm::length(push)`——
+            // 归一化之后长度恒为 1，于是 mag 恒等于 1：任何一个探针只要进到半径内，
+            // 不管只擦到边缘还是深深插进去，都会触发满强度 0.9 rad 的一推。画面上
+            // 就是"手/腿一挨到裙摆，整片布猛地鼓开"，紧接着因为布已经鼓走、只剩
+            // 弹簧滞后，腿前摆和手后摆就直接从裙面穿出去。
+            //
+            // 改成累加**深度**而不是累加方向：浅接触给一点点推，深穿透才给满力。
+            if (pushDepth > 1e-5f) {
                 push = glm::normalize(push);
-                const float mag = std::min(glm::length(push) * 2.0f, 1.0f);
-                target.x += push.x * mag * 0.9f;
-                target.z += push.z * mag * 0.9f;
+                // 深度用 sqrt 而不是线性：浅接触也要给一点推，否则"刚好擦到"的腿/手
+                // 会让布面完全不动、直接穿过去；深穿透时又能到满力。
+                const float mag = std::min(std::sqrt(std::min(pushDepth, 1.0f)) * 1.15f, 1.0f);
+                // 上限 2.2 rad：短裙 + 大幅摆腿时，0.9 rad 的布面偏转不足以让下摆
+                // 骑到大腿外面，腿就从下摆边缘切出去（实测 walk 相位 0.45 仍有 3.7 cm）。
+                target.x += push.x * mag * 2.2f;
+                target.z += push.z * mag * 2.2f;
             }
         }
 
