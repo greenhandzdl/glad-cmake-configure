@@ -1,5 +1,7 @@
 module;
 
+#include <cstdlib>
+
 #include "gldx/gmf.hpp"
 
 #include <algorithm>
@@ -87,6 +89,7 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
     if (advance) clock_ += dt;
 
     const int count = chain.count;
+    const int strandLenDbg = tuning.strandLength;
 
     // Root motion: how far the chain's base moved this frame, and how much it rotated.
     // Derived from the world matrices rather than from the pose source, because the
@@ -113,6 +116,55 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
     const glm::vec3 side = glm::normalize(glm::cross(up, glm::vec3(0.0f, 0.0f, 1.0f) + up * 1e-3f));
     const glm::vec3 fwd = glm::normalize(glm::cross(side, up));
 
+    // 根的**速度**与**加速度**。
+    //
+    // 上面三个量用的还是每帧位移 `delta`：那是"每帧多少米"，本身带上了帧率
+    // （120 Hz 与 60 Hz 差一倍），只是历史上按 120 Hz 调过来才显得能用。这里
+    // 一并换成每秒量，惯性和帧率就脱钩了。
+    // `advance` 决定"这一帧是不是真的过去了"。
+    //
+    // Solve 每帧会被调用很多次：冻结的前 kSettleSteps 步是一个循环里的几百次
+    // `advance=false` 的迭代。若在那些迭代里也更新上一帧位置，速度就永远是
+    // "当前帧减当前帧"= 0——探针拖拽、惯性这些**差分**驱动会整体失效，而且失效得
+    // 很隐蔽：画面只是"不动"，看起来像没接上。
+    const float idt = 1.0f / std::max(dt, 1.0e-4f);
+    const glm::vec3 vel = advance ? delta * idt : glm::vec3(0.0f);
+    glm::vec3 acc = advance ? (vel - prevRootVel_) * idt : glm::vec3(0.0f);
+    // 首帧/断电后重置时加速度会炸，限幅到 40 m/s²（约 4 g 的粗活）。
+    if (glm::length(acc) > 40.0f) acc = glm::normalize(acc) * 40.0f;
+    if (advance) prevRootVel_ = vel;
+    const float accFwd = glm::dot(acc, fwd);
+    const float accUp  = glm::dot(acc, up);
+
+    // ---- 探针速度：腿扫过时把布"拖"着走 ----
+    //
+    // 探针只被用来"推开"布，所以腿一旦离开半径，布立刻回位，中间那段什么都没有。
+    // 加上速度项之后，腿扫过的整个过程布都被拖着，走过去以后再由弹簧摆回来——
+    // 一步一次可见摆动，方向跟着腿走。
+    std::vector<glm::vec3> probeVel(legPoints_.size(), glm::vec3(0.0f));
+    if (tuning.probeDrag != 0.0f && advance) {
+        if (prevProbePos_.size() != legPoints_.size()) {
+            prevProbePos_.assign(legPoints_.size(), glm::vec3(0.0f));
+            for (std::size_t pi = 0; pi < legPoints_.size(); ++pi)
+                prevProbePos_[pi] = legPoints_[pi];
+        }
+        if (std::getenv("GLDX_PROBEDBG")) {
+            static int n = 0;
+            if (n++ % 20 == 0)
+                std::fprintf(stderr, "[probe] n=%zu prev0=(%.3f,%.3f,%.3f) cur0=(%.3f,%.3f,%.3f)\n",
+                             legPoints_.size(), (double)prevProbePos_[0].x,
+                             (double)prevProbePos_[0].y, (double)prevProbePos_[0].z,
+                             (double)legPoints_[0].x, (double)legPoints_[0].y,
+                             (double)legPoints_[0].z);
+        }
+        for (std::size_t pi = 0; pi < legPoints_.size(); ++pi) {
+            glm::vec3 v = (legPoints_[pi] - prevProbePos_[pi]) * idt;
+            if (glm::length(v) > 30.0f) v = glm::normalize(v) * 30.0f;   // 传送/切动作时别炸
+            probeVel[pi] = v;
+            prevProbePos_[pi] = legPoints_[pi];
+        }
+    }
+
     const float leanFwd = glm::dot(delta, fwd);
     const float leanSide = glm::dot(delta, side);
     // Vertical motion drives the "flare" axis: landing pushes the hem out, jumping
@@ -134,7 +186,62 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
         target.x = -leanFwd * gain * 8.0f;             // pitch: lean back when moving fwd
         target.y = -leanSide * gain * 8.0f;            // yaw: swing to the outside of a turn
         target.z = -liftAmount * gain * 6.0f;          // roll: flare on vertical motion
-        target += glm::vec3(tuning.gravity * gain, 0.0f, 0.0f);   // hang under gravity
+        target += glm::vec3(tuning.gravity * gain, 0.0f, 0.0f);   // 常数偏置（见头文件）
+
+        // ---- 步态驱动：前片跟前面的腿，后片跟后面的腿 ----
+        //
+        // **直接叠加到关节角度**，不走弹簧。理由：`StepSpring` 的固有频率上限是
+        // `sqrt(1.0*60)=7.7 rad/s`（约 1.2 Hz），而步频约 1 Hz —— 弹簧跟这种周期性
+        // 目标只会严重衰减（实测目标 ±0.6 rad、弹簧只出 ±0.08 rad，画面上就是
+        // "裙子还是没动"）。摆动是**确定性信号**，直接给；二次响应才留给弹簧。
+        float gaitAngleX = 0.0f;
+        float gaitAngleZ = 0.0f;
+        if (tuning.gaitDrive != 0.0f) {
+            const glm::vec3 outw = glm::vec3(world[bone][3]) - glm::vec3(world[chain[0]][3]);
+            glm::vec3 outh(outw.x, 0.0f, outw.z);
+            const float olen = glm::length(outh);
+            if (olen > 1.0e-4f) {
+                outh /= olen;
+                const float sideSign = glm::dot(outh, side) >= 0.0f ? 1.0f : -1.0f;
+                const float fwdFactor = glm::dot(outh, fwd);       // +1 正前, -1 正后
+                const float sw = (sideSign > 0.0f ? tuning.gaitSwingL : tuning.gaitSwingR);
+                // 前片逆着腿的方向往前推、后片跟着往后：用 fwdFactor 加权即可。
+                gaitAngleX = tuning.gaitDrive * gain * sw * (0.55f + 0.45f * fwdFactor);
+                gaitAngleZ = tuning.gaitDrive * 0.20f * gain * sw * std::abs(sw) * sideSign;
+            }
+        }
+
+        // ---- 探针拖拽：离该关节最近的几个探针，按接近程度加权 ----
+        if (tuning.probeDrag != 0.0f && !legPoints_.empty()) {
+            glm::vec3 drag(0.0f);
+            float wsum = 0.0f;
+            for (std::size_t pi = 0; pi < legPoints_.size(); ++pi) {
+                const float d = glm::distance(glm::vec3(world[bone][3]), legPoints_[pi]);
+                const float reach = std::max(legRadii_[pi], 1e-3f) * 3.0f;   // 影响半径 = 3 倍探针半径
+                const float w = std::clamp(1.0f - d / reach, 0.0f, 1.0f);
+                if (w <= 0.0f) continue;
+                drag += probeVel[pi] * w;
+                wsum += w;
+            }
+            if (wsum > 1e-4f) drag /= wsum;
+            if (std::getenv("GLDX_PROBEDBG")) {
+                static int n2 = 0;
+                if (n2++ % 20 == 0)
+                    std::fprintf(stderr, "[drag] pd=%.3f wsum=%.3f drag=(%.3f,%.3f,%.3f)\n",
+                                 (double)tuning.probeDrag, (double)wsum, (double)drag.x,
+                                 (double)drag.y, (double)drag.z);
+            }
+            target.x -= glm::dot(drag, fwd) * tuning.probeDrag * gain;
+            target.z -= glm::dot(drag, up) * tuning.probeDrag * 0.6f * gain;
+        }
+
+        // ---- 惯性：布面滞后于根的加速度 ----
+        //
+        // 符号与 `leanFwd` 那条一致地取负：身体往前加速，布面往后甩。
+        if (tuning.inertia != 0.0f)
+            target.x -= accFwd * tuning.inertia * gain;
+        if (tuning.inertiaZ != 0.0f)
+            target.z -= accUp * tuning.inertiaZ * gain;
 
         // ---- 呼吸微动 ----
         //
@@ -218,6 +325,15 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
             }
         }
 
+        if (std::getenv("GLDX_SOLVERDBG") && i == 2 && count > 20) {
+            static int n = 0;
+            if (n++ % 12 == 0)
+                std::fprintf(stderr,
+                             "[solver] count=%d gd=%.2f tip target=(%+.3f,%+.3f,%+.3f) angle=(%+.3f,%+.3f,%+.3f)\n",
+                             count, (double)tuning.gaitDrive,
+                             (double)target.x, (double)target.y, (double)target.z,
+                             (double)angle_[j].x, (double)angle_[j].y, (double)angle_[j].z);
+        }
         if (advance) {
             StepSpring(angle_[j].x, omega_[j].x, target.x, tuning.stiffness, tuning.damping, dt);
             StepSpring(angle_[j].y, omega_[j].y, target.y, tuning.stiffness, tuning.damping, dt);
@@ -229,14 +345,19 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
         // below what a 12-panel skirt resolves, and the alternative (full quaternion
         // integration) would buy nothing visible here.
         glm::mat4 rot(1.0f);
-        rot = glm::rotate(rot, angle_[j].x, glm::vec3(1.0f, 0.0f, 0.0f));
+        // 直接叠加的步态角也必须限幅：它绕过了 `StepSpring` 里那道 0.6 rad 的夹紧，
+        // 不限的话极端姿态下裙片会翻过去（碗状）。
+        const float gx = std::clamp(angle_[j].x + gaitAngleX, -0.6f, 0.6f);
+        rot = glm::rotate(rot, gx, glm::vec3(1.0f, 0.0f, 0.0f));
         rot = glm::rotate(rot, angle_[j].y, glm::vec3(0.0f, 1.0f, 0.0f));
-        rot = glm::rotate(rot, angle_[j].z, glm::vec3(0.0f, 0.0f, 1.0f));
+        rot = glm::rotate(rot, angle_[j].z + gaitAngleZ, glm::vec3(0.0f, 0.0f, 1.0f));
         local[static_cast<std::size_t>(bone)] = local[static_cast<std::size_t>(bone)] * rot;
     }
 
-    prevRootPos_[0] = rootPos;
-    prevRootUp_ = rootUp;
+    if (advance) {
+        prevRootPos_[0] = rootPos;
+        prevRootUp_ = rootUp;
+    }
 }
 
 }  // namespace gldx

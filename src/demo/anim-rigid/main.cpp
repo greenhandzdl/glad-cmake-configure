@@ -329,6 +329,8 @@ struct Character {
     // Per-kind chain parameters. Values are asset properties (how many panels, how
     // soft), so they live here rather than in the engine - same rule as WalkTuning.
     gldx::ChainTuning chainTune[gldx::RigChainKindCount];
+    float gaitSwingL = 0.0f;   // 左膝相对左髋的前向位移（米）
+    float gaitSwingR = 0.0f;
     float sitRise    = 0.0f;
     // MMD `捩`（twist）bones that sit directly under the UPPER arm instead of the
     // forearm. Gloves and cuffs are weighted to them, so unless they are rotated with
@@ -1802,8 +1804,19 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
         // With the old flattened-index gain, panel 1 moved at 0.45 and panel 8 at 1.0 -
         // one side of the hem puffed out while the other stayed skin-tight, and it never
         // evened out because the two sides were being driven at different strengths.
-        gldx::ChainTuning skirtTune{0.10f, 0.975f, 0.30f, /*tuck*/-0.16f};
+        // gravity 从 0.30 改成 0：那一项是**常数向后仰**，不是"垂下来"。整圈下摆
+        // 永久停在身后 17°，走路时也照样停在那儿——"裙子一直往后、而且不动"就是它。
+        // 静止时不加偏置，rest 姿态本来就是自然下垂的。
+        gldx::ChainTuning skirtTune{0.10f, 0.960f, 0.0f, /*tuck*/-0.16f};
         skirtTune.strandLength = 3;
+        // 随步频摆起来：每迈一步身体的上下起伏与前后摆给出非零加速度，布面按
+        // -acc 滞后。没有这一项时，原地走的 demo 驱动量恒为 0。
+        skirtTune.inertia  = 0.20f;
+        skirtTune.inertiaZ = 0.045f;
+        // 腿扫过时把下摆拖着走（m/s -> rad）。这是"走路时裙子在动"的主要来源。
+        skirtTune.probeDrag = 1.10f;
+        // 步态驱动（m -> rad）。膝盖前后摆约 ±0.16 m，乘 2.6 得到约 ±0.4 rad 的摆动。
+        skirtTune.gaitDrive = 2.60f;
         t[static_cast<int>(RigChainKind::Skirt)] = skirtTune;
         t[static_cast<int>(RigChainKind::Hair)]  = gldx::ChainTuning{0.13f, 0.970f, 0.18f};
         t[static_cast<int>(RigChainKind::Tail)]  = gldx::ChainTuning{0.12f, 0.965f, 0.12f};
@@ -3532,6 +3545,47 @@ int main(int argc, char** argv) {
                     }
                 }
                 const float legRadius = 0.125f * model.unitScale() * 10.0f;   // ~thigh radius
+
+                // ---- 两侧大腿的前后摆幅（膝盖相对髋的前向位移，米）----
+                //
+                // 这是"走路时裙摆要动"的信号源。髋关节在这个原地走的 demo 里不平移，
+                // 所以按探针邻近度加权得到的驱动量恒为 0（实测 0.000）；膝盖的位移
+                // 才是真正在变的量。
+                {
+                    const glm::mat4 hipM = smWorld[(std::size_t)character.rig.hips];
+                    const glm::vec3 fwdW = glm::normalize(glm::vec3(hipM[2]) * -1.0f +
+                                                          glm::vec3(0.0f));   // 恒等于朝前
+                    (void)fwdW;
+                    // 用骨架的 restWorld 前向做参考：模型正面朝 -Z（与相机约定一致）。
+                    // 只有步态动作才下发摆腿信号。
+                    //
+                    // 坐姿/跪姿里膝盖是**前折**的，`knee - hip` 的前向分量很大（0.2~0.3 m），
+                    // 若照样下发，每片裙摆会被恒定推 0.6 rad 外翻，整条裙子翻成一个向上
+                    // 开的碗（用户截图就是这个）。摆动是步态的特征，不是姿态的特征。
+                    const bool gaitActive =
+                        view.requestAction == Action::Walk ||
+                        view.requestAction == Action::Run ||
+                        view.requestAction == Action::CrouchWalk;
+                    const glm::vec3 fwdRef(0.0f, 0.0f, -1.0f);
+                    for (int sd = 0; sd < gldx::kRigSides; ++sd) {
+                        const int bu = character.rig.legUp[sd];
+                        const int bl = character.rig.legLow[sd];
+                        if (bu < 0 || bl < 0) continue;
+                        const glm::vec3 hip(smWorld[(std::size_t)bu][3]);
+                        const glm::vec3 knee(smWorld[(std::size_t)bl][3]);
+                        const float sw = glm::dot(knee - hip, fwdRef);
+                        const float gated = gaitActive ? sw : 0.0f;
+                        if (sd == 0) character.gaitSwingL = gated;
+                        else         character.gaitSwingR = gated;
+                    }
+                    if (std::getenv("GLDX_GAITDBG")) {
+                        static int n = 0;
+                        if (n++ % 12 == 0)
+                            std::fprintf(stderr, "[gait] L=%+.4f R=%+.4f\n",
+                                         (double)character.gaitSwingL,
+                                         (double)character.gaitSwingR);
+                    }
+                }
                 for (int ci = 0; ci < gldx::RigChainKindCount; ++ci) {
                     const auto kind = static_cast<gldx::RigChainKind>(ci);
                     if (!character.rig.hasChain(kind)) continue;
@@ -3546,6 +3600,20 @@ int main(int argc, char** argv) {
                         character.chainSolvers[ci].AddProbes(handPts, 0.048f);
                         for (std::size_t pi = 0; pi < armMidPts.size(); ++pi)
                             character.chainSolvers[ci].AddProbes({armMidPts[pi]}, 0.045f);
+                    }
+                    // 裙摆：把这一帧的摆腿信号下发（按左右分别给）。
+                    if (kind == gldx::RigChainKind::Skirt) {
+                        character.chainTune[ci].gaitSwingL = character.gaitSwingL;
+                        character.chainTune[ci].gaitSwingR = character.gaitSwingR;
+                    }
+                    if (std::getenv("GLDX_GAITDBG") && kind == gldx::RigChainKind::Skirt) {
+                        static int n3 = 0;
+                        if (n3++ % 12 == 0)
+                            std::fprintf(stderr, "[tune] skirt count=%d gd=%.2f swL=%+.3f swR=%+.3f\n",
+                                         character.rig.chains[ci].count,
+                                         (double)character.chainTune[ci].gaitDrive,
+                                         (double)character.chainTune[ci].gaitSwingL,
+                                         (double)character.chainTune[ci].gaitSwingR);
                     }
                     const gldx::ChainTuning& tk = character.chainTune[ci];
                     character.chainSolvers[ci].Solve(character.rig.chains[ci], character.pose,
@@ -3846,6 +3914,30 @@ int main(int argc, char** argv) {
                     std::fprintf(stderr, "[pen] handToThighAxis=%.4f\n", (double)hd);
                 }
                 std::fprintf(stderr, "[pen] worst=%.4f\n", (double)worst);
+            }
+            if (std::getenv("GLDX_SKIRTTRACE")) {
+                // 逐帧记录四片裙摆尖端相对**骨盆**的位置。判据：减去身体自身的运动
+                // 之后，振幅还剩下多少。若≈0，裙摆就是被刚性焊在髋上的——不管解算
+                // 代码写得多热闹，画面都只会"跟着身体走"，看起来就是"从来没动过"。
+                std::vector<glm::mat4> tw;
+                character.model.skeleton().ComputeWorld(character.pose, character.model.Mat4(),
+                                                        tw);
+                const auto& sc2 = character.rig.chains[static_cast<int>(gldx::RigChainKind::Skirt)];
+                const int hipB = character.rig.hips;
+                if (sc2.count > 0 && hipB >= 0) {
+                    const glm::vec3 hipW(tw[(std::size_t)hipB][3]);
+                    std::fprintf(stderr, "[trace] t=%.3f", (double)view.clock);
+                    // 每片 3 节，取第 3 节（尖端）。
+                    for (int i = 2; i < sc2.count; i += 3) {
+                        const int b = sc2.bones[i];
+                        if (b < 0 || static_cast<std::size_t>(b) >= tw.size()) continue;
+                        const glm::vec3 p2(tw[(std::size_t)b][3]);
+                        std::fprintf(stderr, " p%d=(%+.3f,%+.3f,%+.3f)", i / 3,
+                                     (double)(p2.x - hipW.x), (double)(p2.y - hipW.y),
+                                     (double)(p2.z - hipW.z));
+                    }
+                    std::fprintf(stderr, "\n");
+                }
             }
             if (std::getenv("GLDX_SKIRTSYM")) {
                 std::vector<glm::mat4> bw;
