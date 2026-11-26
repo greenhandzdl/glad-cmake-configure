@@ -48,7 +48,7 @@ struct LegAngles {
     float toe = 0.0f;
 };
 
-LegAngles LegAt(const GaitTuning& tune, float p) {
+inline LegAngles LegAt(const GaitTuning& tune, float p) {
     LegAngles out;
     if (p < tune.stanceEnd) {
         const float s = p / tune.stanceEnd;                   // 0 = contact, 1 = toe off
@@ -343,5 +343,55 @@ struct Character {
         return cycles * cycleSeconds(1.0f);
     }
 };
+
+// Metres to add to every palette translation. `solvedLift` is `ground.Solve()`'s
+// answer for the pose the caller just built.
+
+inline float GroundWeightFor(const Character& c, Action a, float t) {
+    switch (a) {
+        case Action::Jump:
+            return (c.jumpSource && !c.jumpSource->GroundedAt(t)) ? 0.0f : 1.0f;
+        case Action::Run:
+            return c.runSource ? 1.0f - c.runSource->AirborneWeightAt(t) : 1.0f;
+        case Action::Swim:
+            return 0.0f;   // feet do not touch the floor; the water rise owns the height
+        case Action::Sit:
+            // The support is the SEAT, not the soles, so the sole solve has nothing to
+            // say. The height is authored (see Character::seatedHip) and applied through
+            // the same channel as a jump's arc.
+            return 0.0f;
+        default:
+            return 1.0f;   // walk / idle / crouch / crouchwalk / attack
+    }
+}
+inline float VerticalShiftFor(const Character& c, Action a, float t, float solvedLift) {
+    const float weight = GroundWeightFor(c, a, t);
+    float rise = 0.0f;
+    if (a == Action::Jump && c.jumpSource) {
+        rise = c.jumpSource->AirborneRiseAt(t);
+    } else if (a == Action::Sit) {
+        rise = c.sitRise;
+    } else if (a == Action::Swim && c.swimSource) {
+        // A swimmer does not stand on the floor: the whole body floats at the water
+        // line. Applied through the same channel as a jump's arc, so there is exactly
+        // one place that decides "how high is this character right now".
+        rise = c.swimSource->waterRise();
+    } else if (a == Action::Run && c.runSource) {
+        // A run's flight is short, so its height is scaled by the same continuous
+        // weight that gates the solve - with the weight's slope zero at the boundary,
+        // so the pelvis never jumps. Without this term the run's feet stay pinned to
+        // the floor while the legs fold, i.e. "running on a treadmill that follows you".
+        rise = c.runSource->airborneRiseAt(t);
+    }
+    // `restLift` is the lift that puts the STANDING soles on the floor. It is not part
+    // of a seated pose's height at all: the seat is what touches, and `sitRise` already
+    // places it. Adding the two launched the character 0.87 m into the air - measured
+    // `sit <- FLOATS` with `lowestY = 0.871`, i.e. the standing lift was applied on top
+    // of a pose that was already on the floor.
+    const float flight = (a == Action::Sit) ? rise : (c.restLift + rise);
+    // Written as a weighted sum so the walk path stays bit-identical: weight is
+    // exactly 1 there, and 1*x + 0*y is x in IEEE arithmetic.
+    return weight * solvedLift + (1.0f - weight) * flight;
+}
 
 }  // namespace anim

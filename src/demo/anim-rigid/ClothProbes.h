@@ -20,7 +20,7 @@ struct GaitSwing {
     float right = 0.0f;
 };
 
-GaitSwing ComputeGaitSwing(const Character& character, const std::vector<glm::mat4>& world) {
+inline GaitSwing ComputeGaitSwing(const Character& character, const std::vector<glm::mat4>& world) {
     GaitSwing out;
     const glm::vec3 fwdRef(0.0f, 0.0f, -1.0f);
     for (int sd = 0; sd < gldx::kRigSides; ++sd) {
@@ -52,7 +52,7 @@ struct ClothProbes {
     float                  legRadius = 0.0f;   // SetLegProbes 的统一半径
 };
 
-ClothProbes BuildClothProbes(const Character& character,
+inline ClothProbes BuildClothProbes(const Character& character,
                              const std::vector<glm::mat4>& world) {
     ClothProbes out;
     const float rad = 0.125f * character.model.unitScale() * 10.0f;   // thigh radius
