@@ -99,12 +99,40 @@ import gldxcli;
 
 #include "MmdNaming.h"
 #include "Tunings.h"
+#include "Character.h"
+#include "ClothProbes.h"
+#include "SkinPass.h"
+#include "Scene.h"
+#include "View.h"
 
 #include "Shaders.h"
 
-namespace {
+using anim::Action;
+using anim::AcesFilm;
+using anim::Character;
+using anim::ClothProbes;
+using anim::ComputeGaitSwing;
+using anim::DisplayColor;
+using anim::Clamp01;
+using anim::Ease01;
+using anim::GaitSwing;
+using anim::GaitTuning;
+using anim::Segment01;
+using anim::SkinPass;
+using anim::kBounceColor;
+using anim::BuildClothProbes;
+using anim::kGroundColor;
+using anim::kPi;
+using anim::kSkyColor;
+using anim::kSunColor;
+using anim::kSunDir;
+using anim::kSunIntensity;
+using anim::LegAngles;
+using anim::LegAt;
+using anim::NamingChannel;
+using anim::View;
 
-constexpr float kPi = 3.14159265358979323846f;
+namespace {
 
 // The GLSL declares `uniform mat4 uBones[N]` because a uniform array needs a
 // literal size. Pinning the engine's number to it here means a rig that outgrows
@@ -133,340 +161,11 @@ constexpr const char* kDefaultModel = "src/assets/models/aigei/Lamy_Idol_Mark2_1
 // even though these particular VALUES were tuned on this asset. Aliasing rather
 // than copying is the point: two structs with the same fields would drift the day
 // someone adds one to the engine.
-using GaitTuning = gldx::WalkTuning;
 
 
 // A clamp, an ease and a segment ramp - the three primitives the curves below
 // are built from. Naming them keeps the gait readable as a gait instead of as
 // arithmetic.
-float Clamp01(float x) { return std::clamp(x, 0.0f, 1.0f); }
-float Ease01(float x) {
-    x = Clamp01(x);
-    return x * x * (3.0f - 2.0f * x);
-}
-float Segment01(float x, float a, float b) {
-    return Clamp01((x - a) / std::max(b - a, 1e-5f));
-}
-
-// One leg's joint angles at `p` in [0,1), where 0 is heel strike.
-//
-// The sign conventions all come from one place: a positive rotation about the
-// rig's lateral axis swings a downward-pointing bone backwards. So a thigh angle
-// is negative when the leg is forward, knee flexion is positive (the shin goes
-// back), and a positive ankle angle points the toes down.
-struct LegAngles {
-    float hip = 0.0f;
-    float knee = 0.0f;
-    float ankle = 0.0f;
-    float toe = 0.0f;
-};
-
-LegAngles LegAt(const GaitTuning& tune, float p) {
-    LegAngles out;
-    if (p < tune.stanceEnd) {
-        const float s = p / tune.stanceEnd;                   // 0 = contact, 1 = toe off
-        // Linear through stance, not eased: the foot is planted, so the pelvis
-        // passes over it at constant speed and the *relative* hip angle is what
-        // is linear here. Easing it would make the character surge.
-        out.hip = tune.hipSwing * (2.0f * s - 1.0f);
-        // Loading response: the knee dips right after contact and is straight by
-        // mid-stance, when the body is highest.
-        out.knee = tune.kneeStanceFlex * (1.0f - Ease01(Segment01(s, 0.0f, 0.45f)));
-        // Heel strike (toes up) rolls flat, then plantarflexes into push-off.
-        out.ankle = tune.ankleHeelStrike * (1.0f - Ease01(Segment01(s, 0.0f, 0.30f))) +
-                    tune.ankleToeOff * Ease01(Segment01(s, 0.62f, 1.0f));
-        // The toe joint only moves at the very end of stance, when the heel is
-        // already off the floor and the toes are the last contact point.
-        out.toe = -tune.toeOffBend * Ease01(Segment01(s, 0.70f, 1.0f));
-    } else {
-        const float s = (p - tune.stanceEnd) / (1.0f - tune.stanceEnd);  // 0 = toe off, 1 = contact
-        // Cosine ease: a swinging limb accelerates through the middle and
-        // decelerates into the next contact, which is exactly a cosine.
-        const float from = tune.hipSwing;
-        const float to = -tune.hipSwing;
-        out.hip = from + (to - from) * (0.5f - 0.5f * std::cos(kPi * s));
-        // Knee: flex hard early in the swing to clear the floor, then extend so
-        // the shin is straight and reaching at contact. The two multipliers that
-        // force it to zero at both ends are what keep the curve continuous across
-        // the stance/swing boundary - a 0.14 rad step there reads as a visible pop.
-        // Peaked EARLY in the swing, not in the middle: the knee flexes to lift
-        // the foot clear while the leg is still behind the body, then extends as
-        // it passes underneath. Peaking at mid-swing is what makes a procedural
-        // walk look like marching - the foot arrives under the hips at its highest
-        // point, which no one does, and the measured sole height says so (0.31 m
-        // before this curve was moved, ~0.06 m after).
-        const float swell = Ease01(Segment01(s, 0.0f, 0.22f)) *
-                            (1.0f - Ease01(Segment01(s, 0.28f, 0.72f)));
-        out.knee = tune.kneeSwingFlex * swell;
-        // Plantarflexion unwinds after toe-off; dorsiflexion comes in for the
-        // heel-first landing.
-        out.ankle = tune.ankleToeOff * (1.0f - Ease01(Segment01(s, 0.0f, 0.28f))) +
-                    tune.ankleHeelStrike * Ease01(Segment01(s, 0.40f, 0.95f));
-        out.toe = -tune.toeOffBend * (1.0f - Ease01(Segment01(s, 0.0f, 0.22f)));
-    }
-    return out;
-}
-
-
-} // namespace
-
-namespace {
-
-// Which action is being asked for. A free enum in the demo namespace rather than a
-// member of Character: the input callback records it into the View, the frame loop
-// turns it into a machine Request. Keeping it out of Character is what lets the
-// callback stay free of the animation machine.
-enum class Action { Idle, Walk, Run, Crouch, CrouchWalk, Attack, Jump, Sit, Swim };
-
-// ---------------------------------------------------------------------------
-// The demo's own state around one character: everything that is NOT the rig
-// itself. The rig (skeleton, meshes, maps, unit scale, rest worlds) is
-// gldx::RiggedModel; the ground solve is gldx::GroundContact; the semantic bone
-// lookup is gldx::RigProfile. What stays here is the scratch they write into
-// and the walk-specific numbers derived from them.
-// ---------------------------------------------------------------------------
-/**
- * Which naming family resolves this asset's bone names.
- *
- * `Auto` is the old behaviour: the engine's built-in general-purpose families
- * (Mixamo/Blender, 3ds Max Biped, UE) compete on Detect(). `Mmd` selects the
- * demo-side MMD/PMX family, which is the only place that knows Japanese bone names.
- *
- * The point of having this as a runtime switch rather than a compile-time pick is
- * that the *same* pose sources must drive both rigs: swapping the model plus this
- * channel is the whole difference.
- */
-enum class NamingChannel { Auto, Mmd };
-
-struct Character {
-    gldx::RiggedModel model;
-    gldx::RigProfile  rig;
-    gldx::GroundContact ground;
-
-    // Constant vertical offset for the run, in metres, applied instead of the per-frame
-    // ground solve.
-    //
-    // A run has a FLIGHT PHASE, so grounding it every frame (lowest vertex -> 0) would
-    // flatten the very thing that makes it read as a run. Leaving it out entirely - the
-    // previous behaviour - was worse: the character hovered a constant 0.135 m up, all
-    // cycle, with a shadow far below. The right lever is a constant: measure the lowest
-    // vertex over one whole cycle and shift the character by -that, so the lowest instant
-    // of the cycle plants on the floor and the flight phase keeps its own arc on top.
-    float runGroundOffset = 0.0f;
-    bool  runGroundReady  = false;
-
-    std::vector<glm::mat4> pose;      // one local matrix per bone, rebuilt per frame
-    std::vector<glm::mat4> palette;   // what the vertex shader reads as uBones[]
-    GaitTuning tune;
-
-    // The ground solve's lift for the *rest* pose, in metres. This is the height at
-    // which an upright, straight-legged character stands on this floor, and it is not
-    // zero (measured: +11.6 mm) because the contact points are the sole plane, which
-    // sits a little below the rig origin. Flight needs it: while both feet are off the
-    // floor there is nothing to solve against, so a jump's root motion has to be
-    // measured from this height rather than from "whatever the solve last said". The
-    // jump's take-off and touch-down frames are authored with straight legs - i.e.
-    // exactly the rest pose - so the airborne branch and the grounded branch meet at
-    // this number with no step. Measured at load, once.
-    float restLift = 0.0f;
-    // Lowest bind-pose vertex measured along `rig.up` (rig units). The sole plane sits
-    // this far below the bone positions; GroundContact needs it, and so does the
-    // floor-violation check (see the pose table).
-    float bindLowestOnUp = 0.0f;
-    // Hip height a seated pose should sit at, in METRES, and the rise that gets it there
-    // from the standing height. Sitting is not ground-solved (see GroundWeightFor): its
-    // height is authored, because the contact that matters is the seat and the engine's
-    // solve only knows the soles. Keeping the number here (metres, world) avoids the
-    // unit trap that a pelvis translation inside a pose source would hit - poses are in
-    // RIG units (x0.01 on this asset), so 0.87 m written there is 8.7 mm.
-    // ABSOLUTE world height of the hips while seated, in metres.
-    //
-    // This is NOT "the hip height above the floor" - it goes through
-    // `sitRise = seatedHip - (hips.y + restLift)`, and for a non-solved pose the final
-    // shift is `restLift + sitRise = seatedHip - hips.y`. `hips.y` is the REST hip
-    // height (~0.99 m here), so any value below it pushes the whole character UNDER
-    // the floor - which is exactly what 0.19/0.22/0.51 did (measured shift -0.76 m,
-    // head at -0.60 m). Sitting needs `seatedHip` slightly ABOVE the standing hip
-    // height so the pelvis drops by the right amount and no more.
-    float seatedHip  = 0.295f;
-    // Is `seatedHip` an authored constant, or a fraction of this rig's own leg length?
-    //
-    // It was a constant, and a constant cannot serve two rigs: 0.295 m is the right
-    // seated pelvis height for the 1.68 m reference character (thigh + shin ~0.79 m)
-    // and the wrong one for this 2.10 m MMD rig, where it drove the soles 90 mm
-    // through the floor and the report said `sit <- SINKS`.
-    //
-    // Seated height is a RATIO of the leg: fold the shin back and the pelvis comes to
-    // rest about a thigh's thickness above the floor, which scales with the body.
-    // Deriving it keeps `--action sit` correct on any rig the naming family binds,
-    // while the constant stays as the reference value this demo was tuned against -
-    // kSeatedHipRatio is the ratio that reproduces 0.295 on a 0.79 m leg
-    // (0.295 / 0.79 = 0.373).
-    static constexpr float kSeatedHipRatio = 0.338f;
-    bool seatedHipDerived = false;
-    NamingChannel namingChannel = NamingChannel::Auto;
-
-    // One solver per chain kind. They hold per-joint angular state across frames, so
-    // they are members of the character rather than locals: a skirt that forgot its
-    // velocity between frames would snap to the target every frame and read as rigid.
-    gldx::ChainSolver chainSolvers[gldx::RigChainKindCount];
-
-    // Seconds since the previous secondary-motion step, already clamped. Kept separate
-    // from the machine's dt because the solver is only valid on a real time step: a
-    // frame that loads the model blocks for seconds and would integrate a spring over
-    // that whole interval.
-    float secondaryDt = 1.0f / 60.0f;
-    bool  secondaryPrimed = false;
-    // One-shot settle budget for `--freeze-at` (see the frame loop): the cloth is run
-    // to steady state exactly once, so the frozen picture depends on the instant the
-    // clock stopped rather than on the frame rate.
-    bool  secondarySettled = false;
-    // Decimated copy of the mesh, kept for measurements that need real vertices (the
-    // contact-point solve has been wrong twice; the mesh does not lie).
-    std::vector<gldx::SkinnedVertex> probeVerts;
-    int   secondarySettleSteps = 0;
-
-    // Per-kind chain parameters. Values are asset properties (how many panels, how
-    // soft), so they live here rather than in the engine - same rule as WalkTuning.
-    gldx::ChainTuning chainTune[gldx::RigChainKindCount];
-    float gaitSwingL = 0.0f;   // 左膝相对左髋的前向位移（米）
-    float gaitSwingR = 0.0f;
-    float sitRise    = 0.0f;
-    // MMD `捩`（twist）bones that sit directly under the UPPER arm instead of the
-    // forearm. Gloves and cuffs are weighted to them, so unless they are rotated with
-    // the elbow those pieces stay on the upper arm's line while the forearm swings away
-    // - visually "the cuff hangs at the waist and the arm passes through it".
-    //
-    // Found by name at load (this is demo-side, MMD-specific knowledge).
-    std::vector<int> twistBones;
-    // For each twist bone: where it sits in the FOREARM's local frame, measured in bind
-    // pose. Applying that offset through the posed forearm puts the bone exactly where it
-    // would be if the exporter had parented it to the forearm - which is what the cuff
-    // geometry assumes. Handles both variants identically (`左腕捩` under the upper arm,
-    // `左腕捩` deeper down, etc.) without per-bone special cases.
-    std::vector<glm::vec3> twistForearmOffset;   // parallel to twistBones
-    // The bone that carries BOTH the legs and the torso: the lowest common ancestor of
-    // `hips` and `spine`.
-    //
-    // On MMD rigs those two are SIBLINGS (`下半身` and `上半身`, both under `腰`), so
-    // rotating `hips` moves only the legs and the pelvis never comes down - which is why
-    // crouch/sit looked like "standing with bent knees". Translating the LCA moves the
-    // whole body, and it is derived from the tree rather than hard-coded, so a rig where
-    // hips really is the spine's parent still works (the LCA is then hips itself).
-    int bodyRoot = -1;
-    // Bind-space corner box of the pelvis, measured once at load. The SEATED solve uses
-    // it (see GroundContact::AddBodyContact): sitting puts the weight on the seat, and
-    // the four sole points cannot see the seat.
-
-
-    // The action layer. `walk` is the only source this demo holds, and the machine
-    // owns neither it nor the rig - both live right above, so destroying the
-    // character in the wrong order is the only way to dangle (see AnimStateMachine.h).
-    //
-    // Held through unique_ptrs because a ProceduralWalk takes references at
-    // construction (restWorld, rig, skeleton), and those only exist after the
-    // model has uploaded - so it cannot be a plain member built in step with
-    // this struct.
-    std::unique_ptr<gldx::ProceduralIdle>   idleSource;
-    std::unique_ptr<gldx::ProceduralWalk> walkSource;
-    std::unique_ptr<gldx::ProceduralRun>  runSource;
-    std::unique_ptr<gldx::ProceduralCrouch> crouchSource;
-    std::unique_ptr<gldx::ProceduralWalk>   crouchWalkSource;
-    std::unique_ptr<gldx::ProceduralAttack> attackSource;
-    std::unique_ptr<gldx::ProceduralJump>   jumpSource;
-    std::unique_ptr<gldx::ProceduralSit>    sitSource;
-    std::unique_ptr<gldx::ProceduralSwim>   swimSource;
-
-    // Which one-shot action is still running, if any, and whether it has ended.
-    //
-    // Attack and jump are **events**, not modes: once the swing lands or the feet
-    // touch down the character should go back to idling on its own. Without this the
-    // last frame stays on screen until the user presses another number, which reads
-    // as "it froze" rather than "it finished".
-    //
-    // Kept as a query rather than a stored "finished" flag so it cannot go stale
-    // when the action is changed underneath it.
-    [[nodiscard]] bool oneShotFinished(Action a, float t) const {
-        const gldx::AnimPoseSource* src = nullptr;
-        if (a == Action::Attack) src = attackSource.get();
-        else if (a == Action::Jump) src = jumpSource.get();
-        return src != nullptr && src->FinishedAt(t);
-    }
-    // Which AnimPoseSource backs an action, for the machine. Crouch-walking and the
-    // static crouch both go through the machine too; the two phase-driven gaits are
-    // reported separately because the machine cannot know their cycles (see the frame
-    // loop: it samples them at machine time, which is exactly a cycle phase).
-    [[nodiscard]] const gldx::AnimPoseSource* sourceFor(Action a) const {
-        switch (a) {
-            case Action::Idle:       return idleSource.get();
-            case Action::Walk:       return walkSource.get();
-            case Action::Run:        return runSource.get();
-            case Action::Crouch:     return crouchSource.get();
-            case Action::CrouchWalk: return crouchWalkSource.get();
-            case Action::Attack:     return attackSource.get();
-            case Action::Jump:       return jumpSource.get();
-            case Action::Sit:        return sitSource.get();
-            case Action::Swim:       return swimSource.get();
-        }
-        return nullptr;
-    }
-
-    gldx::AnimStateMachine               machine;
-
-
-
-    float cycleMetres = 1.0f;         // floor travel per full two-step cycle
-    std::string error;
-
-    [[nodiscard]] bool ready() const { return model.ready(); }
-    [[nodiscard]] float phaseFor(float speed, float seconds) const {
-        // Distance walked / distance travelled by one cycle, so the feet stay
-        // planted: faster walking is a faster cadence, not a longer stride.
-        return cycleMetres > 1e-3f ? 2.0f * kPi * (speed * seconds / cycleMetres) : 0.0f;
-    }
-
-    // The same cadence expressed in the action layer's unit: one cycle is one
-    // Duration(). Kept next to phaseFor (rather than folding one into the other)
-    // because `report` prints the cycle in radians and the machine samples in
-    // seconds - deriving both from cycleMetres is what keeps them in agreement.
-    [[nodiscard]] float cycleSeconds(float speed) const {
-        return (cycleMetres > 1e-3f && speed > 1e-6f) ? cycleMetres / speed : 1.0f;
-    }
-
-    // Seconds into the walk that correspond to `phaseRadians`. This is exactly the
-    // inverse of phaseFor, so sampling the source at this time reproduces the old
-    // BuildWalkPose(phase) pose bit for bit.
-    // Seconds to feed the source for a given phase, *in the source's own duration
-    // units*. The source is built with cycleSeconds(1.0f) and never rebuilt, so this
-    // must not involve the runtime speed: the phase already encodes it. Passing a
-    // speed here looks harmless and costs 30% of the cycle - the source then wraps at
-    // a different period than the phase was measured on.
-    //
-    // Measured limit of this round trip: the phase is built as
-    // `2*pi*(speed*t/cycleMetres)` and inverted back, so a clock difference of exactly
-    // one cycle does NOT return the same time to the last bit. At t=0.37 s the folded
-    // source time is 0.481000 s; one cycle later it is 0.480950 s and three cycles
-    // later 0.480850 s (error grows with t because `speed*t` is where the precision
-    // goes first). That is 1e-4 s of phase, which is invisible in the pose itself
-    // (max bone delta ~1e-4) but IS enough to move a few percent of pixels at 8-bit:
-    // snapshotting `t` and `t + one cycle` therefore shows ~3.4% differing pixels, and
-    // that number does not shrink when you fix the period. The four time-driven
-    // actions (idle/run/crouch and the non-looping pair) close to 0 px because they
-    // are sampled at the raw clock with no phase round trip at all.
-    //
-    // So: do not use `t` vs `t + cycle` snapshots to regression-test walk's loop
-    // closure. Probe the source directly instead (its own drift is 1.2e-7).
-    [[nodiscard]] float walkTimeFor(float phaseRadians) const {
-        // Algebraically this is just `speed * seconds / cycleMetres` inverted, but it
-        // is written through the same two quantities phaseFor uses so that sampling
-        // at t = walkTimeFor(phaseFor(t)) round-trips within a float ULP. Doing the
-        // fold any other way (e.g. normalising by a Duration set from a *different*
-        // speed) shifts every phase slightly, which shows up as a whole-character
-        // silhouette change rather than as an obvious error.
-        const float cycles = phaseRadians / (2.0f * kPi);
-        return cycles * cycleSeconds(1.0f);
-    }
-};
 
 // ---------------------------------------------------------------------------
 // The one place that decides where the character sits vertically, for one action at
@@ -588,459 +287,10 @@ float VerticalShiftFor(const Character& c, Action a, float t, float solvedLift) 
     return weight * solvedLift + (1.0f - weight) * flight;
 }
 
-// Camera + the runtime state the pass, the HUD and the input callbacks share.
-struct View {
-    // Orbit state + input conversion live in the engine now (gldx::OrbitCamera):
-    // 19 demos used to spell this out, with three different drag sensitivities and
-    // two different pitch clamp ranges. The `target` is still driven here because
-    // `--target-y` belongs to this demo's framing, not to the camera maths.
-    gldx::OrbitCamera orbit;
-    // This demo's framing, spelled out rather than inherited: the engine defaults
-    // (yaw .7 / pitch .3 / distance 8) are a generic three-quarter view, and taking
-    // them silently moved every frozen frame this demo is verified against.
-    View() {
-        orbit.settings().yaw = 0.62f;
-        orbit.settings().pitch = 0.17f;
-        orbit.settings().distance = 3.6f;
-        orbit.settings().target = glm::vec3(0.0f, 0.92f, 0.0f);   // sternum height
-        orbit.settings().minDistance = 0.8f;
-        orbit.settings().maxDistance = 30.0f;
-    }
-
-    float fov      = 42.0f;
-    float speed    = 1.30f;   // metres per second of floor travel
-    // `--hide-mat N`: skip every mesh bound to material N. Diagnosis only - when a
-    // patch of the model is the wrong colour, the question is *which draw* paints
-    // it, and the fastest answer is to delete that draw and look again. Reading the
-    // material table cannot answer it: MMD models routinely ship a dozen materials
-    // that all have white base colours and the colour arrives from the texture, so
-    // "who is red here" has no textual answer.
-    int hideMaterial = -1;
-    // `--only-mat N`: the converse - draw nothing but material N. Together with
-    // --hide-mat it turns "which mesh is this pixel" into two snapshots instead of
-    // a guess.
-    int onlyMaterial = -1;
-    // `--on allparts`: draw the parts the asset switched off (PMX diffuse alpha 0).
-    // Default off, because the author's default look is the reference this demo is
-    // verified against; this switch exists to A/B that decision.
-    bool allParts = false;
-    // What the number keys asked for. Applied to the machine inside the frame loop,
-    // never from a callback (see the OnKey comment).
-    Action requestAction = Action::Walk;
-    // When that request was made, in animation seconds, and how far into the clip we
-    // are. One-shot actions (attack/jump) auto-return to idle, and that decision has
-    // to be measured from the REQUEST - see the frame loop.
-    float actionStartedAt = 0.0f;
-    float actionElapsed   = 0.0f;
-    unsigned requestSerial = 0;      // see Request()
-    unsigned lastSentSerial = 0;     // what the frame loop has already forwarded
-    // One dt per frame for the state machine, and the "have we Set() it yet" flag.
-    float lastAnimSeconds = 0.0f;
-    bool  machineInitialised = false;
-
-    // Every action switch goes through here (number keys and --action alike), so the
-    // "when did this start" bookkeeping cannot be forgotten at one of the two call
-    // sites - which is exactly how the number keys came to do nothing for attack/jump.
-    // `now` is passed in rather than read from `clock`: the key callback fires
-    // between frames, and `clock` is only refreshed inside the frame loop - so a
-    // request made from a callback would stamp the PREVIOUS frame's time (and at
-    // startup, zero). One frame of error is invisible; inheriting a stale or zero
-    // timestamp is not, because the one-shot auto-return compares against it.
-    void Request(Action a, double now) {
-        requestAction = a;
-        actionStartedAt = static_cast<float>(now);
-        actionElapsed = 0.0f;
-        // Bumped on every explicit request. The frame loop compares it with the value it
-        // last forwarded to the machine, so a key press reaches the machine exactly once
-        // even though the request state persists for the whole action.
-        ++requestSerial;
-    }
-
-    float freezeAt = 0.0f;    // > 0 pins the clock, for reproducible snapshots
-    double clock   = 0.0;     // animation seconds (already clamped by freezeAt)
-    float scroll   = 0.0f;    // metres of floor travelled
-    glm::vec3 target{0.0f, 0.92f, 0.0f};
-
-    bool walk      = true;
-    bool ground    = true;
-    bool maps      = true;    // sample the FBX's embedded maps (else flat material)
-    bool normalMap = true;    // ...including the normal map (else geometry normals only)
-    bool wireframe = false;
-    bool showHud    = true;
-    bool report     = false;  // dump the gait's joint angles and the per-action table once
-    bool trace      = false;  // dump a 16 row time trace of the selected action once
-
-    float groundLift = 0.0f;   // metres the whole character was shifted this frame
-    float airRise    = 0.0f;   // metres of that shift that came from a jump arc
-    float soleHeight = 0.0f;   // metres, lowest sole after the shift (0 = touching)
-
-    bool dragging = false;
-    double lastX = 0.0;
-    double lastY = 0.0;
-    int drawCalls = 0;
-};
-
-// The scene's fixed lighting/bounce palette. Linear values; the shaders tone map
-// and encode, so these are not the numbers to read off a screenshot.
-constexpr glm::vec3 kSkyColor{0.30f, 0.44f, 0.62f};
-constexpr glm::vec3 kGroundColor{0.20f, 0.21f, 0.23f};
-constexpr glm::vec3 kBounceColor{0.08f, 0.07f, 0.06f};
-constexpr glm::vec3 kSunColor{1.00f, 0.94f, 0.84f};
-constexpr glm::vec3 kSunDir = {-0.38f, -0.82f, -0.42f};   // travels toward the scene
-constexpr float     kSunIntensity = 3.4f;
-
-glm::vec3 AcesFilm(glm::vec3 x) {
-    const glm::vec3 a = x * (2.51f * x + 0.03f);
-    const glm::vec3 b = x * (2.43f * x + 0.59f) + 0.14f;
-    return glm::clamp(a / b, glm::vec3(0.0f), glm::vec3(1.0f));
-}
-
-// The linear->display transform both shaders end with, mirrored on the CPU for
-// the clear colour so the horizon fade and the background cannot disagree (a
-// mismatch there is a visible band exactly where the floor runs out).
-glm::vec3 DisplayColor(glm::vec3 linear) {
-    return glm::pow(AcesFilm(linear * 1.15f), glm::vec3(1.0f / 2.2f));
-}
-
 // ---------------------------------------------------------------------------
 // SkinPass: the floor and the character, drawn straight at the window (no
 // PostProcessChain - this demo has no HDR/bloom to composite, and the shaders
 // encode their own output).
-// ---------------------------------------------------------------------------
-class SkinPass : public gldx::RenderPass {
-public:
-    SkinPass(Character& character, View& view)
-        : RenderPass("Skin"), character_(character), view_(view) {
-        if (auto skin = gldx::ShaderProgram::CreateFromSource(anim_rigid::shaders::kSkinVertex,
-                                                             anim_rigid::shaders::kSkinFragment)) {
-            skin_.emplace(std::move(*skin));
-        } else {
-            std::fprintf(stderr, "[anim-rigid] skin shader: %s\n", skin.error().c_str());
-        }
-        if (auto ground = gldx::ShaderProgram::CreateFromSource(anim_rigid::shaders::kGroundVertex,
-                                                               anim_rigid::shaders::kGroundFragment)) {
-            ground_.emplace(std::move(*ground));
-        } else {
-            std::fprintf(stderr, "[anim-rigid] ground shader: %s\n", ground.error().c_str());
-        }
-        // 80 x 80 m: far enough that the distance fade hides the edge, cheap
-        // enough that the whole floor is two triangles.
-        groundMesh_.Upload(gldx::GeometryFactory::Plane(40.0f));
-    }
-
-    void Execute(gldx::RenderFrame& f) override {
-        gldx::RenderContext::AssertRenderThread("SkinPass::Execute");
-        // Own the state instead of inheriting it: gldx::SpriteBatch::End() leaves
-        // GL_DEPTH_TEST and GL_CULL_FACE disabled (it only restores blending), and
-        // the HUD pass drew last frame. Inheriting that is subtle, not loud - the
-        // character renders with its own back faces and interior cloth showing
-        // through, which reads as "the skinning is broken" at exactly the frame
-        // where the HUD is enabled. Each pass in this repo establishes what it
-        // draws with; this one draws 3D, so it asks for the 3D state.
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_LESS);
-        glDepthMask(GL_TRUE);
-        glEnable(GL_CULL_FACE);
-        glCullFace(GL_BACK);
-        glFrontFace(GL_CCW);
-        glDisable(GL_BLEND);
-        const glm::vec3 clear = DisplayColor(kSkyColor * 0.55f);
-        glViewport(0, 0, f.fbWidth, f.fbHeight);
-        glClearColor(clear.r, clear.g, clear.b, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        if (f.fbWidth <= 0 || f.fbHeight <= 0) return;
-
-        const glm::vec3 eye = f.camera ? f.camera->Position() : glm::vec3(0.0f, 1.0f, 4.0f);
-        int draws = 0;
-
-        if (view_.wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-
-        if (view_.ground && ground_ && groundMesh_.valid()) {
-            ground_->Use();
-            ground_->Set("uViewProj", f.viewProj);
-            ground_->Set("uCamPos", eye);
-            ground_->Set("uSunDir", glm::normalize(kSunDir));
-            ground_->Set("uSunColor", kSunColor);
-            ground_->Set("uSunIntensity", kSunIntensity);
-            ground_->Set("uSkyColor", kSkyColor);
-            ground_->Set("uGroundColor", kGroundColor);
-            ground_->Set("uCharPos", glm::vec3(0.0f));
-            ground_->Set("uScroll", view_.scroll);
-            groundMesh_.Draw();
-            ++draws;
-        }
-
-        const gldx::RiggedModel& model = character_.model;
-        if (skin_ && model.ready() && !character_.palette.empty()) {
-            skin_->Use();
-            skin_->Set("uViewProj", f.viewProj);
-            skin_->Set("uCamPos", eye);
-            skin_->Set("uSunDir", glm::normalize(kSunDir));
-            skin_->Set("uSunColor", kSunColor);
-            skin_->Set("uSunIntensity", kSunIntensity);
-            skin_->Set("uSkyColor", kSkyColor);
-            skin_->Set("uBounceColor", kBounceColor);
-            // `GLDX_DRAWLOW`: the lowest skinned vertex computed from the palette that is
-            // ABOUT to be uploaded - not from the one the report measures. Every height
-            // probe so far read `character.palette` at a different moment and disagreed
-            // with the picture; this one is taken at the draw itself.
-            // `GLDX_SEATLOW`: where the SEAT (hips + skirt) is, not the lowest point of
-            // the whole body. A W-sit is supposed to put the hips on the floor; if the
-            // grounding pass is satisfied by a toe or the tail, the character visually
-            // hovers while every "lowest vertex" reading says 0.
-            if (std::getenv("GLDX_SEATLOW") && !character_.probeVerts.empty()) {
-                static int shown = 0;
-                if (shown++ < 2) {
-                    std::vector<int> allowed;
-                    if (character_.rig.hips >= 0) allowed.push_back(character_.rig.hips);
-                    const int si = static_cast<int>(gldx::RigChainKind::Skirt);
-                    for (int k = 0; k < character_.rig.chains[si].count; ++k)
-                        allowed.push_back(character_.rig.chains[si].bones[k]);
-                    float low = 1.0e9f;
-                    for (const gldx::SkinnedVertex& v : character_.probeVerts) {
-                        bool ok = false;
-                        for (int i = 0; i < 4; ++i) {
-                            if (v.boneWeight[i] <= 0.0f) continue;
-                            const int bi = static_cast<int>(v.boneIndex[i]);
-                            if (std::find(allowed.begin(), allowed.end(), bi) != allowed.end()) {
-                                ok = true; break;
-                            }
-                        }
-                        if (!ok) continue;
-                        glm::vec4 q(0.0f);
-                        for (int i = 0; i < 4; ++i) {
-                            if (v.boneWeight[i] <= 0.0f) continue;
-                            const std::size_t bi = v.boneIndex[i];
-                            if (bi < character_.palette.size())
-                                q += v.boneWeight[i] *
-                                     (character_.palette[bi] * glm::vec4(v.position, 1.0f));
-                        }
-                        low = std::min(low, q.y);
-                    }
-                    std::fprintf(stderr, "[seatlow] seat lowest y = %.4f m\n", (double)low);
-                }
-            }
-            // `GLDX_ALLDRAWLOW`: lowest vertex of ANY bone, at the draw call. Sit hovered
-            // visually while `GLDX_SEATLOW` (measured before ApplyLift) reported 0.000 -
-            // the same "two palettes" trap as before, so this one is taken where it
-            // counts.
-            if (std::getenv("GLDX_ALLDRAWLOW") && !character_.probeVerts.empty()) {
-                static int shown = 0;
-                if (shown++ < 2) {
-                    float low = 1.0e9f;
-                    int lowBone = -1;
-                    for (const gldx::SkinnedVertex& v : character_.probeVerts) {
-                        glm::vec4 q(0.0f);
-                        int dom = -1;
-                        float bestW = 0.0f;
-                        for (int i = 0; i < 4; ++i) {
-                            if (v.boneWeight[i] <= 0.0f) continue;
-                            const std::size_t bi = v.boneIndex[i];
-                            if (bi < character_.palette.size())
-                                q += v.boneWeight[i] *
-                                     (character_.palette[bi] * glm::vec4(v.position, 1.0f));
-                            if (v.boneWeight[i] > bestW) {
-                                bestW = v.boneWeight[i];
-                                dom = static_cast<int>(bi);
-                            }
-                        }
-                        if (q.y < low) { low = q.y; lowBone = dom; }
-                    }
-                    const glm::mat4 hp = character_.palette[(std::size_t)character_.rig.hips];
-                    for (int kk = 0; kk < gldx::kRigSides; ++kk) {
-                        const int lb[3] = {character_.rig.hips, character_.rig.legLow[kk],
-                                           character_.rig.foot[kk]};
-                        std::fprintf(stderr,
-                                     "[bonepos] %s hips=%.3f knee%d=%.3f foot%d=%.3f head=%.3f\n",
-                                     kk == 0 ? "L" : "R",
-                                     (double)character_.palette[(std::size_t)lb[0]][3][1], kk,
-                                     (double)character_.palette[(std::size_t)lb[1]][3][1], kk,
-                                     (double)character_.palette[(std::size_t)lb[2]][3][1],
-                                     (double)character_.palette[(std::size_t)character_.rig.head][3][1]);
-                    }
-                    std::fprintf(stderr, "[alldraw] hips y=%.4f m | lowest=%.4f m on bone %d '%s'\n",
-                                 (double)hp[3][1], (double)low, lowBone,
-                                 lowBone >= 0
-                                     ? character_.model.skeleton().bones()[(std::size_t)lowBone].name.c_str()
-                                     : "?");
-                }
-            }
-            if (std::getenv("GLDX_DRAWLOW") && !character_.probeVerts.empty()) {
-                static int shown = 0;
-                if (shown++ < 2) {
-                    float low = 1.0e9f;
-                    for (const gldx::SkinnedVertex& v : character_.probeVerts) {
-                        glm::vec4 q(0.0f);
-                        for (int i = 0; i < 4; ++i) {
-                            if (v.boneWeight[i] <= 0.0f) continue;
-                            const std::size_t bi = v.boneIndex[i];
-                            if (bi < character_.palette.size())
-                                q += v.boneWeight[i] *
-                                     (character_.palette[bi] * glm::vec4(v.position, 1.0f));
-                        }
-                        low = std::min(low, q.y);
-                    }
-                    std::fprintf(stderr, "[drawlow] lowest drawn vertex y = %.4f m\n",
-                                 (double)low);
-                }
-            }
-            model.BindPalette(*skin_, character_.palette);
-
-            // Every sampler must point at a complete texture on every draw, dummy
-            // or not: an active sampler with nothing behind it makes Apple's driver
-            // drop the whole call (the failure looks like "the model vanished").
-            // AlbedoOrFallback() and friends are that guarantee, so this loop has
-            // no null case to handle.
-            // ---- per-mesh material binding ----
-            //
-            // This loop used to bind ONE material (`PrimaryMaterial()`) and its maps
-            // before drawing every mesh. On a 60-mesh / 15-material character that is
-            // silently wrong: every panel samples the first material's atlas, which on
-            // this asset is the near-white skin map - so a fully textured model
-            // rendered white, and the few coloured patches that showed through were
-            // the one image's non-white corners landing somewhere plausible.
-            //
-            // The maps and the material scalars are now chosen per mesh through
-            // `meshMaterial()[i]`, and the `uHas*` flags move with them.
-            const bool useMaps = view_.maps;
-            const bool useNormal = useMaps && view_.normalMap;
-            const auto& meshMat = model.meshMaterial();
-            const auto& materials = model.materials();
-
-            int boundMaterial = -2;   // -2 = nothing bound yet, -1 = out of range
-            bool blending = glIsEnabled(GL_BLEND) == GL_TRUE;   // tracked, not assumed off
-            if (meshMat.empty()) {
-                // A rig with no material list at all: bind the fallbacks once so every
-                // sampler still points at a complete texture (Apple drops the draw
-                // otherwise) and let the flags switch the sampling off.
-                const gldx::Texture2D& albedo = model.fallbackAlbedo();
-                const gldx::Texture2D& normal = model.fallbackNormal();
-                const gldx::Texture2D& scalar = model.fallbackScalar();
-                albedo.Bind(0);
-                normal.Bind(1);
-                scalar.Bind(2);
-                scalar.Bind(3);
-                skin_->Set("uAlbedo", 0);
-                skin_->Set("uNormal", 1);
-                skin_->Set("uMetallic", 2);
-                skin_->Set("uRoughness", 3);
-                skin_->Set("uHasAlbedo", 0);
-                skin_->Set("uHasNormal", 0);
-                skin_->Set("uHasMetallic", 0);
-                skin_->Set("uHasRoughness", 0);
-                boundMaterial = -1;
-            }
-
-            for (std::size_t mi = 0; mi < model.meshes().size(); ++mi) {
-                const int matIndex = (mi < meshMat.size()) ? meshMat[mi] : -1;
-
-                if (view_.hideMaterial >= 0 && matIndex == view_.hideMaterial) continue;
-                if (view_.onlyMaterial >= 0 && matIndex != view_.onlyMaterial) continue;
-                // Parts the asset switched off (PMX diffuse alpha 0) stay off: the
-                // author's default look is the reference, and these are optional
-                // clothing, not missing data. `--on allparts` draws them anyway for
-                // comparison.
-                if (!view_.allParts && model.isHidden(matIndex)) continue;
-
-                if (matIndex != boundMaterial) {
-                    boundMaterial = matIndex;
-                    const bool hasAlbedo = useMaps && model.hasAlbedo(matIndex);
-                    const bool hasNormal = useNormal && model.hasNormal(matIndex);
-                    const bool hasMetallic = useMaps && model.hasMetallic(matIndex);
-                    const bool hasRoughness = useMaps && model.hasRoughness(matIndex);
-
-                    model.AlbedoOrFallback(matIndex).Bind(0);
-                    model.NormalOrFallback(matIndex).Bind(1);
-                    model.MetallicOrFallback(matIndex).Bind(2);
-                    model.RoughnessOrFallback(matIndex).Bind(3);
-                    skin_->Set("uAlbedo", 0);
-                    skin_->Set("uNormal", 1);
-                    skin_->Set("uMetallic", 2);
-                    skin_->Set("uRoughness", 3);
-                    skin_->Set("uHasAlbedo", hasAlbedo ? 1 : 0);
-                    skin_->Set("uHasNormal", hasNormal ? 1 : 0);
-                    skin_->Set("uHasMetallic", hasMetallic ? 1 : 0);
-                    skin_->Set("uHasRoughness", hasRoughness ? 1 : 0);
-
-                    if (matIndex >= 0 && static_cast<std::size_t>(matIndex) < materials.size()) {
-                        const gldx::SkinnedMaterial& m = materials[static_cast<std::size_t>(matIndex)];
-                        if (std::getenv("GLDX_MAT"))
-                            std::fprintf(stderr, "[mat] %d base=(%.2f %.2f %.2f %.2f) alb=%d\n",
-                                         matIndex, (double)m.baseColor.r, (double)m.baseColor.g,
-                                         (double)m.baseColor.b, (double)m.baseColor.a,
-                                         m.albedoTexture);
-                        skin_->Set("uBaseColor", m.baseColor);
-                        skin_->Set("uMetallicFactor", m.metallic);
-                        skin_->Set("uRoughnessFactor", m.roughness);
-                    }
-                }
-
-                if (std::getenv("GLDX_DRAWMESH")) {
-                    static int shown = 0;
-                    if (shown++ < 25)
-                        std::fprintf(stderr, "[draw] mesh %zu mat=%d verts=%zu\n", mi, matIndex,
-                                     model.meshes()[mi].vertexCount());
-                }
-
-                // ---- alpha blending, per material ----
-                //
-                // MMD face models paint blush, eyeliner and the mouth line on one
-                // mostly-transparent sheet laid over the head. Drawn opaque it is a
-                // solid-band tattoo; drawn blended it is a soft wash. The blend state
-                // is ours to set because this pass owns GL state, so it has to be set
-                // per mesh, not once (one character legitimately mixes both).
-                //
-                // Depth writes are left OFF for blended meshes: that sheet sits a few
-                // millimetres off the skin, and with depth writes on it would occlude
-                // the eyes drawn later in the same frame. It is painted geometry, not
-                // a solid surface, so it has no business in the depth buffer.
-                const bool blended = useMaps && model.isBlended(matIndex);
-                if (blended != blending) {
-                    blending = blended;
-                    if (blended) {
-                        glEnable(GL_BLEND);
-                        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-                        glDepthMask(GL_FALSE);
-                    } else {
-                        glDisable(GL_BLEND);
-                        glDepthMask(GL_TRUE);
-                    }
-                }
-                // The blend equation multiplies by the FRAGMENT alpha, so switching
-                // GL_BLEND on is only half the job - the shader has to emit the
-                // texture's alpha rather than a constant 1.0. Set on every mesh
-                // because the value follows the material, not the pass.
-                skin_->Set("uBlended", blended ? 1 : 0);
-
-                model.meshes()[mi].Draw();
-                ++draws;
-            }
-
-            // Pass-local GL state is restored, never inherited: the next pass (the HUD,
-            // in particular) draws its glyphs blended and assumes it is the one turning
-            // blending on.
-            if (blending) {
-                glDisable(GL_BLEND);
-                glDepthMask(GL_TRUE);
-            }
-        }
-
-        if (view_.wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);   // pass-local state is restored
-        view_.drawCalls = draws;
-    }
-
-private:
-    Character& character_;
-    View&      view_;
-    std::optional<gldx::ShaderProgram> skin_;
-    std::optional<gldx::ShaderProgram> ground_;
-    gldx::Mesh groundMesh_;
-};
-
-// ---------------------------------------------------------------------------
-// The panel: what the demo asserts (walking, skinned) plus the evidence a
-// reviewer would otherwise have to infer from the picture (bone count, palette
-// fill, the bind-pose check, the phase the frame was frozen at).
 // ---------------------------------------------------------------------------
 class WalkHudPass : public gldx::HudPass {
 public:
@@ -3458,6 +2708,19 @@ int main(int argc, char** argv) {
                 // (measured: three runs, three different md5s), because the snapshot
                 // arrives after a variable number of frames.
                 if (character.secondarySettleSteps > 0) {
+                    // 结算前把弹簧状态复位到静止。
+                    //
+                    // 不复位时，结算的**起点**是"冻结前跑了多少帧"的残留：那个帧数
+                    // 由墙上时钟决定，每次运行都不同。600 步只能压到 1e-3 量级，
+                    // 而 2.2 m 视距下 1 mm 正好是一像素——于是同一个 --freeze-at
+                    // 快照两次跑出上万像素差异（实测 1697~14803）。复位之后结算
+                    // 成为"冻结姿态"的纯函数，与跑了几帧无关。
+                    if (!std::getenv("GLDX_NO_RESET_SETTLE")) {
+                    for (int ci = 0; ci < gldx::RigChainKindCount; ++ci) {
+                        if (!character.rig.hasChain(static_cast<gldx::RigChainKind>(ci))) continue;
+                        character.chainSolvers[ci].Reset(character.rig.chains[ci]);
+                    }
+                    }
                     for (int si = 0; si < character.secondarySettleSteps; ++si) {
                         std::vector<glm::mat4> smWorldSettle;
                         model.skeleton().ComputeWorld(character.pose, model.Mat4(), smWorldSettle);
@@ -3465,12 +2728,45 @@ int main(int argc, char** argv) {
                             const auto kind = static_cast<gldx::RigChainKind>(ci);
                             if (!character.rig.hasChain(kind)) continue;
                             if (std::getenv("GLDX_NO_SECONDARY")) continue;
+                            // 摆腿信号必须按**结算中的姿态**重算。复用上一活动帧留下的
+                            // 值会让同一个 --freeze-at 快照两次跑出不同的裙摆：那个帧的
+                            // 相位每次运行都可能不同（实测 1697~14803 像素差异）。
+                            if (kind == gldx::RigChainKind::Skirt) {
+                                // 探针也按结算姿态重建：否则结算是"冻结姿态 + 上一活动帧
+                                // 的探针"，结果仍取决于冻结前跑了多少帧。
+                                const ClothProbes sp = BuildClothProbes(character, smWorldSettle);
+                                character.chainSolvers[ci].SetLegProbes(sp.legs, sp.legRadius);
+                                for (std::size_t pi = 0; pi < sp.legRadii.size(); ++pi)
+                                    character.chainSolvers[ci].AddProbes({sp.legs[pi]}, sp.legRadii[pi]);
+                                character.chainSolvers[ci].AddProbes(sp.hands, 0.048f);
+                                for (std::size_t pi = 0; pi < sp.armMids.size(); ++pi)
+                                    character.chainSolvers[ci].AddProbes({sp.armMids[pi]}, 0.045f);
+                                const GaitSwing sw = ComputeGaitSwing(character, smWorldSettle);
+                                const bool gaitActive =
+                                    view.requestAction == Action::Walk ||
+                                    view.requestAction == Action::Run ||
+                                    view.requestAction == Action::CrouchWalk;
+                                character.chainTune[ci].gaitSwingL = gaitActive ? sw.left : 0.0f;
+                                character.chainTune[ci].gaitSwingR = gaitActive ? sw.right : 0.0f;
+                            }
+                            character.chainSolvers[ci].SetClock(static_cast<float>(view.clock));
                             character.chainSolvers[ci].Solve(
                                 character.rig.chains[ci], character.pose, smWorldSettle,
                                 model.restWorld(), character.chainTune[ci], kSecondaryStep);
                         }
                     }
                     character.secondarySettleSteps = 0;
+                    if (std::getenv("GLDX_SETTLEHASH")) {
+                        // 结算结果的指纹：哪条链的哪个数字在两次运行之间不同，
+                        // 就指向那一层，不必再猜。
+                        double acc = 0.0;
+                        for (int ci = 0; ci < gldx::RigChainKindCount; ++ci) {
+                            if (!character.rig.hasChain(static_cast<gldx::RigChainKind>(ci)))
+                                continue;
+                            acc += character.chainSolvers[ci].StateFingerprint();
+                        }
+                        std::fprintf(stderr, "[settlehash] %.9f\n", acc);
+                    }
                 }
                 character.secondaryDt = 0.0f;
             } else {
@@ -3492,59 +2788,12 @@ int main(int argc, char** argv) {
             {
                 std::vector<glm::mat4> smWorld;
                 model.skeleton().ComputeWorld(character.pose, model.Mat4(), smWorld);
-                // Leg sample points for the cloth push: hip, knee and ankle of each
-                // leg, in world space. The skirt only collides with these - a full
-                // capsule chain would be better but the hem is short and the three
-                // points per leg already stop the visible intersection.
-                std::vector<glm::vec3> legPts;
-                std::vector<float> legRads;
-                for (int sd = 0; sd < gldx::kRigSides; ++sd) {
-                    const int bu = character.rig.legUp[sd];
-                    const int bl = character.rig.legLow[sd];
-                    const int bf = character.rig.foot[sd];
-                    const float rad = 0.125f * model.unitScale() * 10.0f;   // thigh radius
-                    if (bu >= 0) { legPts.emplace_back(smWorld[(std::size_t)bu][3]); legRads.push_back(rad); }
-                    // 大腿中点也要一个探针。
-                    //
-                    // 原先只有髋/膝/踝三点。腿往前摆时膝盖跑到髋**前面**，而小腿仍是
-                    // 竖直的，于是"髋到膝"这一段的中段正好扫过下摆前片——那里没有探针，
-                    // 布面就不会被推开，腿直接从裙面穿出来。加点比加半径有效：半径调大
-                    // 会把整圈裙撑开，中点只补上缺的那一段。
-                    if (bu >= 0 && bl >= 0) {
-                        const glm::vec3 hipP(smWorld[(std::size_t)bu][3]);
-                        const glm::vec3 kneeP(smWorld[(std::size_t)bl][3]);
-                        legPts.emplace_back(glm::mix(hipP, kneeP, 0.55f));
-                        legRads.push_back(rad * 0.95f);
-                    }
-                    if (bl >= 0) { legPts.emplace_back(smWorld[(std::size_t)bl][3]); legRads.push_back(rad * 0.90f); }
-                    if (bf >= 0) { legPts.emplace_back(smWorld[(std::size_t)bf][3]); legRads.push_back(rad * 0.85f); }
-                }
-                // Hands and forearms join the same probe set.
-                //
-                // The hem is at hand height in every idle/standing pose, so the two
-                // intersect constantly - that is the "IDLE 和裙子穿模". Raising the arms
-                // to clear it moves them out of a natural pose, and shrinking the skirt
-                // changes its silhouette. Pushing the CLOTH away from the hand is the one
-                // change that fixes the intersection and reads as the hem puffing out
-                // slightly when a hand comes down past it.
-                std::vector<glm::vec3> handPts;
-                for (int sd = 0; sd < gldx::kRigSides; ++sd) {
-                    for (int b : {character.rig.armLow[sd], character.rig.hand[sd]}) {
-                        if (b >= 0) handPts.emplace_back(smWorld[(std::size_t)b][3]);
-                    }
-                }
-                // 小臂中点：手往后摆时穿过裙摆的是这一段。
-                std::vector<glm::vec3> armMidPts;
-                for (int sd = 0; sd < gldx::kRigSides; ++sd) {
-                    const int bu = character.rig.armUp[sd];
-                    const int bl = character.rig.armLow[sd];
-                    if (bu >= 0 && bl >= 0) {
-                        armMidPts.emplace_back(glm::mix(glm::vec3(smWorld[(std::size_t)bu][3]),
-                                                        glm::vec3(smWorld[(std::size_t)bl][3]),
-                                                        0.6f));
-                    }
-                }
-                const float legRadius = 0.125f * model.unitScale() * 10.0f;   // ~thigh radius
+                const ClothProbes probes = BuildClothProbes(character, smWorld);
+                std::vector<glm::vec3> legPts = probes.legs;
+                std::vector<float> legRads = probes.legRadii;
+                const std::vector<glm::vec3>& handPts = probes.hands;
+                const std::vector<glm::vec3>& armMidPts = probes.armMids;
+                const float legRadius = probes.legRadius;
 
                 // ---- 两侧大腿的前后摆幅（膝盖相对髋的前向位移，米）----
                 //
@@ -3566,18 +2815,9 @@ int main(int argc, char** argv) {
                         view.requestAction == Action::Walk ||
                         view.requestAction == Action::Run ||
                         view.requestAction == Action::CrouchWalk;
-                    const glm::vec3 fwdRef(0.0f, 0.0f, -1.0f);
-                    for (int sd = 0; sd < gldx::kRigSides; ++sd) {
-                        const int bu = character.rig.legUp[sd];
-                        const int bl = character.rig.legLow[sd];
-                        if (bu < 0 || bl < 0) continue;
-                        const glm::vec3 hip(smWorld[(std::size_t)bu][3]);
-                        const glm::vec3 knee(smWorld[(std::size_t)bl][3]);
-                        const float sw = glm::dot(knee - hip, fwdRef);
-                        const float gated = gaitActive ? sw : 0.0f;
-                        if (sd == 0) character.gaitSwingL = gated;
-                        else         character.gaitSwingR = gated;
-                    }
+                    const GaitSwing swing = ComputeGaitSwing(character, smWorld);
+                    character.gaitSwingL = gaitActive ? swing.left : 0.0f;
+                    character.gaitSwingR = gaitActive ? swing.right : 0.0f;
                     if (std::getenv("GLDX_GAITDBG")) {
                         static int n = 0;
                         if (n++ % 12 == 0)
@@ -3615,6 +2855,8 @@ int main(int argc, char** argv) {
                                          (double)character.chainTune[ci].gaitSwingL,
                                          (double)character.chainTune[ci].gaitSwingR);
                     }
+                    // 呼吸相位跟着动画时钟走，不跟帧数走（见 ChainSolver::SetClock）。
+                    character.chainSolvers[ci].SetClock(static_cast<float>(view.clock));
                     const gldx::ChainTuning& tk = character.chainTune[ci];
                     character.chainSolvers[ci].Solve(character.rig.chains[ci], character.pose,
                                                      smWorld, model.restWorld(), tk,

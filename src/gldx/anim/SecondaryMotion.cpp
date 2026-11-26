@@ -62,6 +62,14 @@ void ChainSolver::Reset(const RigProfile::RigChain& chain) {
     angle_.assign(n, glm::vec3(0.0f));
     omega_.assign(n, glm::vec3(0.0f));
     prevRootPos_.assign(n, glm::vec3(0.0f));
+    // 差分历史必须一起清。
+    //
+    // 只清角度/角速度不够：`prevRootVel_` ���**上一帧的速度**，重置后第一次推进时
+    // 它仍是旧值，于是 `acc = (vel - prevRootVel_)/dt` 凭空产生一个加速度（被限幅到
+    // 40 m/s² 之后仍有 40）。结算循环跑 600 步，这个虚假加速度会一直推动布面，而
+    // 旧速度取决于"冻结前跑了多少帧"——症状正是同一个快照两次跑出不同结果。
+    prevRootVel_ = glm::vec3(0.0f);
+    prevProbePos_.clear();
     primed_ = false;
 }
 
@@ -86,7 +94,7 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
     // while the integrate path stops.
     const bool advance = dt > 0.0f;
     // 微动时钟跟着真实时间走（不是跟着姿势时间）——它就是"这具身体还活着"的那条时间轴。
-    if (advance) clock_ += dt;
+    // 不再自己累加：见 SetClock() 的注释。调用方没设过时保持 0，呼吸就是常数相位。
 
     const int count = chain.count;
     const int strandLenDbg = tuning.strandLength;

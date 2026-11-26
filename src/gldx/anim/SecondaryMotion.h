@@ -141,6 +141,28 @@ struct ChainTuning {
 class ChainSolver {
 public:
     /** 按链长度重置状态。链变了（换资产）必须再调一次。 */
+    /**
+     * 呼吸微动读的时钟，由调用方（demo 的动画时钟）提供。
+     *
+     * 内部原本是 `clock_ += dt` 自己累加的。那让"呼吸相位"取决于**跑了多少帧**：
+     * 同一个 `--freeze-at` 快照，两次运行累加的总时长差一两个 dt，相位就差一点，
+     * 头发/尾巴整体偏一点点——2.2 m 视距下 1 mm 正好一像素，于是上万条边缘像素
+     * 不一致（实测 1697~14803）。呼吸是装饰性的，让它跟着动画时间走，快照才可复现。
+     */
+    void SetClock(float seconds) noexcept { clock_ = seconds; }
+
+    /** 诊断用：角度与角速度的和。两次运行之间它不同，就说明解算状态不可复现。 */
+    [[nodiscard]] double StateFingerprint() const noexcept {
+        double acc = 0.0;
+        for (std::size_t i = 0; i < angle_.size(); ++i) {
+            acc += static_cast<double>(angle_[i].x) + static_cast<double>(angle_[i].y) +
+                   static_cast<double>(angle_[i].z);
+            acc += static_cast<double>(omega_[i].x) + static_cast<double>(omega_[i].y) +
+                   static_cast<double>(omega_[i].z);
+        }
+        return acc;
+    }
+
     void Reset(const RigProfile::RigChain& chain);
 
     /**
