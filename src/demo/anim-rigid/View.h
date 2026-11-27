@@ -7,6 +7,8 @@
 
 // NOTE: names gldx engine types (gldx::OrbitCamera), so include AFTER `import gldx;`.
 
+#include <glm/glm.hpp>
+
 namespace anim {
 
 // Which action is being asked for. A free enum in the demo namespace rather than a

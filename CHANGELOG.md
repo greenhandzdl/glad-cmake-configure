@@ -5,6 +5,54 @@
 
 ## Unreleased
 
+（暂无）
+
+## v1.7.3
+
+本版给 `anim-rigid` 这条线收尾：交接文档 `HANDOFF-anim-rigid.md` 里列的三个缺陷全部定位到**根因**（不是靠调参）并复测，
+另外接上 `AI_MATKEY_TWOSIDED` 这条加载器一直在解析、却从没人读过一面的资产信号。版本号只进一位，不引入新的引擎子系统。
+
+### 修复 `anim-rigid`：冻结快照可复现、裙摆不再撕开、`crouch` 等于 `crouchwalk`
+
+- **冻结快照不可复现（同一个二进制、同样 argv，两次跑出不同像素）**：根因不在弹簧、呼吸时钟或探针复用，而在**结算的门判错了**——
+  `if (view.freezeAt > 0.0f)` 是"命令行要求冻结"，不是"时钟已经停住"，**第一帧就满足它**；而 `FrameInfo::time` 在 `onFrame` **之前**就采好了
+  （`App::Run` 里 `now = glfwGetTime()` 在回调前），模型加载那次几秒的阻塞不在里面，于是第一帧拿到的是"窗口/上下文/字体初始化花了多久"
+  （实测 0.19~0.26 s，每次不同）。结果是结算被喂进 t≈0.2 s 的姿态、快照却在 t=1.0 s 的姿态上画。改判 `view.clock >= freezeAt`
+  （它本来就是 `min(info.time, freezeAt)`，只有越过之后才恒等于 freezeAt）。另修两处同源的错：结算循环每一步都要从**冻结姿态**重新施加角度
+  （`Solve` 的写回是 `local[bone] *= rot`，600 步连着叠会把世界矩阵转过 600 次，而循环里的探针、摆腿信号、`tuck` 的侧向符号全在读那个世界），
+  以及结算结束后把 pose 还原（紧接着的常规二次运动还会用 dt=0 再施加一次角度——dt=0 只跳过积分、不跳过写回）。
+  **取证**：九种动作（idle/walk/run/crouch/crouchwalk/attack/jump/sit/swim）× 两次运行，BMP `cmp` **差 0 字节**（此前 46 万字节、
+  `[settlehash]` 5.108 / 4.884 / 4.913）。
+- **走路时裙摆那道撕开的三角翻片**：上一版把它归给蒙皮权重，**不是**——`GLDX_NO_SECONDARY=1`（整条二次运动关掉）时同一帧的裙摆是完整锥面。
+  根因在 `ChainSolver`：每片裙片的"朝外"方向量的是 `bonePos - chain[0]`，而 `chain[0]` 只是**第 1 片裙片的根**，不是身体轴
+  （实测各片根部相对它的侧向偏移 -0.071~+0.198 m），于是对面那几片的指向**穿过身体**、`sideSign` 被分到错的一侧，相邻两片拿到方向相反的摆腿信号；
+  而且 `side`/`fwd` 是从 `(0,0,1)` 推的，隐含假设"身体正对世界 -Z"（转身时 `fwd` 只取到 ±0.85），左右还是**硬切**。
+  改法：中线取各片**根关节的水平重心**，侧向/前向取**链根骨的世界轴列**，左右按侧向分量线性混合。相邻两片的摆腿角差从 0.27 rad 降到 0.15 rad，
+  画面上翻片消失、裙摆回到锥面。`tuck` 的侧向符号也改用同一个中线（原来同样分错边）。
+- **`crouch` 不等于 `crouchwalk@phase 0`**：`--on report` 那行断言一直在打印失败值 0.236，只是没人看。根因是 `Setup.cpp` 里
+  `crouchSource` 用 `character.tune`（**站立**步态）构造，而 `crouchWalkSource` 用的是收窄过的 `crouchTune`（`hipSwing*0.54` 等）——
+  两个源用的根本不是同一条曲线。改为共用 `crouchTune`，现在是 `t=0 pose 0.000000e+00, drawn palette 0.000000e+00`
+  （`worst over a breath 3.000e-02` 是刻意保留的呼吸幅度）。
+- **接上 `AI_MATKEY_TWOSIDED`**：加载器一直在解析 `SkinnedMaterial::twoSided`，却没有任何消费者。新增
+  `RiggedModel::isTwoSided()` 与 demo 的 `--on twoside`（逐材质、默认关）。实测这份 PMX **一个材质都没标双面**，
+  所以它对这具资产是空开关（与默认**逐字节相同**）——但它是唯一能表达"这块面是单面薄片"的资产信号，换一份老实标了它的资产就直接可用。
+  顺带把下摆花边那道锯齿缺口的证据链定死：关剔除能补缺口但把整圈裙子的**未受光内壁**露出来（读数更差），所以默认保持现状。
+- **探针搬出帧循环**：六个纯诊断探针（`GLDX_PEN` / `GLDX_SKIRTTRACE` / `GLDX_SKIRTSYM` / `GLDX_BREATHE` / `GLDX_TWISTCHK` /
+  `GLDX_HANDDBG`）搬进 `Probes.h/.cpp`，`main.cpp` 1586 → 1447 行。判据是**九种动作与重构前的二进制逐字节相同**、六组探针输出照旧——
+  它们是只读 `(Character, View)` 的纯函数，不碰动画本身。
+- **消掉 demo 唯一的 `-Wswitch`**：`switch (view.requestAction)` 漏了 `CrouchWalk`（静默落到走路那档的握持值）。补上并让它与 `Crouch`
+  共用一组值——蹲下和蹲走是同一个动作的两个时刻，手指不该跳。全量构建 `src/**` 零告警。
+- **这条 demo 此前从未在 Linux / Windows 上编过**：v1.7.3 第一次跑三平台矩阵时 macOS 绿、另外两个红，
+  报的都不是逻辑错，而是「只有 clang 才容忍」的两类写法——① 头文件靠包含它的 TU 间接带进 `<memory>` /
+  `<string>` / `<optional>` / `<algorithm>` 等（macOS 的 libc++ 会顺带拉进来，libstdc++ 与 MSVC 不会）；
+  ② `MmdNaming.h` 里一个 `inline constexpr const char* const kEmpty[] = {};` 的**零长数组**
+  （clang 当扩展收下，MSVC 直接 `C2466: cannot allocate an array of constant size 0`）。修法是让每个头/源
+  **自带**它用到的标准头，并把空槽改成返回默认构造的 `std::span`（不再需要那个数组）。
+  教训写在这里而不是只写修法：**「本机能编过」对跨平台是零证据**——上一次成功的 CI 是 2026-11-13，
+  而这条 demo 是之后才进来的。
+- **取证与结论写回文档**：`AGENTS.md` 的 `anim-rigid` 条目与 `HANDOFF-anim-rigid.md` 补上三条根因的推导、复测数字，以及两条"别再走"的结论：
+  下摆锯齿是资产侧（这份资产没给可用信号）、座姿裙摆像平板是 `skirtFlare` 的取舍（扫 0.20/0.12/0.06/0.00，0.12 以下膝盖就开始顶穿裙面）。
+
 ### 新增 `anim-rigid`：带骨架与内嵌贴图的 FBX，蒙皮在 GPU 上，走路自己算
 
 - **新增引擎模块 `src/gldx/anim/`（`Skeleton` / `SkinnedVertex` / `SkinnedMesh`）**：`Skeleton` 是 parents-first 的 `Bone{name,parent,inverseBind,restLocal}` 数组 + `Add/Find/RestWorld/ComputeWorld/ComputeSkinning`，rest pose 由 **inverse-bind 矩阵**推导而不是读文件的节点变换，所以“空姿态 == bind 姿态”是构造出来的性质而不是巧合（demo 把它当断言报出来：`--off walk` 回到 bind pose，与走路帧差 3.21% 像素）。`kMaxBonePalette = 64`，与 shade 里的 `uniform mat4 uBones[64]` 由 `static_assert` 钉在一起——rig 长大到超出时是**编译期**失败，而不是运行时读越界。`SkinnedVertex` 刻意不复用静态 `Vertex`：`kMaxBoneInfluences = 4`，loc 0/1/2 = position/normal/uv、**loc 5 = `uvec4` 骨骼索引**、loc 6 = 权重。`SkinnedMesh` 是 move-only 的 GPU owner（`Upload/Draw/valid`），palette 不归它持有——由 `Skeleton` 每帧产出，调用方自己传 uniform 数组。

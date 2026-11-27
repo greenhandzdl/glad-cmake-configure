@@ -55,7 +55,11 @@ namespace animrigid {
 //   · `捩` means "twist" (腕捩 = arm twist), likewise not a hinge joint.
 // Every table is `static constexpr const char* const[]` at namespace scope because the
 // interface returns a span - a span over a temporary would dangle.
-inline constexpr const char* const kEmpty[] = {};
+//
+// There is deliberately no `kEmpty` array: a zero-length array (`= {}`) is not standard
+// C++. clang accepts it as an extension, MSVC rejects it outright ("cannot allocate an
+// array of constant size 0") - and that is how the demo came to build on macOS only.
+// An absent slot just returns a default-constructed span.
 
 inline constexpr const char* const kHips[]  = {"下半身", "腰", "センター"};
 inline constexpr const char* const kSpine[] = {"上半身", "上半身2"};

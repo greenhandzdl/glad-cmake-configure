@@ -5,9 +5,12 @@ import gldx;
 
 #include "MmdNaming.h"
 
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <iterator>
+#include <string>
+#include <span>
 
 namespace animrigid {
 
@@ -42,7 +45,7 @@ std::span<const char* const> MmdNaming::NamesFor(gldx::RigSlot slot) const {
     switch (slot) {
         case gldx::RigSlot::Hips:        return {kHips,  std::size(kHips)};
         case gldx::RigSlot::Spine:       return {kSpine, std::size(kSpine)};
-        case gldx::RigSlot::Spine1:      return {kEmpty, 0};
+        case gldx::RigSlot::Spine1:      return {};
         case gldx::RigSlot::Chest:       return {kChest, std::size(kChest)};
         case gldx::RigSlot::Head:        return {kHead,  std::size(kHead)};
         case gldx::RigSlot::LegUpLeft:   return {kLegUpL,  std::size(kLegUpL)};
@@ -62,7 +65,7 @@ std::span<const char* const> MmdNaming::NamesFor(gldx::RigSlot slot) const {
         case gldx::RigSlot::ClavicleLeft:  return {kClavL, std::size(kClavL)};
         case gldx::RigSlot::ClavicleRight: return {kClavR, std::size(kClavR)};
     }
-    return {kEmpty, 0};
+    return {};
 }
 
 int MmdNaming::Detect(const gldx::Skeleton& skeleton) const {

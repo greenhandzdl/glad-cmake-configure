@@ -4,6 +4,18 @@
 // their own output. NOTE: names gldx types, so include AFTER `import gldx;`.
 #pragma once
 
+// The standard headers this header actually uses. Relying on the including TU to
+// have pulled them in is exactly how this file came to compile on clang (whose libc++
+// transitively includes <memory>/<string>) and fail on libstdc++ and MSVC - see the
+// v1.7.3 release note: the demo had never been built on Linux/Windows.
+#include <algorithm>
+#include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <optional>
+#include <utility>
+#include <vector>
+
 #include "Shaders.h"
 #include "Character.h"
 #include "Scene.h"

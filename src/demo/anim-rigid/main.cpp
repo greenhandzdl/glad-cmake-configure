@@ -92,6 +92,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <cstddef>
+#include <utility>
 
 import gldx;
 import gldxwin;

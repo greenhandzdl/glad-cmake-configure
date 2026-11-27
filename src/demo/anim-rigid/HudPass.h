@@ -7,7 +7,9 @@
 // NOTE: names gldx types, so include AFTER `import gldx;`.
 #pragma once
 
+#include <cmath>
 #include <cstdint>
+#include <cstdio>
 
 #include "Character.h"
 #include "Scene.h"

@@ -8,6 +8,9 @@ import gldx;
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <cstddef>
+#include <cstring>
 
 namespace anim {
 

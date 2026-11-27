@@ -12,6 +12,9 @@ import gldx;
 #include <cstring>
 #include <string>
 #include <vector>
+#include <cstddef>
+#include <memory>
+#include <utility>
 
 namespace anim {
 

@@ -7,6 +7,7 @@
 // previous frame's probes, and that made the same snapshot irreproducible.
 #pragma once
 
+#include <cstddef>
 #include <vector>
 
 #include <glm/glm.hpp>
