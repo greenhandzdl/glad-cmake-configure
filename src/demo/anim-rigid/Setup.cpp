@@ -472,8 +472,16 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // same gait, narrower stride, knees held bent. Making it a second set of curves
     // is how the two drift apart. The pelvis drop is still solved from ground contact,
     // so nothing here hard-codes a height.
+    // Hoisted out of the block below on purpose: `crouchSource` must be built from the
+    // SAME curve, or "crouch is crouch-walk held at one phase" is just a claim.
+    //
+    // It used to be passed `character.tune` (the STANDING walk), while the crouch-walk
+    // source got the narrowed swing below. The two then differed by 0.236 in the report
+    // line that exists to prove they agree - i.e. pressing/selecting `crouch` produced
+    // a visibly different stance from `crouchwalk` at the same phase, and the check
+    // that was supposed to catch it had been reporting the failure for a while.
+    gldx::WalkTuning crouchTune = character.tune;
     {
-        gldx::WalkTuning crouchTune = character.tune;
         crouchTune.crouch = 1.0f;
         // `strideScale()` divides by this, so it must be the STANDING swing - set it
         // before the crouch multipliers below shrink `hipSwing`.
@@ -508,7 +516,7 @@ void UploadCharacter(Character& character, gldx::LoadedSkinnedModelData&& data,
     // the two actions cannot drift apart because there is only one curve. `report`
     // prints the byte-level delta between them so "same pose" stays a measurement.
     character.crouchSource = std::make_unique<gldx::ProceduralCrouch>(
-        skeleton, character.rig, model.restWorld(), tunings.crouch, character.tune);
+        skeleton, character.rig, model.restWorld(), tunings.crouch, crouchTune);
     character.attackSource = std::make_unique<gldx::ProceduralAttack>(
         skeleton, character.rig, model.restWorld(), tunings.attack);
     character.jumpSource = std::make_unique<gldx::ProceduralJump>(

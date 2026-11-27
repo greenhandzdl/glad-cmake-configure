@@ -92,6 +92,17 @@ struct View {
     bool maps      = true;    // sample the FBX's embedded maps (else flat material)
     bool normalMap = true;    // ...including the normal map (else geometry normals only)
     bool wireframe = false;
+    // `--on twoside`: draw materials the ASSET marks two-sided (glTF doubleSided /
+    // FBX TwoSided / PMX's per-material double-sided bit) without culling.
+    //
+    // Off by default, and that is a measured decision rather than a cautious one: this
+    // PMX flags essentially every material two-sided (an authoring habit), so honouring
+    // the flag unconditionally turns culling back on for nothing and shows the unlit
+    // inside of solid parts - the skirt's interior becomes a pale bowl that reads worse
+    // than the notches it fixes. Kept as a switch because the flag is still the only
+    // signal that says "this surface is a single-sided sheet", and an asset that uses it
+    // honestly would want exactly this path.
+    bool twoSided = false;
     bool showHud    = true;
     bool report     = false;  // dump the gait's joint angles and the per-action table once
     bool trace      = false;  // dump a 16 row time trace of the selected action once

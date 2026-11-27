@@ -207,6 +207,27 @@ public:
      * white boots over bare feet, a bra under a dress. See SkinnedMaterial::hidden.
      */
     [[nodiscard]] bool isHidden(int material) const;
+
+    /**
+     * Does this material declare itself two-sided (glTF `doubleSided`, FBX's
+     * TwoSided flag, MMD's per-material double-sided bit)?
+     *
+     * The loader has always PARSED this flag and nothing ever read it, which is the
+     * worst of both worlds: the file says "draw both faces" and the renderer culls
+     * one of them anyway, so a single-surface sheet loses a bite out of its
+     * silhouette wherever it turns away. The scalloped lace strip on this demo's hem
+     * is one - the dark jagged notches along the hem are that strip's culled back
+     * faces, not a skinning or cloth fault, and no amount of tuning the animation
+     * closes them.
+     *
+     * The caller still owns the GL state (this demo's SkinPass sets GL_CULL_FACE for
+     * the whole pass), so this is a QUESTION, not an action - toggling state inside a
+     * draw would fight whatever the pass decided. Draw two-sided materials with
+     * `glDisable(GL_CULL_FACE)`; note that this costs fill rate and, for a surface
+     * with no back-face lighting, shows the unlit interior - which is exactly why the
+     * answer is per material rather than per model.
+     */
+    [[nodiscard]] bool isTwoSided(int material) const;
     [[nodiscard]] const Texture2D& NormalOrFallback() const;
     [[nodiscard]] const Texture2D& MetallicOrFallback() const;
     [[nodiscard]] const Texture2D& RoughnessOrFallback() const;

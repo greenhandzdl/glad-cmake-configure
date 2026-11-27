@@ -116,13 +116,65 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
         return;   // no history -> nothing to lag behind yet
     }
 
+    // ---- 每一片裙片的“朝外”必须从**身体中线**量，不能从 chain[0] 量 ----
+    //
+    // `chain[0]` 只是**第 1 片裙片的根**，不是身体轴：实测这具资产各片根部相对它的
+    // 侧向偏移从 -0.071 m 到 +0.198 m。于是对面那几片的 `bonePos - chain[0]` 指向的是
+    // **穿过身体**的方向，`sideSign` 被分到错误的一侧——相邻两片于是拿到方向相反的
+    // 摆腿信号，它们共享的那一圈三角形被拉成一道“撕开的翻片”（用户看到的就是这个，
+    // 与蒙皮权重无关：`GLDX_NO_SECONDARY=1` 时同一帧的裙摆是完整的锥面）。
+    //
+    // 中线取各片**根关节**的水平重心：裙片根围成一圈，重心就是身体轴。单根链（尾巴、
+    // 头发）没有这种需求（`strandLength == 1`），重心退化成链自身，行为不变。
+    glm::vec3 chainCenter = rootPos;
+    glm::vec3 bodySide(0.0f, 0.0f, 1.0f);
+    glm::vec3 bodyFwd(0.0f, 0.0f, -1.0f);
+    {
+        // Only chains made of SEVERAL strands have a "body axis" to find. A rope (hair,
+        // tail, ear: strandLength == 1) has one strand, and the centroid of its joints
+        // is somewhere down its own length - using that as the centre would silently
+        // change how the rope reads. Those chains never opt into the per-strand terms
+        // anyway (`tuck` and `gaitDrive` are 0 for them), so the guard is defence in
+        // depth rather than a behaviour change.
+        const int strand = std::max(tuning.strandLength, 1);
+        if (strand > 1 && count > strand) {
+            glm::vec3 acc(0.0f);
+            int roots = 0;
+            for (int i = 0; i < count; i += strand) {
+                const int b = chain[i];
+                if (b < 0 || b >= static_cast<int>(world.size())) continue;
+                acc += glm::vec3(world[static_cast<std::size_t>(b)][3]);
+                ++roots;
+            }
+            if (roots > 1) chainCenter = acc / static_cast<float>(roots);
+        }
+
+        // 身体轴（side/fwd）取链**根骨**的世界旋转列。链根是 pelvis 的子级，所以它的
+        // 朝向就是身体的朝向；用它比用 hips 自己更直接，也省掉一次"父级是谁"的假设。
+        if (rootBone >= 0 && rootBone < static_cast<int>(world.size())) {
+            bodySide = glm::vec3(world[static_cast<std::size_t>(rootBone)][0]);
+            bodyFwd  = glm::vec3(world[static_cast<std::size_t>(rootBone)][2]);
+            const float sl = glm::length(bodySide);
+            const float fl = glm::length(bodyFwd);
+            if (!(sl > 1e-6f)) bodySide = glm::vec3(0.0f, 0.0f, 1.0f);
+            else bodySide /= sl;
+            if (!(fl > 1e-6f)) bodyFwd = glm::vec3(0.0f, 0.0f, -1.0f);
+            else bodyFwd /= fl;
+        }
+    }
+
     // Horizontal acceleration is the drive: a steady walk should leave the skirt
     // hanging, a sudden turn or a landing should swing it. Using raw velocity would
     // make it lean permanently backwards while walking, which looks like wind.
     const glm::vec3 delta = rootPos - prevRootPos_[0];
     const glm::vec3 up = rootUp;
-    const glm::vec3 side = glm::normalize(glm::cross(up, glm::vec3(0.0f, 0.0f, 1.0f) + up * 1e-3f));
-    const glm::vec3 fwd = glm::normalize(glm::cross(side, up));
+    // `side`/`fwd` 用**身体轴**而不是从 (0,0,1) 推。
+    glm::vec3 side = bodySide;
+    glm::vec3 fwd = bodyFwd;
+    const float sl = glm::length(side);
+    const float fl = glm::length(fwd);
+    if (!(sl > 1e-6f)) side = glm::normalize(glm::cross(up, glm::vec3(0.0f, 0.0f, 1.0f)));
+    if (!(fl > 1e-6f)) fwd = glm::normalize(glm::cross(side, up));
 
     // 根的**速度**与**加速度**。
     //
@@ -205,17 +257,42 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
         float gaitAngleX = 0.0f;
         float gaitAngleZ = 0.0f;
         if (tuning.gaitDrive != 0.0f) {
-            const glm::vec3 outw = glm::vec3(world[bone][3]) - glm::vec3(world[chain[0]][3]);
+            const glm::vec3 outw = glm::vec3(world[bone][3]) - chainCenter;
             glm::vec3 outh(outw.x, 0.0f, outw.z);
             const float olen = glm::length(outh);
             if (olen > 1.0e-4f) {
                 outh /= olen;
-                const float sideSign = glm::dot(outh, side) >= 0.0f ? 1.0f : -1.0f;
+                // 左右**平滑**混合，不在中线硬切。
+                //
+                // 原来是 `sideSign >= 0 ? L : R`：中线两侧相邻的两片拿到方向相反的
+                // 摆腿信号，一块布片被往左推、紧挨着的那片被往右推，中间那圈三角形
+                // 就是那道撕开的翻片。腿是原地交替摆的，所以两片真正该拿的是**各自
+                // 那条腿**的量，而正前方/正后方那一片离两条腿一样远——混合到平均值
+                // 才是它该有的响应。
+                const float lat = glm::dot(outh, side);            // +1 右侧, -1 左侧
+                // 线性过渡跨**整个**侧向轴，而不是一格窗口。窗口越窄，正前方/正后方
+                // 相邻的两片越接近"一片全左、一片全右"——那正是翻片的来源。实测这具
+                // 资产正前两片的 lat 是 -0.55/+0.56，窗口 0.35 时它们仍各拿满幅，
+                // 摆腿角差 0.27 rad；线性混合后降到 0.55 倍摆幅。
+                const float wl = glm::clamp(0.5f + 0.5f * lat, 0.0f, 1.0f);
+                const float sw = tuning.gaitSwingL * wl + tuning.gaitSwingR * (1.0f - wl);
                 const float fwdFactor = glm::dot(outh, fwd);       // +1 正前, -1 正后
-                const float sw = (sideSign > 0.0f ? tuning.gaitSwingL : tuning.gaitSwingR);
                 // 前片逆着腿的方向往前推、后片跟着往后：用 fwdFactor 加权即可。
                 gaitAngleX = tuning.gaitDrive * gain * sw * (0.55f + 0.45f * fwdFactor);
-                gaitAngleZ = tuning.gaitDrive * 0.20f * gain * sw * std::abs(sw) * sideSign;
+                // 侧向的“张开”同样按侧向分量连续化（原来乘 ±1，在中线上是阶跃）。
+                const float latSign = glm::clamp(lat * 2.5f, -1.0f, 1.0f);
+                gaitAngleZ = tuning.gaitDrive * 0.20f * gain * sw * std::abs(sw) * latSign;
+                if (std::getenv("GLDX_SKIRTDRIVE") != nullptr && tuning.strandLength > 1 &&
+                    (i % tuning.strandLength) == 0) {
+                    std::fprintf(stderr,
+                                 "[drive] panel=%2d bone=%3d lat=%+.2f fwd=%+.2f sw=%+.4f "
+                                 "gx=%+.3f gz=%+.3f spring=(%+.3f,%+.3f,%+.3f)\n",
+                                 i / tuning.strandLength, bone, (double)lat,
+                                 (double)fwdFactor, (double)sw,
+                                 (double)gaitAngleX, (double)gaitAngleZ,
+                                 (double)angle_[j].x, (double)angle_[j].y,
+                                 (double)angle_[j].z);
+                }
             }
         }
 
@@ -272,9 +349,11 @@ void ChainSolver::Solve(const RigProfile::RigChain& chain, std::vector<glm::mat4
         // to roll to move inward depends on which side of the body it hangs on, so the
         // sign comes from the panel's own lateral offset from the chain root.
         if (tuning.tuck != 0.0f) {
-            const glm::vec3 rootPos(world[chain[0]][3]);
+            // 与摆腿信号同一个理由：侧向距离要从**身体中线**量（见上面 chainCenter
+            // 的注释）。从 chain[0] 量时，对面那几片的 lateral 符号是错的，"整圈向
+            // 中线收"变成"一半收、一半撑开"。
             const glm::vec3 sideAxis = glm::normalize(glm::vec3(world[chain[0]][0]));
-            const float lateral = glm::dot(glm::vec3(world[j][3]) - rootPos, sideAxis);
+            const float lateral = glm::dot(glm::vec3(world[j][3]) - chainCenter, sideAxis);
             const float tuckSign = (lateral >= 0.0f) ? 1.0f : -1.0f;
             // 幅度随"离中线多远"变化。
             //

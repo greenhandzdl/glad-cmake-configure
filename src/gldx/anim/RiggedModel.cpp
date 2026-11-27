@@ -368,6 +368,11 @@ bool RiggedModel::isHidden(int material) const {
     return mi >= 0 && materials_[static_cast<std::size_t>(mi)].hidden;
 }
 
+bool RiggedModel::isTwoSided(int material) const {
+    const int mi = MaterialIndexOrNone(materials_, material);
+    return mi >= 0 && materials_[static_cast<std::size_t>(mi)].twoSided;
+}
+
 const Texture2D& RiggedModel::AlbedoOrFallback() const {
     if (hasAlbedo_) {
         const int index = materials_.front().albedoTexture;

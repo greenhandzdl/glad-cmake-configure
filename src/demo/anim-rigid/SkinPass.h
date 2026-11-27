@@ -213,6 +213,7 @@ public:
 
             int boundMaterial = -2;   // -2 = nothing bound yet, -1 = out of range
             bool blending = glIsEnabled(GL_BLEND) == GL_TRUE;   // tracked, not assumed off
+            bool cullingOff = false;                           // tracked: two-sided materials clear it
             if (meshMat.empty()) {
                 // A rig with no material list at all: bind the fallbacks once so every
                 // sampler still points at a complete texture (Apple drops the draw
@@ -316,6 +317,31 @@ public:
                 // because the value follows the material, not the pass.
                 skin_->Set("uBlended", blended ? 1 : 0);
 
+                // ---- culling, per material ----
+                //
+                // The asset's own materials say which surfaces are single-sided sheets.
+                // The scalloped lace trim on this skirt's hem is one: culled, its back
+                // faces vanish and the hem reads as a row of dark notches that move with
+                // the cloth - which looks exactly like a skinning tear, and is not one
+                // (`GLDX_NO_SECONDARY=1` leaves them there). The loader parsed that flag
+                // from the start and nothing consumed it.
+                //
+                // Per material, not per model: this character legitimately mixes both,
+                // and turning culling off globally shows the unlit inside of every solid
+                // part (measured: the skirt's interior becomes a black bowl that reads far
+                // worse than the notches it fixes). Two-sided sheets are flat, so they
+                // have no inside to show.
+                const bool twoSided = view_.twoSided && model.isTwoSided(matIndex);
+                if (twoSided != cullingOff) {
+                    cullingOff = twoSided;
+                    if (twoSided) {
+                        glDisable(GL_CULL_FACE);
+                    } else {
+                        glEnable(GL_CULL_FACE);
+                        glCullFace(GL_BACK);
+                    }
+                }
+
                 model.meshes()[mi].Draw();
                 ++draws;
             }
@@ -326,6 +352,12 @@ public:
             if (blending) {
                 glDisable(GL_BLEND);
                 glDepthMask(GL_TRUE);
+            }
+            // Culling is pass-level state and the next pass may assume GL defaults, so
+            // it is restored here rather than left wherever the last material put it.
+            if (cullingOff) {
+                glEnable(GL_CULL_FACE);
+                glCullFace(GL_BACK);
             }
         }
 
